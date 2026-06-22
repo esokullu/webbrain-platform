@@ -697,11 +697,17 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
     const token = signNoVncToken({ sessionId: session.id, expiresAt, secret: session.connect_secret });
     const scheme = req.body.scheme || 'http';
     const port = req.body.port || 6081;
+    const query = new URLSearchParams({
+      token,
+      autoconnect: 'true',
+      resize: 'scale',
+      path: `websockify?token=${token}`,
+    });
     await audit(req, 'browser_session.connect_token', 'browser_session', session.id);
     res.json({
       token,
       expires_at: expiresAt,
-      url: `${scheme}://${session.public_ip}:${port}/vnc.html?token=${encodeURIComponent(token)}`,
+      url: `${scheme}://${session.public_ip}:${port}/vnc.html?${query.toString()}`,
     });
   });
 

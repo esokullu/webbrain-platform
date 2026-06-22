@@ -108,6 +108,10 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   assert.equal(connect.status, 200);
   assert.equal(verifyNoVncToken(connect.body.token, storedSession.connect_secret).ok, true);
   assert.match(connect.body.url, /token=/);
+  const connectUrl = new URL(connect.body.url);
+  assert.equal(connectUrl.searchParams.get('autoconnect'), 'true');
+  assert.equal(connectUrl.searchParams.get('resize'), 'scale');
+  assert.equal(connectUrl.searchParams.get('path'), `websockify?token=${connect.body.token}`);
 
   ws = new WebSocket(`${ctx.wsBase}/droplet/control?session_token=${encodeURIComponent(storedSession.connect_secret)}`);
   await new Promise(resolve => ws.once('open', resolve));
