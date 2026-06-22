@@ -24,7 +24,7 @@ export function renderCloudInit({ session, config, providerApiKey = '' }) {
     DISPLAY: ':99',
     WEBBRAIN_HEADLESS: 'false',
     WEBBRAIN_START_URL: 'about:blank',
-    WEBBRAIN_BROWSER_BIN: '/usr/bin/google-chrome-stable',
+    WEBBRAIN_BROWSER_BIN: '/opt/chrome-linux64/chrome',
   };
   const envText = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join('\n');
 
@@ -36,6 +36,7 @@ packages:
   - ca-certificates
   - curl
   - git
+  - unzip
   - ufw
   - xvfb
   - x11vnc
@@ -132,6 +133,9 @@ runcmd:
   - apt-get install -y nodejs
   - curl -fsSL -o /tmp/google-chrome-stable_current_amd64.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
   - apt-get install -y /tmp/google-chrome-stable_current_amd64.deb
+  - node --input-type=module -e "const r = await fetch('https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json'); const j = await r.json(); console.log(j.channels.Stable.downloads.chrome.find(x => x.platform === 'linux64').url);" > /tmp/chrome-for-testing-url
+  - curl -fsSL -o /tmp/chrome-linux64.zip "$(cat /tmp/chrome-for-testing-url)"
+  - rm -rf /opt/chrome-linux64 && unzip -q /tmp/chrome-linux64.zip -d /opt
   - git clone ${shellQuote(repoUrl)} ${appDir}
   - git clone ${shellQuote(webbrainRepoUrl)} ${webbrainDir}
   - git clone https://github.com/novnc/noVNC.git /opt/noVNC
