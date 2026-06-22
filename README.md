@@ -1,43 +1,77 @@
-# WebBrain Cloud Execution Bridge
+# WebBrain Platform
 
-Local-only v1 sidecar for managed cloud browser droplets.
+All-in-one cloud runtime for programmable WebBrain browser sessions.
+
+The repo has two runtime roles:
+
+- `platform`: Express + MySQL control plane for users, API keys, browser sessions, DigitalOcean droplets, run orchestration, and signed noVNC URLs.
+- `droplet`: cloud browser runtime that runs the local WebBrain sidecar, connects outbound to the platform control WebSocket, and gates noVNC with signed tokens.
+
+`../webbrain3` remains the canonical WebBrain execution engine.
+
+## Run Locally
 
 ```bash
 npm install
-npm run start:sidecar
+WEBBRAIN_DB_DRIVER=memory WEBBRAIN_PROVISIONER=null npm run start:platform
 ```
 
-In a second process on the droplet, launch the managed browser profile:
+For the local droplet sidecar/browser pieces:
 
 ```bash
+npm run start:sidecar
 npm run start:browser
+npm run start:droplet
 ```
 
-Useful browser bootstrap environment variables:
+## Production Configuration
 
-- `WEBBRAIN_SESSION_ID`: browser-session/profile name. Defaults to `default`.
-- `WEBBRAIN_PROFILE_DIR`: persistent Chromium user data dir.
-- `WEBBRAIN_EXTENSION_DIR`: unpacked WebBrain Chrome extension dir. Defaults to `../webbrain3/src/chrome`.
-- `WEBBRAIN_SIDECAR_WS_URL`: extension bridge URL. Defaults to `ws://127.0.0.1:17373/extension`.
-- `WEBBRAIN_PROVIDER_BASE_URL`, `WEBBRAIN_PROVIDER_API_KEY`, `WEBBRAIN_PROVIDER_MODEL`: WebBrain Platform model/proxy settings.
-- `WEBBRAIN_TRACING_ENABLED`: `true` by default for cloud debugging.
+Platform:
 
-The WebBrain extension connects outbound to:
+- `WEBBRAIN_DB_DRIVER=mysql`
+- `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`
+- `DO_API_TOKEN`, `DO_REGION`, `DO_SIZE`, `DO_IMAGE`, `DO_SSH_KEYS`
+- `WEBBRAIN_PLATFORM_URL`
+- `WEBBRAIN_MODEL_PROXY_BASE_URL`, `WEBBRAIN_MODEL_PROXY_API_KEY`
 
-```text
-ws://127.0.0.1:17373/extension
-```
+Droplet cloud-init passes:
 
-REST endpoints:
+- `WEBBRAIN_SESSION_ID`
+- `WEBBRAIN_SESSION_TOKEN`
+- `WEBBRAIN_PLATFORM_URL`
+- `WEBBRAIN_CONTROL_WS_URL`
+- `WEBBRAIN_EXTENSION_DIR`
+- `WEBBRAIN_PROVIDER_BASE_URL`
+- `WEBBRAIN_PROVIDER_API_KEY`
+- `WEBBRAIN_NOVNC_SECRET`
 
-- `POST /runs`
-- `GET /runs/:runId`
-- `POST /runs/:runId/abort`
+## Platform API
+
+Auth:
+
+- `POST /auth/register`
+- `POST /auth/login`
+- `POST /auth/logout`
+- `GET /api/me`
+- `POST /api/api-keys`
+- `GET /api/api-keys`
+- `DELETE /api/api-keys/:keyId`
+
+Browser sessions:
+
+- `POST /api/browser-sessions`
+- `GET /api/browser-sessions`
+- `GET /api/browser-sessions/:sessionId`
+- `DELETE /api/browser-sessions/:sessionId`
+- `POST /api/browser-sessions/:sessionId/connect-token`
+
+Runs:
+
 - `POST /api/browser-sessions/:sessionId/runs`
 - `GET /api/browser-sessions/:sessionId/runs/:runId`
 - `POST /api/browser-sessions/:sessionId/runs/:runId/abort`
 
-Example:
+Example run:
 
 ```json
 {
@@ -52,6 +86,24 @@ Example:
 }
 ```
 
-The extension also accepts Chrome managed storage under `webbrainCloud`; see
-`config/webbrain-cloud-managed-policy.example.json`. The local bootstrap script
-uses CDP to preseed the same settings for development and simple droplets.
+## Droplet Internals
+
+The WebBrain extension connects outbound to the local sidecar:
+
+```text
+ws://127.0.0.1:17373/extension
+```
+
+The droplet role connects outbound to the platform:
+
+```text
+ws(s)://<platform>/droplet/control?session_token=<session secret>
+```
+
+The command sidecar remains local-only. noVNC is exposed through the droplet gate on `6081` and requires a short-lived signed token from `POST /api/browser-sessions/:sessionId/connect-token`.
+
+Chrome managed storage example:
+
+```text
+config/webbrain-cloud-managed-policy.example.json
+```

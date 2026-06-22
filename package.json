@@ -4,11 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "node src/platform/index.js",
+    "start:platform": "node src/platform/index.js",
+    "start:droplet": "node src/droplet/index.js",
     "start:browser": "node scripts/launch-cloud-browser.mjs",
     "start:sidecar": "node src/sidecar.js",
     "test": "node --test"
   },
   "dependencies": {
+    "express": "^4.19.2",
+    "mysql2": "^3.11.3",
     "ws": "^8.18.0"
   },
   "devDependencies": {}
