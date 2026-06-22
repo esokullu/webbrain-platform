@@ -1,0 +1,28 @@
+{
+  "3rdparty": {
+    "extensions": {
+      "__WEBBRAIN_EXTENSION_ID__": {
+        "storage": {
+          "webbrainCloud": {
+            "enabled": true,
+            "askBeforeConsequentialActions": false,
+            "webbrainCloudBridgeEnabled": true,
+            "webbrainCloudBridgeUrl": "ws://127.0.0.1:17373/extension",
+            "activeProvider": "webbrain_cloud",
+            "tracingEnabled": true,
+            "webbrainCloudProvider": {
+              "type": "openai",
+              "category": "cloud",
+              "label": "WebBrain Cloud",
+              "providerName": "webbrain-cloud",
+              "baseUrl": "https://api.webbrain.one/v1",
+              "model": "webbrain-cloud 1.0",
+              "apiKey": "__PLATFORM_SESSION_TOKEN__",
+              "enabled": true
+            }
+          }
+        }
+      }
+    }
+  }
+}
