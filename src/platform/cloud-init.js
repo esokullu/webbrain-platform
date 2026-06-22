@@ -29,10 +29,14 @@ export function renderCloudInit({ session, config, providerApiKey = '' }) {
 
   return `#cloud-config
 package_update: true
+package_upgrade: true
 packages:
+  - build-essential
+  - curl
   - git
   - nodejs
   - npm
+  - ufw
   - chromium-browser
   - xvfb
   - x11vnc
@@ -123,6 +127,9 @@ ${envText.split('\n').map(line => `      ${line}`).join('\n')}
       [Install]
       WantedBy=multi-user.target
 runcmd:
+  - ufw allow OpenSSH
+  - ufw allow 6081/tcp
+  - ufw --force enable
   - git clone ${shellQuote(repoUrl)} ${appDir}
   - git clone ${shellQuote(webbrainRepoUrl)} ${webbrainDir}
   - cd ${appDir} && npm ci --omit=dev
