@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import WebSocket from 'ws';
 import { MemoryStore } from '../src/db/memory.js';
-import { NullProvisioner } from '../src/platform/digitalocean.js';
+import { DigitalOceanProvisioner, NullProvisioner, digitalOceanDropletName } from '../src/platform/digitalocean.js';
 import { loadConfig } from '../src/platform/config.js';
 import { createPlatformServer } from '../src/platform/server.js';
 import { renderCloudInit } from '../src/platform/cloud-init.js';
@@ -224,4 +224,39 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
   assert.match(cloudInit, /ufw allow 6081\/tcp/);
   assert.match(cloudInit, /ufw --force enable/);
   assert.match(cloudInit, /systemctl enable --now webbrain-sidecar\.service webbrain-xvfb\.service webbrain-x11vnc\.service webbrain-novnc\.service webbrain-browser\.service webbrain-droplet\.service/);
+});
+
+test('digitalocean provisioner uses hostname-safe droplet names', async () => {
+  const config = loadConfig({
+    DO_API_TOKEN: 'do-token',
+    DO_REGION: 'nyc3',
+    DO_SIZE: 's-1vcpu-1gb',
+    WEBBRAIN_PLATFORM_URL: 'http://platform.example',
+  });
+  let requestBody = null;
+  const provisioner = new DigitalOceanProvisioner(config, async (url, options) => {
+    assert.equal(url, 'https://api.digitalocean.com/v2/droplets');
+    requestBody = JSON.parse(options.body);
+    return {
+      ok: true,
+      async json() {
+        return {
+          droplet: {
+            id: 123,
+            networks: { v4: [{ type: 'public', ip_address: '203.0.113.10' }] },
+          },
+        };
+      },
+    };
+  });
+
+  assert.equal(digitalOceanDropletName('bs_abc123'), 'webbrain-bs-abc123');
+  const created = await provisioner.createBrowserDroplet({
+    id: 'bs_abc123',
+    connect_secret: 'connect-secret',
+  });
+
+  assert.equal(created.status, 'ready');
+  assert.equal(requestBody.name, 'webbrain-bs-abc123');
+  assert.match(requestBody.name, /^[a-z0-9.-]+$/);
 });

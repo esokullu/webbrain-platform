@@ -13,7 +13,7 @@ export class DigitalOceanProvisioner {
       throw e;
     }
     const body = {
-      name: `webbrain-${session.id}`,
+      name: digitalOceanDropletName(session.id),
       region: opts.region || session.region || this.config.digitalOcean.region,
       size: opts.size || session.size || this.config.digitalOcean.size,
       image: opts.image || this.config.digitalOcean.image,
@@ -96,6 +96,16 @@ export class NullProvisioner {
     this.destroyed.push(dropletId);
     return { ok: true };
   }
+}
+
+export function digitalOceanDropletName(sessionId) {
+  const suffix = String(sessionId || 'session')
+    .toLowerCase()
+    .replace(/[^a-z0-9.-]+/g, '-')
+    .replace(/^[^a-z0-9]+/, '')
+    .replace(/[^a-z0-9]+$/, '')
+    .slice(0, 48) || 'session';
+  return `webbrain-${suffix}`;
 }
 
 function findPublicIp(droplet) {
