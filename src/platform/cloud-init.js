@@ -24,6 +24,7 @@ export function renderCloudInit({ session, config, providerApiKey = '' }) {
     DISPLAY: ':99',
     WEBBRAIN_HEADLESS: 'false',
     WEBBRAIN_START_URL: 'about:blank',
+    WEBBRAIN_BROWSER_BIN: '/usr/bin/google-chrome-stable',
   };
   const envText = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join('\n');
 
@@ -32,15 +33,12 @@ package_update: true
 package_upgrade: true
 packages:
   - build-essential
+  - ca-certificates
   - curl
   - git
-  - nodejs
-  - npm
   - ufw
-  - chromium-browser
   - xvfb
   - x11vnc
-  - novnc
   - websockify
 write_files:
   - path: /etc/webbrain-droplet.env
@@ -94,7 +92,7 @@ ${envText.split('\n').map(line => `      ${line}`).join('\n')}
       Requires=webbrain-x11vnc.service
       [Service]
       EnvironmentFile=/etc/webbrain-droplet.env
-      ExecStart=/usr/share/novnc/utils/novnc_proxy --listen 127.0.0.1:6080 --vnc 127.0.0.1:5900
+      ExecStart=/opt/noVNC/utils/novnc_proxy --listen 127.0.0.1:6080 --vnc 127.0.0.1:5900
       Restart=always
       RestartSec=3
       [Install]
@@ -130,8 +128,13 @@ runcmd:
   - ufw allow OpenSSH
   - ufw allow 6081/tcp
   - ufw --force enable
+  - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  - apt-get install -y nodejs
+  - curl -fsSL -o /tmp/google-chrome-stable_current_amd64.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+  - apt-get install -y /tmp/google-chrome-stable_current_amd64.deb
   - git clone ${shellQuote(repoUrl)} ${appDir}
   - git clone ${shellQuote(webbrainRepoUrl)} ${webbrainDir}
+  - git clone https://github.com/novnc/noVNC.git /opt/noVNC
   - cd ${appDir} && npm ci --omit=dev
   - cd ${webbrainDir} && git checkout ${shellQuote(config.droplet.webbrainRef)}
   - systemctl daemon-reload
