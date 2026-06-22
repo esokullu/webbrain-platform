@@ -5,6 +5,7 @@ import { MemoryStore } from '../src/db/memory.js';
 import { NullProvisioner } from '../src/platform/digitalocean.js';
 import { loadConfig } from '../src/platform/config.js';
 import { createPlatformServer } from '../src/platform/server.js';
+import { renderCloudInit } from '../src/platform/cloud-init.js';
 import { verifyNoVncToken } from '../src/shared/novnc-token.js';
 
 async function startPlatform() {
@@ -42,6 +43,15 @@ async function request(base, path, options = {}) {
     status: res.status,
     headers: res.headers,
     body: text ? JSON.parse(text) : null,
+  };
+}
+
+async function requestText(base, path, options = {}) {
+  const res = await fetch(`${base}${path}`, options);
+  return {
+    status: res.status,
+    headers: res.headers,
+    text: await res.text(),
   };
 }
 
@@ -170,4 +180,43 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
     ws?.close();
     await ctx.platform.close();
   }
+});
+
+test('authenticated dashboard renders browser session controls and noVNC viewer', async () => {
+  const ctx = await startPlatform();
+  try {
+    const cookie = await register(ctx.base, 'dashboard@example.com');
+    const res = await requestText(ctx.base, '/', { headers: { cookie } });
+    assert.equal(res.status, 200);
+    assert.match(res.text, /Browser Sessions/);
+    assert.match(res.text, /Open noVNC/);
+    assert.match(res.text, /novncFrame/);
+    assert.match(res.text, /\/api\/browser-sessions/);
+    assert.match(res.text, /Create key/);
+  } finally {
+    await ctx.platform.close();
+  }
+});
+
+test('browser session cloud-init starts virtual display and noVNC services', () => {
+  const config = loadConfig({
+    WEBBRAIN_PLATFORM_URL: 'http://platform.example',
+    WEBBRAIN_PROVIDER_BASE_URL: 'http://platform.example/v1',
+    WEBBRAIN_REPO_URL: 'https://github.com/esokullu/webbrain3.git',
+    WEBBRAIN_REF: 'main',
+  });
+  const cloudInit = renderCloudInit({
+    session: { id: 'bs_test', connect_secret: 'connect-secret' },
+    config,
+    providerApiKey: 'provider-secret',
+  });
+
+  assert.match(cloudInit, /DISPLAY=':99'/);
+  assert.match(cloudInit, /WEBBRAIN_HEADLESS='false'/);
+  assert.match(cloudInit, /WEBBRAIN_NOVNC_GATE_PORT='6081'/);
+  assert.match(cloudInit, /webbrain-xvfb\.service/);
+  assert.match(cloudInit, /webbrain-x11vnc\.service/);
+  assert.match(cloudInit, /webbrain-novnc\.service/);
+  assert.match(cloudInit, /novnc_proxy --listen 127\.0\.0\.1:6080 --vnc 127\.0\.0\.1:5900/);
+  assert.match(cloudInit, /systemctl enable --now webbrain-sidecar\.service webbrain-xvfb\.service webbrain-x11vnc\.service webbrain-novnc\.service webbrain-browser\.service webbrain-droplet\.service/);
 });

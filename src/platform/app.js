@@ -90,12 +90,47 @@ function dashboardPage(user) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>WebBrain Platform</title>
   <style>
-    body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f7f7f4; color: #202124; }
-    main { max-width: 960px; margin: 0 auto; padding: 36px 24px; }
-    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #ddd; padding-bottom: 18px; }
-    button { font: inherit; padding: 10px 12px; border-radius: 6px; border: 1px solid #202124; background: #202124; color: #fff; cursor: pointer; }
-    code { background: #fff; border: 1px solid #ddd; padding: 2px 5px; border-radius: 4px; }
-    section { margin-top: 24px; }
+    body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f6f7f5; color: #202124; }
+    main { max-width: 1280px; margin: 0 auto; padding: 28px 24px 40px; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #d9ddd6; padding-bottom: 16px; }
+    h1 { margin: 0; font-size: 26px; letter-spacing: 0; }
+    h2 { margin: 0; font-size: 17px; letter-spacing: 0; }
+    button, input, select { font: inherit; }
+    button { min-height: 38px; padding: 8px 12px; border-radius: 6px; border: 1px solid #202124; background: #202124; color: #fff; cursor: pointer; white-space: nowrap; }
+    button.secondary { background: #fff; color: #202124; border-color: #bfc5bd; }
+    button.danger { background: #8b1f14; border-color: #8b1f14; }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .button-link { min-height: 38px; box-sizing: border-box; display: inline-flex; align-items: center; padding: 8px 12px; border-radius: 6px; border: 1px solid #bfc5bd; background: #fff; color: #202124; text-decoration: none; white-space: nowrap; }
+    input, select { min-height: 38px; box-sizing: border-box; border: 1px solid #c6cbc3; border-radius: 6px; padding: 8px 10px; background: #fff; color: #202124; }
+    .muted { color: #646b61; }
+    .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .grid { display: grid; grid-template-columns: minmax(340px, 430px) 1fr; gap: 18px; margin-top: 20px; align-items: start; }
+    .panel { background: #fff; border: 1px solid #d9ddd6; border-radius: 8px; }
+    .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 14px 12px; border-bottom: 1px solid #edf0eb; }
+    .panel-body { padding: 14px; }
+    .create-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; margin-bottom: 12px; }
+    .sessions { display: grid; gap: 8px; }
+    .session { text-align: left; width: 100%; color: #202124; background: #fafbf9; border: 1px solid #dfe4dc; display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 10px; }
+    .session.active { border-color: #202124; background: #f0f2ed; }
+    .session-title { font-weight: 650; overflow-wrap: anywhere; }
+    .session-meta { color: #646b61; font-size: 12px; margin-top: 4px; overflow-wrap: anywhere; }
+    .status { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border-radius: 999px; background: #edf0eb; color: #394034; font-size: 12px; }
+    .viewer-wrap { min-height: 680px; display: grid; grid-template-rows: auto 1fr; }
+    .viewer-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #edf0eb; }
+    .viewer-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    iframe { width: 100%; height: 640px; border: 0; background: #111; border-radius: 0 0 8px 8px; }
+    .empty { min-height: 640px; display: grid; place-items: center; color: #646b61; text-align: center; padding: 20px; }
+    .message { margin-top: 10px; min-height: 20px; color: #355f1d; overflow-wrap: anywhere; }
+    .message.error { color: #9b2b1f; }
+    .api-key-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 10px; }
+    .secret { display: none; margin-top: 10px; padding: 10px; border: 1px solid #d9ddd6; border-radius: 6px; background: #fafbf9; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    @media (max-width: 900px) {
+      main { padding: 20px 14px 32px; }
+      header { align-items: flex-start; flex-direction: column; }
+      .grid { grid-template-columns: 1fr; }
+      .create-row { grid-template-columns: 1fr; }
+      iframe, .empty { height: 520px; min-height: 520px; }
+    }
   </style>
 </head>
 <body>
@@ -103,17 +138,258 @@ function dashboardPage(user) {
     <header>
       <div>
         <h1>Cloud browsers</h1>
-        <div>${escapeHtml(user.email)}</div>
+        <div class="muted">${escapeHtml(user.email)}</div>
       </div>
-      <form method="post" action="/auth/logout"><button type="submit">Logout</button></form>
+      <div class="toolbar">
+        <button class="secondary" id="refreshBtn" type="button">Refresh</button>
+        <form method="post" action="/auth/logout"><button type="submit">Logout</button></form>
+      </div>
     </header>
-    <section>
-      <p>Create browser sessions and API keys through the JSON API. The first useful calls are:</p>
-      <p><code>POST /api/browser-sessions</code></p>
-      <p><code>POST /api/browser-sessions/:sessionId/runs</code></p>
-      <p><code>POST /api/browser-sessions/:sessionId/connect-token</code></p>
-    </section>
+    <div class="grid">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Browser Sessions</h2>
+          <span class="status" id="sessionCount">0</span>
+        </div>
+        <div class="panel-body">
+          <div class="create-row">
+            <select id="regionInput" aria-label="Region">
+              <option value="nyc3">nyc3</option>
+              <option value="nyc1">nyc1</option>
+              <option value="sfo3">sfo3</option>
+              <option value="ams3">ams3</option>
+            </select>
+            <select id="sizeInput" aria-label="Size">
+              <option value="s-1vcpu-1gb">Small</option>
+              <option value="s-2vcpu-2gb">Medium</option>
+              <option value="s-2vcpu-4gb">Browser</option>
+            </select>
+            <button id="createSessionBtn" type="button">Create</button>
+          </div>
+          <div class="sessions" id="sessions"></div>
+          <div class="message" id="sessionMessage"></div>
+        </div>
+      </section>
+      <section class="panel viewer-wrap">
+        <div class="viewer-actions">
+          <div class="viewer-title" id="viewerTitle">noVNC</div>
+          <div class="toolbar">
+            <button class="secondary" id="connectBtn" type="button" disabled>Open noVNC</button>
+            <a class="button-link" id="externalLink" href="#" target="_blank" rel="noopener" style="display:none">New tab</a>
+            <button class="danger" id="deleteSessionBtn" type="button" disabled>Delete</button>
+          </div>
+        </div>
+        <div id="viewerEmpty" class="empty">Create or select a browser session, then open noVNC here.</div>
+        <iframe id="novncFrame" title="WebBrain cloud browser noVNC" style="display:none" referrerpolicy="no-referrer"></iframe>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><h2>API Keys</h2></div>
+        <div class="panel-body">
+          <div class="api-key-row">
+            <input id="apiKeyName" placeholder="API key name" value="Default API key">
+            <button id="createApiKeyBtn" type="button">Create key</button>
+          </div>
+          <div class="secret" id="newApiKey"></div>
+          <div class="message" id="apiKeyMessage"></div>
+        </div>
+      </section>
+    </div>
   </main>
+  <script>
+    const sessionsEl = document.getElementById('sessions');
+    const sessionMessage = document.getElementById('sessionMessage');
+    const sessionCount = document.getElementById('sessionCount');
+    const createSessionBtn = document.getElementById('createSessionBtn');
+    const refreshBtn = document.getElementById('refreshBtn');
+    const connectBtn = document.getElementById('connectBtn');
+    const deleteSessionBtn = document.getElementById('deleteSessionBtn');
+    const viewerTitle = document.getElementById('viewerTitle');
+    const viewerEmpty = document.getElementById('viewerEmpty');
+    const novncFrame = document.getElementById('novncFrame');
+    const externalLink = document.getElementById('externalLink');
+    const createApiKeyBtn = document.getElementById('createApiKeyBtn');
+    const apiKeyName = document.getElementById('apiKeyName');
+    const newApiKey = document.getElementById('newApiKey');
+    const apiKeyMessage = document.getElementById('apiKeyMessage');
+    const state = { sessions: [], selectedId: null };
+
+    function showMessage(el, text, isError) {
+      el.textContent = text || '';
+      el.classList.toggle('error', !!isError);
+    }
+
+    async function api(path, options) {
+      options = options || {};
+      const res = await fetch(path, {
+        credentials: 'same-origin',
+        ...options,
+        headers: {
+          'content-type': 'application/json',
+          ...(options.headers || {}),
+        },
+        body: options.body && typeof options.body !== 'string' ? JSON.stringify(options.body) : options.body,
+      });
+      const text = await res.text();
+      const body = text ? JSON.parse(text) : null;
+      if (!res.ok) throw new Error((body && body.error) || 'Request failed');
+      return body;
+    }
+
+    function selectedSession() {
+      return state.sessions.find(s => s.id === state.selectedId) || null;
+    }
+
+    function renderSessions() {
+      sessionCount.textContent = String(state.sessions.length);
+      sessionsEl.innerHTML = '';
+      if (!state.sessions.length) {
+        sessionsEl.innerHTML = '<div class="empty" style="min-height:180px">No browser sessions yet.</div>';
+      }
+      for (const session of state.sessions) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'session' + (session.id === state.selectedId ? ' active' : '');
+        const details = document.createElement('div');
+        const title = document.createElement('div');
+        title.className = 'session-title';
+        title.textContent = session.id;
+        const meta = document.createElement('div');
+        meta.className = 'session-meta';
+        meta.textContent = (session.public_ip || 'waiting for IP') + ' | ' + session.region + ' | ' + session.size;
+        details.append(title, meta);
+        const status = document.createElement('span');
+        status.className = 'status';
+        status.textContent = session.status;
+        btn.append(details, status);
+        btn.addEventListener('click', () => {
+          state.selectedId = session.id;
+          renderSessions();
+          renderViewer();
+          refreshOne(session.id).catch(e => showMessage(sessionMessage, e.message, true));
+        });
+        sessionsEl.appendChild(btn);
+      }
+      renderViewer();
+    }
+
+    function renderViewer() {
+      const session = selectedSession();
+      connectBtn.disabled = !session || !session.public_ip || session.status === 'destroyed';
+      deleteSessionBtn.disabled = !session || session.status === 'destroyed';
+      viewerTitle.textContent = session ? session.id + ' | ' + session.status : 'noVNC';
+    }
+
+    async function loadSessions() {
+      const body = await api('/api/browser-sessions');
+      state.sessions = body.browser_sessions || [];
+      if (state.selectedId && !state.sessions.some(s => s.id === state.selectedId)) state.selectedId = null;
+      if (!state.selectedId && state.sessions[0]) state.selectedId = state.sessions[0].id;
+      renderSessions();
+    }
+
+    async function refreshOne(id) {
+      const body = await api('/api/browser-sessions/' + encodeURIComponent(id));
+      const next = body.browser_session;
+      state.sessions = state.sessions.map(s => s.id === next.id ? next : s);
+      renderSessions();
+      return next;
+    }
+
+    async function createSession() {
+      createSessionBtn.disabled = true;
+      showMessage(sessionMessage, 'Creating droplet...');
+      try {
+        const body = await api('/api/browser-sessions', {
+          method: 'POST',
+          body: {
+            region: document.getElementById('regionInput').value,
+            size: document.getElementById('sizeInput').value,
+          },
+        });
+        state.selectedId = body.browser_session.id;
+        await loadSessions();
+        showMessage(sessionMessage, 'Session created. It may take a few minutes before noVNC is ready.');
+      } catch (e) {
+        showMessage(sessionMessage, e.message, true);
+      } finally {
+        createSessionBtn.disabled = false;
+      }
+    }
+
+    async function openNoVnc() {
+      const session = selectedSession();
+      if (!session) return;
+      connectBtn.disabled = true;
+      showMessage(sessionMessage, 'Creating noVNC link...');
+      try {
+        const body = await api('/api/browser-sessions/' + encodeURIComponent(session.id) + '/connect-token', {
+          method: 'POST',
+          body: { scheme: 'http', port: 6081 },
+        });
+        novncFrame.src = body.url;
+        externalLink.href = body.url;
+        externalLink.style.display = '';
+        viewerEmpty.style.display = 'none';
+        novncFrame.style.display = '';
+        showMessage(sessionMessage, 'noVNC opened. Token expires at ' + body.expires_at + '.');
+      } catch (e) {
+        showMessage(sessionMessage, e.message, true);
+      } finally {
+        connectBtn.disabled = false;
+        renderViewer();
+      }
+    }
+
+    async function deleteSession() {
+      const session = selectedSession();
+      if (!session || !confirm('Delete browser session ' + session.id + '?')) return;
+      deleteSessionBtn.disabled = true;
+      showMessage(sessionMessage, 'Deleting session...');
+      try {
+        await api('/api/browser-sessions/' + encodeURIComponent(session.id), { method: 'DELETE' });
+        if (state.selectedId === session.id) {
+          state.selectedId = null;
+          novncFrame.removeAttribute('src');
+          novncFrame.style.display = 'none';
+          viewerEmpty.style.display = '';
+          externalLink.style.display = 'none';
+        }
+        await loadSessions();
+        showMessage(sessionMessage, 'Session deleted.');
+      } catch (e) {
+        showMessage(sessionMessage, e.message, true);
+      } finally {
+        deleteSessionBtn.disabled = false;
+      }
+    }
+
+    async function createApiKey() {
+      createApiKeyBtn.disabled = true;
+      newApiKey.style.display = 'none';
+      showMessage(apiKeyMessage, 'Creating API key...');
+      try {
+        const body = await api('/api/api-keys', {
+          method: 'POST',
+          body: { name: apiKeyName.value || 'Dashboard API key' },
+        });
+        newApiKey.textContent = body.key;
+        newApiKey.style.display = 'block';
+        showMessage(apiKeyMessage, 'Copy this key now. It will not be shown again.');
+      } catch (e) {
+        showMessage(apiKeyMessage, e.message, true);
+      } finally {
+        createApiKeyBtn.disabled = false;
+      }
+    }
+
+    createSessionBtn.addEventListener('click', createSession);
+    refreshBtn.addEventListener('click', () => loadSessions().catch(e => showMessage(sessionMessage, e.message, true)));
+    connectBtn.addEventListener('click', openNoVnc);
+    deleteSessionBtn.addEventListener('click', deleteSession);
+    createApiKeyBtn.addEventListener('click', createApiKey);
+    loadSessions().catch(e => showMessage(sessionMessage, e.message, true));
+    setInterval(() => loadSessions().catch(() => {}), 15000);
+  </script>
 </body>
 </html>`;
 }
@@ -331,7 +607,11 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
 
   app.get('/api/browser-sessions', requireAuth, async (req, res) => {
     const sessions = await store.listBrowserSessions(req.auth.user.id);
-    res.json({ browser_sessions: sessions.map(publicBrowserSession) });
+    const refreshed = [];
+    for (const session of sessions) {
+      refreshed.push(await refreshProvisioningSession(session));
+    }
+    res.json({ browser_sessions: refreshed.map(publicBrowserSession) });
   });
 
   app.post('/api/browser-sessions', requireAuth, async (req, res, next) => {
@@ -373,16 +653,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
   app.get('/api/browser-sessions/:sessionId', requireAuth, async (req, res) => {
     let session = await ownedBrowserSession(req, res);
     if (!session) return;
-    if (session.status === 'provisioning' && session.droplet_id) {
-      const refreshed = await provisioner.getDroplet(session.droplet_id).catch(() => null);
-      if (refreshed?.status && refreshed.status !== session.status) {
-        session = await store.updateBrowserSession(session.id, {
-          status: refreshed.status,
-          public_ip: refreshed.public_ip || session.public_ip,
-          updated_at: nowIso(),
-        });
-      }
-    }
+    session = await refreshProvisioningSession(session);
     res.json({
       browser_session: {
         ...publicBrowserSession(session),
@@ -390,6 +661,18 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
       },
     });
   });
+
+  async function refreshProvisioningSession(session) {
+    if (session.status !== 'provisioning' || !session.droplet_id) return session;
+    const refreshed = await provisioner.getDroplet(session.droplet_id).catch(() => null);
+    if (!refreshed?.status) return session;
+    if (refreshed.status === session.status && (!refreshed.public_ip || refreshed.public_ip === session.public_ip)) return session;
+    return await store.updateBrowserSession(session.id, {
+      status: refreshed.status,
+      public_ip: refreshed.public_ip || session.public_ip,
+      updated_at: nowIso(),
+    });
+  }
 
   app.delete('/api/browser-sessions/:sessionId', requireAuth, async (req, res, next) => {
     try {
@@ -406,8 +689,9 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
   });
 
   app.post('/api/browser-sessions/:sessionId/connect-token', requireAuth, async (req, res) => {
-    const session = await ownedBrowserSession(req, res);
+    let session = await ownedBrowserSession(req, res);
     if (!session) return;
+    session = await refreshProvisioningSession(session);
     if (!session.public_ip) return jsonError(res, 409, 'Browser session is not ready');
     const expiresAt = isoAfterMs(config.connectTokenTtlMs);
     const token = signNoVncToken({ sessionId: session.id, expiresAt, secret: session.connect_secret });

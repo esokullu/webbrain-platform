@@ -21,6 +21,9 @@ export function renderCloudInit({ session, config, providerApiKey = '' }) {
     WEBBRAIN_NOVNC_SECRET: session.connect_secret,
     WEBBRAIN_NOVNC_TARGET: 'http://127.0.0.1:6080',
     WEBBRAIN_NOVNC_GATE_PORT: '6081',
+    DISPLAY: ':99',
+    WEBBRAIN_HEADLESS: 'false',
+    WEBBRAIN_START_URL: 'about:blank',
   };
   const envText = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join('\n');
 
@@ -54,11 +57,50 @@ ${envText.split('\n').map(line => `      ${line}`).join('\n')}
       RestartSec=3
       [Install]
       WantedBy=multi-user.target
+  - path: /etc/systemd/system/webbrain-xvfb.service
+    content: |
+      [Unit]
+      Description=WebBrain virtual display
+      After=network-online.target
+      [Service]
+      EnvironmentFile=/etc/webbrain-droplet.env
+      ExecStart=/usr/bin/Xvfb :99 -screen 0 1440x900x24 -ac -noreset
+      Restart=always
+      RestartSec=3
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/systemd/system/webbrain-x11vnc.service
+    content: |
+      [Unit]
+      Description=WebBrain VNC server
+      After=webbrain-xvfb.service
+      Requires=webbrain-xvfb.service
+      [Service]
+      EnvironmentFile=/etc/webbrain-droplet.env
+      ExecStart=/usr/bin/x11vnc -display :99 -forever -shared -rfbport 5900 -nopw
+      Restart=always
+      RestartSec=3
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/systemd/system/webbrain-novnc.service
+    content: |
+      [Unit]
+      Description=WebBrain noVNC proxy
+      After=webbrain-x11vnc.service
+      Requires=webbrain-x11vnc.service
+      [Service]
+      EnvironmentFile=/etc/webbrain-droplet.env
+      ExecStart=/usr/share/novnc/utils/novnc_proxy --listen 127.0.0.1:6080 --vnc 127.0.0.1:5900
+      Restart=always
+      RestartSec=3
+      [Install]
+      WantedBy=multi-user.target
   - path: /etc/systemd/system/webbrain-browser.service
     content: |
       [Unit]
       Description=WebBrain cloud browser
-      After=webbrain-sidecar.service
+      After=webbrain-sidecar.service webbrain-xvfb.service
+      Requires=webbrain-xvfb.service
       [Service]
       EnvironmentFile=/etc/webbrain-droplet.env
       WorkingDirectory=${appDir}
@@ -71,7 +113,7 @@ ${envText.split('\n').map(line => `      ${line}`).join('\n')}
     content: |
       [Unit]
       Description=WebBrain droplet control client
-      After=webbrain-sidecar.service webbrain-browser.service
+      After=webbrain-sidecar.service webbrain-browser.service webbrain-novnc.service
       [Service]
       EnvironmentFile=/etc/webbrain-droplet.env
       WorkingDirectory=${appDir}
@@ -86,6 +128,6 @@ runcmd:
   - cd ${appDir} && npm ci --omit=dev
   - cd ${webbrainDir} && git checkout ${shellQuote(config.droplet.webbrainRef)}
   - systemctl daemon-reload
-  - systemctl enable --now webbrain-sidecar.service webbrain-browser.service webbrain-droplet.service
+  - systemctl enable --now webbrain-sidecar.service webbrain-xvfb.service webbrain-x11vnc.service webbrain-novnc.service webbrain-browser.service webbrain-droplet.service
 `;
 }
