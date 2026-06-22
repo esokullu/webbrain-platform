@@ -215,7 +215,7 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
   assert.match(cloudInit, /WEBBRAIN_HEADLESS='false'/);
   assert.match(cloudInit, /WEBBRAIN_NOVNC_GATE_PORT='6081'/);
   assert.match(cloudInit, /WEBBRAIN_BROWSER_BIN='\/usr\/bin\/google-chrome-stable'/);
-  assert.match(cloudInit, /package_upgrade: true/);
+  assert.match(cloudInit, /package_upgrade: false/);
   assert.match(cloudInit, /  - build-essential/);
   assert.match(cloudInit, /  - ufw/);
   assert.match(cloudInit, /webbrain-xvfb\.service/);

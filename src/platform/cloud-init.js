@@ -30,7 +30,7 @@ export function renderCloudInit({ session, config, providerApiKey = '' }) {
 
   return `#cloud-config
 package_update: true
-package_upgrade: true
+package_upgrade: false
 packages:
   - build-essential
   - ca-certificates
