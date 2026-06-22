@@ -234,20 +234,30 @@ test('digitalocean provisioner uses hostname-safe droplet names', async () => {
     WEBBRAIN_PLATFORM_URL: 'http://platform.example',
   });
   let requestBody = null;
-  const provisioner = new DigitalOceanProvisioner(config, async (url, options) => {
-    assert.equal(url, 'https://api.digitalocean.com/v2/droplets');
-    requestBody = JSON.parse(options.body);
+  const provisioner = new DigitalOceanProvisioner(config, async (url, options = {}) => {
+    if (options.method === 'POST') {
+      assert.equal(url, 'https://api.digitalocean.com/v2/droplets');
+      requestBody = JSON.parse(options.body);
+    }
     return {
       ok: true,
       async json() {
         return {
           droplet: {
             id: 123,
+            status: 'active',
             networks: { v4: [{ type: 'public', ip_address: '203.0.113.10' }] },
           },
         };
       },
     };
+  }, {
+    async isRuntimeReachable(host, port, timeoutMs) {
+      assert.equal(host, '203.0.113.10');
+      assert.equal(port, 6081);
+      assert.equal(timeoutMs, 1000);
+      return true;
+    },
   });
 
   assert.equal(digitalOceanDropletName('bs_abc123'), 'webbrain-bs-abc123');
@@ -256,7 +266,10 @@ test('digitalocean provisioner uses hostname-safe droplet names', async () => {
     connect_secret: 'connect-secret',
   });
 
-  assert.equal(created.status, 'ready');
+  assert.equal(created.status, 'provisioning');
   assert.equal(requestBody.name, 'webbrain-bs-abc123');
   assert.match(requestBody.name, /^[a-z0-9.-]+$/);
+
+  const refreshed = await provisioner.getDroplet(123);
+  assert.equal(refreshed.status, 'ready');
 });

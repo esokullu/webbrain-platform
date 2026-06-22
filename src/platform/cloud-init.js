@@ -20,7 +20,7 @@ export function renderCloudInit({ session, config, providerApiKey = '' }) {
     WEBBRAIN_PROVIDER_MODEL: config.droplet.providerModel,
     WEBBRAIN_NOVNC_SECRET: session.connect_secret,
     WEBBRAIN_NOVNC_TARGET: 'http://127.0.0.1:6080',
-    WEBBRAIN_NOVNC_GATE_PORT: '6081',
+    WEBBRAIN_NOVNC_GATE_PORT: String(config.droplet.noVncGatePort || 6081),
     DISPLAY: ':99',
     WEBBRAIN_HEADLESS: 'false',
     WEBBRAIN_START_URL: 'about:blank',

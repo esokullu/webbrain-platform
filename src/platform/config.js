@@ -39,6 +39,8 @@ export function loadConfig(env = process.env) {
       webbrainRef: env.WEBBRAIN_REF || 'main',
       providerBaseUrl: env.WEBBRAIN_PROVIDER_BASE_URL || `${baseUrl}/v1`,
       providerModel: env.WEBBRAIN_PROVIDER_MODEL || 'webbrain-cloud 1.0',
+      noVncGatePort: Number(env.WEBBRAIN_NOVNC_GATE_PORT || 6081),
+      readyTimeoutMs: Number(env.WEBBRAIN_DROPLET_READY_TIMEOUT_MS || 1000),
     },
   };
 }

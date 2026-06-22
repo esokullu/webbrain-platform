@@ -274,7 +274,7 @@ function dashboardPage(user) {
 
     function renderViewer() {
       const session = selectedSession();
-      connectBtn.disabled = !session || !session.public_ip || session.status === 'destroyed';
+      connectBtn.disabled = !session || !session.public_ip || session.status !== 'ready';
       deleteSessionBtn.disabled = !session || session.status === 'destroyed';
       viewerTitle.textContent = session ? session.id + ' | ' + session.status : 'noVNC';
     }
@@ -663,7 +663,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
   });
 
   async function refreshProvisioningSession(session) {
-    if (session.status !== 'provisioning' || !session.droplet_id) return session;
+    if (!session.droplet_id || ['failed', 'stopping', 'destroyed'].includes(session.status)) return session;
     const refreshed = await provisioner.getDroplet(session.droplet_id).catch(() => null);
     if (!refreshed?.status) return session;
     if (refreshed.status === session.status && (!refreshed.public_ip || refreshed.public_ip === session.public_ip)) return session;

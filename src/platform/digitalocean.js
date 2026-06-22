@@ -1,9 +1,11 @@
+import net from 'node:net';
 import { renderCloudInit } from './cloud-init.js';
 
 export class DigitalOceanProvisioner {
-  constructor(config, fetchImpl = fetch) {
+  constructor(config, fetchImpl = fetch, opts = {}) {
     this.config = config;
     this.fetch = fetchImpl;
+    this.isRuntimeReachable = opts.isRuntimeReachable || isTcpReachable;
   }
 
   async createBrowserDroplet(session, opts = {}) {
@@ -41,7 +43,7 @@ export class DigitalOceanProvisioner {
     return {
       droplet_id: String(parsed.droplet?.id || ''),
       public_ip: findPublicIp(parsed.droplet),
-      status: findPublicIp(parsed.droplet) ? 'ready' : 'provisioning',
+      status: 'provisioning',
       request: body,
     };
   }
@@ -53,11 +55,15 @@ export class DigitalOceanProvisioner {
     });
     if (!res.ok) return null;
     const parsed = await res.json();
+    const publicIp = findPublicIp(parsed.droplet);
+    const runtimeReady = parsed.droplet?.status === 'active'
+      && publicIp
+      && await this.isRuntimeReachable(publicIp, this.config.droplet.noVncGatePort, this.config.droplet.readyTimeoutMs);
     return {
       droplet_id: String(parsed.droplet?.id || dropletId),
-      public_ip: findPublicIp(parsed.droplet),
+      public_ip: publicIp,
       raw_status: parsed.droplet?.status,
-      status: parsed.droplet?.status === 'active' && findPublicIp(parsed.droplet) ? 'ready' : 'provisioning',
+      status: runtimeReady ? 'ready' : 'provisioning',
     };
   }
 
@@ -106,6 +112,22 @@ export function digitalOceanDropletName(sessionId) {
     .replace(/[^a-z0-9]+$/, '')
     .slice(0, 48) || 'session';
   return `webbrain-${suffix}`;
+}
+
+export function isTcpReachable(host, port, timeoutMs = 1000) {
+  if (!host || !port) return Promise.resolve(false);
+  return new Promise(resolve => {
+    const socket = net.createConnection({ host, port });
+    const finish = ok => {
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(ok);
+    };
+    socket.setTimeout(timeoutMs);
+    socket.once('connect', () => finish(true));
+    socket.once('timeout', () => finish(false));
+    socket.once('error', () => finish(false));
+  });
 }
 
 function findPublicIp(droplet) {
