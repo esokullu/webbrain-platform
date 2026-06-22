@@ -20,6 +20,7 @@ export function loadConfig(env = process.env) {
       user: env.MYSQL_USER || 'webbrain',
       password: env.MYSQL_PASSWORD || '',
       database: env.MYSQL_DATABASE || 'webbrain_platform',
+      sslRejectUnauthorized: env.MYSQL_SSL_REJECT_UNAUTHORIZED === 'true',
     },
     digitalOcean: {
       token: env.DO_API_TOKEN || '',

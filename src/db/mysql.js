@@ -47,7 +47,7 @@ function normalizeCloudRun(row) {
 export class MySqlStore {
   constructor(config) {
     this.config = config;
-    this.pool = mysql.createPool(config.url ? config.url : {
+    this.pool = mysql.createPool(config.url ? poolConfigFromUrl(config) : {
       host: config.host,
       port: config.port,
       user: config.user,
@@ -286,4 +286,22 @@ export class MySqlStore {
   async close() {
     await this.pool.end();
   }
+}
+
+function poolConfigFromUrl(config) {
+  const parsed = new URL(config.url);
+  const sslMode = parsed.searchParams.get('ssl-mode') || parsed.searchParams.get('sslmode');
+  parsed.searchParams.delete('ssl-mode');
+  parsed.searchParams.delete('sslmode');
+  const sslRequired = sslMode && !['DISABLED', 'disable', 'false', '0'].includes(sslMode);
+  return {
+    host: parsed.hostname,
+    port: Number(parsed.port || 3306),
+    user: decodeURIComponent(parsed.username),
+    password: decodeURIComponent(parsed.password),
+    database: decodeURIComponent(parsed.pathname.replace(/^\//, '')),
+    connectionLimit: 10,
+    namedPlaceholders: true,
+    ssl: sslRequired ? { rejectUnauthorized: config.sslRejectUnauthorized === true } : undefined,
+  };
 }
