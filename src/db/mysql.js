@@ -32,12 +32,15 @@ function normalizeBrowserSession(row) {
   };
 }
 
-function normalizeCloudRun(row) {
+export function normalizeCloudRun(row) {
   if (!row) return null;
   return {
     ...row,
     output_schema: parseJsonMaybe(row.output_schema),
-    result: parseJsonMaybe(row.result),
+    // mysql2 decodes JSON columns before returning them. In particular, a JSON
+    // string result arrives here as a plain JavaScript string, so parsing it a
+    // second time would turn a normal agent answer into the fallback `null`.
+    result: row.result,
     created_at: fromMysqlDate(row.created_at),
     updated_at: fromMysqlDate(row.updated_at),
     completed_at: fromMysqlDate(row.completed_at),
