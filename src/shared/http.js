@@ -10,6 +10,9 @@ export function publicBrowserSession(row) {
     expires_at: row.expires_at,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    droplet_connected: row.droplet_connected === true,
+    extension_connected: row.extension_connected === true,
+    runtime_ready: row.runtime_ready === true,
   };
 }
 

@@ -205,7 +205,23 @@ export function createSidecarServer(options = {}) {
       else p.resolve(msg.result);
     });
     ws.on('close', () => {
-      if (extensionSocket === ws) extensionSocket = null;
+      if (extensionSocket !== ws) return;
+      extensionSocket = null;
+      const completedAt = new Date().toISOString();
+      for (const run of runs.values()) {
+        if (!['running', 'aborting'].includes(run.status)) continue;
+        run.status = run.status === 'aborting' ? 'aborted' : 'failed';
+        run.error = run.status === 'aborted'
+          ? 'Run aborted when the extension bridge disconnected.'
+          : 'Run interrupted when the extension bridge disconnected.';
+        run.updated_at = completedAt;
+        run.completed_at = completedAt;
+      }
+      for (const item of pending.values()) {
+        clearTimeout(item.timer);
+        item.reject(new Error('WebBrain extension bridge disconnected.'));
+      }
+      pending.clear();
     });
   });
 

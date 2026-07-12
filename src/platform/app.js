@@ -533,7 +533,10 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
       const target = `${config.modelProxy.baseUrl.replace(/\/$/, '')}/${req.params[0]}`;
       const headers = {
         'content-type': req.headers['content-type'] || 'application/json',
+        'x-webbrain-device-id': `platform-${hashToken(`webbrain-platform:${session.user_id}`).slice(0, 32)}`,
+        'x-webbrain-client': 'platform',
       };
+      if (req.headers.accept) headers.accept = req.headers.accept;
       if (config.modelProxy.apiKey) headers.authorization = `Bearer ${config.modelProxy.apiKey}`;
       const upstream = await fetch(target, {
         method: req.method,
@@ -652,10 +655,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
 
   app.get('/api/browser-sessions', requireAuth, async (req, res) => {
     const sessions = await store.listBrowserSessions(req.auth.user.id);
-    const refreshed = [];
-    for (const session of sessions) {
-      refreshed.push(await refreshProvisioningSession(session));
-    }
+    const refreshed = await Promise.all(sessions.map(session => refreshProvisioningSession(session)));
     res.json({ browser_sessions: refreshed.map(publicBrowserSession) });
   });
 
@@ -700,23 +700,39 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
     if (!session) return;
     session = await refreshProvisioningSession(session);
     res.json({
-      browser_session: {
-        ...publicBrowserSession(session),
-        droplet_connected: controlChannel.isConnected(session.id),
-      },
+      browser_session: publicBrowserSession(session),
     });
   });
 
+  async function browserRuntimeState(session) {
+    const dropletConnected = controlChannel.isConnected(session.id);
+    if (!dropletConnected) {
+      return { droplet_connected: false, extension_connected: false, runtime_ready: false };
+    }
+    const health = await controlChannel.send(session.id, 'health', {}, 2000).catch(() => null);
+    const extensionConnected = health?.extension_connected === true;
+    return {
+      droplet_connected: true,
+      extension_connected: extensionConnected,
+      runtime_ready: extensionConnected,
+    };
+  }
+
   async function refreshProvisioningSession(session) {
-    if (!session.droplet_id || ['failed', 'stopping', 'destroyed'].includes(session.status)) return session;
+    const runtime = await browserRuntimeState(session);
+    if (!session.droplet_id || ['failed', 'stopping', 'destroyed'].includes(session.status)) return { ...session, ...runtime };
     const refreshed = await provisioner.getDroplet(session.droplet_id).catch(() => null);
-    if (!refreshed?.status) return session;
-    if (refreshed.status === session.status && (!refreshed.public_ip || refreshed.public_ip === session.public_ip)) return session;
-    return await store.updateBrowserSession(session.id, {
-      status: refreshed.status,
+    if (!refreshed?.status) return { ...session, ...runtime };
+    const status = refreshed.status === 'ready' && !runtime.runtime_ready ? 'provisioning' : refreshed.status;
+    if (status === session.status && (!refreshed.public_ip || refreshed.public_ip === session.public_ip)) {
+      return { ...session, ...runtime };
+    }
+    const updated = await store.updateBrowserSession(session.id, {
+      status,
       public_ip: refreshed.public_ip || session.public_ip,
       updated_at: nowIso(),
     });
+    return { ...updated, ...runtime };
   }
 
   app.delete('/api/browser-sessions/:sessionId', requireAuth, async (req, res, next) => {
@@ -764,9 +780,14 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
       if (!session) return;
       const task = String(req.body.task || '').trim();
       if (!task) return jsonError(res, 400, '`task` is required');
+      const runtime = await browserRuntimeState(session);
+      if (!runtime.runtime_ready) {
+        return jsonError(res, 409, 'WebBrain browser runtime is not ready; the extension bridge is not connected.', runtime);
+      }
       const started = await controlChannel.send(session.id, 'run', {
         task,
         output_schema: req.body.output_schema ?? req.body.outputSchema ?? null,
+        tab_id: req.body.tab_id ?? req.body.tabId ?? null,
         wait: false,
         timeout_ms: req.body.timeout_ms,
       });

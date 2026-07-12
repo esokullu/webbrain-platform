@@ -15,7 +15,7 @@
               "category": "cloud",
               "label": "WebBrain Cloud",
               "providerName": "webbrain-cloud",
-              "baseUrl": "https://api.webbrain.one/v1",
+              "baseUrl": "https://webbrain.cloud/v1",
               "model": "webbrain-cloud 1.0",
               "apiKey": "__PLATFORM_SESSION_TOKEN__",
               "enabled": true
