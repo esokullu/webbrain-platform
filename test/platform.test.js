@@ -307,7 +307,7 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
   assert.match(cloudInit, /WEBBRAIN_HEADLESS='false'/);
   assert.match(cloudInit, /WEBBRAIN_NOVNC_GATE_PORT='6081'/);
   assert.match(cloudInit, /WEBBRAIN_BROWSER_BIN='\/opt\/chrome-linux64\/chrome'/);
-  assert.match(cloudInit, /WEBBRAIN_START_URL='https:\/\/example\.com'/);
+  assert.match(cloudInit, /WEBBRAIN_START_URL='https:\/\/webbrain\.one'/);
   assert.match(cloudInit, /package_upgrade: false/);
   assert.match(cloudInit, /  - build-essential/);
   assert.match(cloudInit, /  - unzip/);

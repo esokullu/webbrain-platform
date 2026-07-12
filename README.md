@@ -89,7 +89,7 @@ Example run:
 
 ## Droplet Internals
 
-Browser VMs use the latest Stable [Chrome for Testing](https://developer.chrome.com/blog/chrome-for-testing/) build for a reproducible automation runtime. Chrome is launched with its non-interactive infobars disabled and starts on `https://example.com` so the WebBrain extension has normal site access immediately.
+Browser VMs use the latest Stable [Chrome for Testing](https://developer.chrome.com/blog/chrome-for-testing/) build for a reproducible automation runtime. Chrome is launched with its non-interactive infobars disabled and starts on `https://webbrain.one` so the WebBrain extension has normal site access immediately.
 
 The WebBrain extension connects outbound to the local sidecar:
 

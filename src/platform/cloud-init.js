@@ -23,7 +23,7 @@ export function renderCloudInit({ session, config, providerApiKey = '' }) {
     WEBBRAIN_NOVNC_GATE_PORT: String(config.droplet.noVncGatePort || 6081),
     DISPLAY: ':99',
     WEBBRAIN_HEADLESS: 'false',
-    WEBBRAIN_START_URL: 'https://example.com',
+    WEBBRAIN_START_URL: 'https://webbrain.one',
     WEBBRAIN_BROWSER_BIN: '/opt/chrome-linux64/chrome',
   };
   const envText = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join('\n');
