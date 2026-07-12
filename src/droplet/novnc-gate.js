@@ -86,6 +86,7 @@ export function createNoVncGate({
       return new Promise(resolve => server.listen(port, host, () => resolve(server.address())));
     },
     close() {
+      for (const client of wss.clients) client.terminate();
       return new Promise(resolve => wss.close(() => server.close(resolve)));
     },
   };
