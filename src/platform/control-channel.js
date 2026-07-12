@@ -99,7 +99,7 @@ export class DropletControlChannel {
       item.reject(new Error('Droplet control channel closed'));
     }
     this.pending.clear();
-    for (const ws of this.connections.values()) ws.close();
+    for (const ws of this.connections.values()) ws.terminate();
     this.connections.clear();
     return new Promise(resolve => this.wss.close(resolve));
   }
