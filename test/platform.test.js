@@ -6,7 +6,7 @@ import { MemoryStore } from '../src/db/memory.js';
 import { DigitalOceanProvisioner, NullProvisioner, digitalOceanDropletName } from '../src/platform/digitalocean.js';
 import { loadConfig } from '../src/platform/config.js';
 import { createPlatformServer } from '../src/platform/server.js';
-import { renderCloudInit } from '../src/platform/cloud-init.js';
+import { chromeExtensionIdForPath, renderCloudInit } from '../src/platform/cloud-init.js';
 import { verifyNoVncToken } from '../src/shared/novnc-token.js';
 import { instanceHostname, sessionIdFromInstanceHost } from '../src/platform/instance-proxy.js';
 
@@ -308,6 +308,8 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
   assert.match(cloudInit, /WEBBRAIN_NOVNC_GATE_PORT='6081'/);
   assert.match(cloudInit, /WEBBRAIN_BROWSER_BIN='\/opt\/chrome-linux64\/chrome'/);
   assert.match(cloudInit, /WEBBRAIN_START_URL='https:\/\/webbrain\.one'/);
+  assert.match(cloudInit, /"toolbar_pin":"default_pinned"/);
+  assert.match(cloudInit, new RegExp(chromeExtensionIdForPath('/opt/webbrain3/src/chrome')));
   assert.match(cloudInit, /package_upgrade: false/);
   assert.match(cloudInit, /  - build-essential/);
   assert.match(cloudInit, /  - unzip/);
@@ -325,6 +327,10 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
   assert.match(cloudInit, /git clone 'https:\/\/github\.com\/webbrain-one\/webbrain\.git' \/opt\/webbrain3/);
   assert.match(cloudInit, /git clone https:\/\/github\.com\/novnc\/noVNC\.git \/opt\/noVNC/);
   assert.match(cloudInit, /systemctl enable --now webbrain-sidecar\.service webbrain-xvfb\.service webbrain-x11vnc\.service webbrain-novnc\.service webbrain-browser\.service webbrain-droplet\.service/);
+});
+
+test('cloud browser extension id matches Chrome unpacked-extension path hashing', () => {
+  assert.equal(chromeExtensionIdForPath('/opt/webbrain3/src/chrome'), 'ojnjlpnhkfaiapnicpdgngopfpmphocc');
 });
 
 test('digitalocean provisioner uses hostname-safe droplet names', async () => {

@@ -114,11 +114,55 @@ async function waitForExtensionId() {
     const targets = await devtoolsJson('/json/list').catch(() => []);
     for (const target of targets.filter(item => item.type === 'service_worker')) {
       const id = extensionIdFromUrl(target.url);
-      if (id) return id;
+      if (!id) continue;
+      const cdp = createCdpClient(target.webSocketDebuggerUrl);
+      try {
+        await cdp.open();
+        await cdp.call('Runtime.enable');
+        const result = await cdp.call('Runtime.evaluate', {
+          expression: "chrome.runtime?.getManifest?.().name || ''",
+          returnByValue: true,
+        });
+        if (result.result?.value === 'WebBrain') return id;
+      } catch {
+        // The Preferences path remains the primary identification mechanism.
+      } finally {
+        cdp.close();
+      }
     }
     await sleep(300);
   }
   throw new Error('Could not detect the WebBrain extension ID from DevTools targets or profile preferences.');
+}
+
+function normalizedPageKey(value) {
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.replace(/^www\./, '');
+    const pathname = url.pathname.replace(/\/+$/, '') || '/';
+    return `${url.protocol}//${hostname}${pathname}${url.search}`;
+  } catch {
+    return String(value || '');
+  }
+}
+
+async function normalizeStartupTabs(extensionId) {
+  const targets = await devtoolsJson('/json/list').catch(() => []);
+  const startKey = normalizedPageKey(startUrl);
+  let keptStartPage = false;
+  for (const target of targets) {
+    if (target.type !== 'page') continue;
+    const targetExtensionId = extensionIdFromUrl(target.url);
+    const wrongSeedPage = targetExtensionId
+      && targetExtensionId !== extensionId
+      && /\/src\/ui\/settings\.html(?:$|[?#])/.test(target.url);
+    const isStartPage = normalizedPageKey(target.url) === startKey;
+    if (wrongSeedPage || (isStartPage && keptStartPage)) {
+      await closeTarget(target.id).catch(() => {});
+      continue;
+    }
+    if (isStartPage) keptStartPage = true;
+  }
 }
 
 async function closeTarget(targetId) {
@@ -278,6 +322,7 @@ async function main() {
   await waitForDevtools();
   const extensionId = await waitForExtensionId();
   const seeded = await preseedExtension(extensionId);
+  await normalizeStartupTabs(extensionId);
   console.log(JSON.stringify({
     ok: true,
     browser,

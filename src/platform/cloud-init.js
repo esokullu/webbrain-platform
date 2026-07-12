@@ -1,5 +1,12 @@
+import { createHash } from 'node:crypto';
+
 function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+export function chromeExtensionIdForPath(extensionPath) {
+  const hex = createHash('sha256').update(String(extensionPath)).digest('hex').slice(0, 32);
+  return [...hex].map(char => String.fromCharCode(97 + Number.parseInt(char, 16))).join('');
 }
 
 export function renderCloudInit({ session, config, providerApiKey = '' }) {
@@ -7,6 +14,8 @@ export function renderCloudInit({ session, config, providerApiKey = '' }) {
   const webbrainRepoUrl = config.droplet.webbrainRepoUrl || 'https://github.com/webbrain-one/webbrain.git';
   const appDir = '/opt/webbrain-platform';
   const webbrainDir = '/opt/webbrain3';
+  const extensionDir = `${webbrainDir}/src/chrome`;
+  const extensionId = chromeExtensionIdForPath(extensionDir);
   const env = {
     NODE_ENV: 'production',
     WEBBRAIN_ROLE: 'droplet',
@@ -14,7 +23,7 @@ export function renderCloudInit({ session, config, providerApiKey = '' }) {
     WEBBRAIN_SESSION_TOKEN: session.connect_secret,
     WEBBRAIN_PLATFORM_URL: config.baseUrl,
     WEBBRAIN_CONTROL_WS_URL: config.baseUrl.replace(/^http/, 'ws') + '/droplet/control',
-    WEBBRAIN_EXTENSION_DIR: `${webbrainDir}/src/chrome`,
+    WEBBRAIN_EXTENSION_DIR: extensionDir,
     WEBBRAIN_PROVIDER_BASE_URL: config.droplet.providerBaseUrl,
     WEBBRAIN_PROVIDER_API_KEY: providerApiKey,
     WEBBRAIN_PROVIDER_MODEL: config.droplet.providerModel,
@@ -42,6 +51,10 @@ packages:
   - x11vnc
   - websockify
 write_files:
+  - path: /etc/opt/chrome_for_testing/policies/managed/webbrain.json
+    permissions: '0644'
+    content: |
+      {"ExtensionSettings":{"${extensionId}":{"installation_mode":"allowed","toolbar_pin":"default_pinned"}}}
   - path: /etc/webbrain-droplet.env
     permissions: '0600'
     content: |
