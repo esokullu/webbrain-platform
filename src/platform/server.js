@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { createPlatformApp } from './app.js';
 import { DropletControlChannel } from './control-channel.js';
+import { createInstanceProxy } from './instance-proxy.js';
 
 export function createPlatformServer({ store, provisioner, config }) {
   const controlChannel = new DropletControlChannel({
@@ -8,7 +9,26 @@ export function createPlatformServer({ store, provisioner, config }) {
     requestTimeoutMs: config.runWaitTimeoutMs,
   });
   const app = createPlatformApp({ store, provisioner, controlChannel, config });
-  const server = http.createServer(app);
+  const instanceProxy = createInstanceProxy({
+    store,
+    domain: config.instanceDomain,
+    targetPort: config.droplet.noVncGatePort,
+  });
+  const server = http.createServer((req, res) => {
+    instanceProxy.handleRequest(req, res)
+      .then(handled => {
+        if (!handled) app(req, res);
+      })
+      .catch(error => {
+        if (res.headersSent) {
+          res.destroy(error);
+          return;
+        }
+        res.writeHead(502, { 'content-type': 'text/plain' });
+        res.end('Instance proxy error');
+      });
+  });
+  instanceProxy.attach(server);
   controlChannel.attach(server);
 
   return {
@@ -20,7 +40,7 @@ export function createPlatformServer({ store, provisioner, config }) {
     },
     close() {
       return new Promise(resolve => {
-        controlChannel.close().then(() => server.close(resolve));
+        Promise.all([controlChannel.close(), instanceProxy.close()]).then(() => server.close(resolve));
       });
     },
   };

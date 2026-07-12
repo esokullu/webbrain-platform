@@ -10,6 +10,7 @@ export function loadConfig(env = process.env) {
     sessionTtlMs: Number(env.WEBBRAIN_WEB_SESSION_TTL_MS || 30 * 24 * 60 * 60 * 1000),
     browserSessionTtlMs: Number(env.WEBBRAIN_BROWSER_SESSION_TTL_MS || 6 * 60 * 60 * 1000),
     connectTokenTtlMs: Number(env.WEBBRAIN_CONNECT_TOKEN_TTL_MS || 5 * 60 * 1000),
+    instanceDomain: String(env.WEBBRAIN_INSTANCE_DOMAIN || '').trim().toLowerCase(),
     runWaitTimeoutMs: Number(env.WEBBRAIN_RUN_WAIT_TIMEOUT_MS || 120000),
     runPollIntervalMs: Number(env.WEBBRAIN_RUN_POLL_INTERVAL_MS || 500),
     db: {

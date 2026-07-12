@@ -40,7 +40,8 @@ export function createNoVncGate({
       headers: proxyHeaders(req),
     }, upstreamRes => {
       const headers = { ...upstreamRes.headers };
-      headers['set-cookie'] = [`wbp_novnc=${encodeURIComponent(auth.token)}; Path=/; HttpOnly; SameSite=Lax`];
+      const secure = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
+      headers['set-cookie'] = [`wbp_novnc=${encodeURIComponent(auth.token)}; Path=/; HttpOnly; SameSite=Lax${secure ? '; Secure' : ''}`];
       res.writeHead(upstreamRes.statusCode || 502, headers);
       upstreamRes.pipe(res);
     });
@@ -62,12 +63,19 @@ export function createNoVncGate({
       const upstream = new WebSocket(`ws://${targetUrl.hostname}:${targetUrl.port || 80}${req.url}`, {
         headers: proxyHeaders(req),
       });
-      upstream.once('open', () => {
-        client.on('message', data => upstream.send(data));
-        upstream.on('message', data => client.send(data));
-        client.on('close', () => upstream.close());
-        upstream.on('close', () => client.close());
+      const pending = [];
+      client.on('message', data => {
+        if (upstream.readyState === WebSocket.OPEN) upstream.send(data);
+        else if (upstream.readyState === WebSocket.CONNECTING) pending.push(data);
       });
+      client.on('close', () => upstream.close());
+      upstream.once('open', () => {
+        for (const data of pending.splice(0)) upstream.send(data);
+      });
+      upstream.on('message', data => {
+        if (client.readyState === WebSocket.OPEN) client.send(data);
+      });
+      upstream.on('close', () => client.close());
       upstream.once('error', () => client.close());
     });
   });

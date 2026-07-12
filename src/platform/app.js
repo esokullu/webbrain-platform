@@ -3,6 +3,7 @@ import { randomId, randomSecret, nowIso, isoAfterMs } from '../shared/ids.js';
 import { hashPassword, verifyPassword, hashToken } from '../shared/crypto.js';
 import { publicBrowserSession, publicRun, jsonError } from '../shared/http.js';
 import { signNoVncToken } from '../shared/novnc-token.js';
+import { instanceHostname } from './instance-proxy.js';
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'aborted']);
 
@@ -707,7 +708,9 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
     res.json({
       token,
       expires_at: expiresAt,
-      url: `${scheme}://${session.public_ip}:${port}/vnc.html?${query.toString()}`,
+      url: config.instanceDomain
+        ? `https://${instanceHostname(session.id, config.instanceDomain)}/vnc.html?${query.toString()}`
+        : `${scheme}://${session.public_ip}:${port}/vnc.html?${query.toString()}`,
     });
   });
 

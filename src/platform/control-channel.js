@@ -33,7 +33,6 @@ export class DropletControlChannel {
         return;
       }
       if (parsed.pathname !== '/droplet/control') {
-        socket.destroy();
         return;
       }
       const sessionToken = parsed.searchParams.get('session_token') || req.headers['x-webbrain-session-token'];

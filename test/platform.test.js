@@ -1,12 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import WebSocket from 'ws';
+import http from 'node:http';
+import WebSocket, { WebSocketServer } from 'ws';
 import { MemoryStore } from '../src/db/memory.js';
 import { DigitalOceanProvisioner, NullProvisioner, digitalOceanDropletName } from '../src/platform/digitalocean.js';
 import { loadConfig } from '../src/platform/config.js';
 import { createPlatformServer } from '../src/platform/server.js';
 import { renderCloudInit } from '../src/platform/cloud-init.js';
 import { verifyNoVncToken } from '../src/shared/novnc-token.js';
+import { instanceHostname, sessionIdFromInstanceHost } from '../src/platform/instance-proxy.js';
 
 async function startPlatform() {
   const config = loadConfig({
@@ -199,6 +201,86 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /Create key/);
   } finally {
     await ctx.platform.close();
+  }
+});
+
+test('instance hostnames round-trip browser session ids', () => {
+  assert.equal(instanceHostname('bs_9c1e5c521147839e5cf00373', 'webbrain.cloud'), 'bs-9c1e5c521147839e5cf00373.webbrain.cloud');
+  assert.equal(sessionIdFromInstanceHost('bs-9c1e5c521147839e5cf00373.webbrain.cloud', 'webbrain.cloud'), 'bs_9c1e5c521147839e5cf00373');
+  assert.equal(sessionIdFromInstanceHost('webbrain.cloud', 'webbrain.cloud'), null);
+});
+
+test('instance subdomains proxy HTTP and WebSocket traffic to the session droplet', async () => {
+  const upstream = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'text/plain', 'x-upstream-path': req.url });
+    res.end('proxied');
+  });
+  const upstreamWss = new WebSocketServer({ server: upstream });
+  upstreamWss.on('connection', ws => ws.on('message', data => ws.send(data)));
+  const upstreamAddress = await new Promise(resolve => upstream.listen(0, '127.0.0.1', () => resolve(upstream.address())));
+
+  const config = loadConfig({
+    WEBBRAIN_DB_DRIVER: 'memory',
+    WEBBRAIN_PROVISIONER: 'null',
+    WEBBRAIN_INSTANCE_DOMAIN: 'webbrain.cloud',
+    WEBBRAIN_NOVNC_GATE_PORT: String(upstreamAddress.port),
+  });
+  const store = new MemoryStore();
+  await store.createBrowserSession({
+    id: 'bs_deadbeef',
+    user_id: 'usr_test',
+    status: 'ready',
+    public_ip: '127.0.0.1',
+    connect_secret: 'secret',
+    expires_at: new Date(Date.now() + 60000).toISOString(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+  const platform = createPlatformServer({ store, provisioner: new NullProvisioner(), config });
+  const address = await platform.listen(0, '127.0.0.1');
+
+  try {
+    const res = await new Promise((resolve, reject) => {
+      const req = http.request({
+        hostname: '127.0.0.1',
+        port: address.port,
+        path: '/app/ui.css?token=test',
+        headers: { host: 'bs-deadbeef.webbrain.cloud' },
+      }, upstreamRes => {
+        const chunks = [];
+        upstreamRes.on('data', chunk => chunks.push(chunk));
+        upstreamRes.on('end', () => resolve({
+          status: upstreamRes.statusCode,
+          headers: upstreamRes.headers,
+          text: Buffer.concat(chunks).toString('utf8'),
+        }));
+      });
+      req.once('error', reject);
+      req.end();
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.text, 'proxied');
+    assert.equal(res.headers['x-upstream-path'], '/app/ui.css?token=test');
+
+    const ws = new WebSocket(`ws://127.0.0.1:${address.port}/websockify?token=test`, {
+      headers: { host: 'bs-deadbeef.webbrain.cloud' },
+    });
+    await new Promise((resolve, reject) => {
+      ws.once('open', resolve);
+      ws.once('error', reject);
+    });
+    ws.send('hello');
+    const echoed = await new Promise((resolve, reject) => {
+      ws.once('message', data => resolve(data.toString()));
+      ws.once('error', reject);
+    });
+    assert.equal(echoed, 'hello');
+    const wsClosed = new Promise(resolve => ws.once('close', resolve));
+    ws.close();
+    await wsClosed;
+  } finally {
+    await platform.close();
+    await new Promise(resolve => upstreamWss.close(() => upstream.close(resolve)));
   }
 });
 
