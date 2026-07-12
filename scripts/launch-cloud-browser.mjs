@@ -109,16 +109,34 @@ async function readExtensionIdFromPreferences() {
 async function waitForExtensionId() {
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
+    const prefsId = await readExtensionIdFromPreferences();
+    if (prefsId) return prefsId;
     const targets = await devtoolsJson('/json/list').catch(() => []);
-    for (const target of targets) {
+    for (const target of targets.filter(item => item.type === 'service_worker')) {
       const id = extensionIdFromUrl(target.url);
       if (id) return id;
     }
-    const prefsId = await readExtensionIdFromPreferences();
-    if (prefsId) return prefsId;
     await sleep(300);
   }
   throw new Error('Could not detect the WebBrain extension ID from DevTools targets or profile preferences.');
+}
+
+async function closeTarget(targetId) {
+  const res = await fetch(`http://127.0.0.1:${debuggingPort}/json/close/${encodeURIComponent(targetId)}`);
+  if (!res.ok) throw new Error(`Could not close temporary extension target: ${res.status}`);
+}
+
+async function waitForExtensionPage(cdp) {
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    const result = await cdp.call('Runtime.evaluate', {
+      expression: "typeof chrome !== 'undefined' && !!chrome.storage?.local && !!chrome.runtime?.sendMessage",
+      returnByValue: true,
+    });
+    if (result.result?.value === true) return;
+    await sleep(100);
+  }
+  throw new Error('WebBrain extension page did not become ready for configuration.');
 }
 
 async function createTarget(url) {
@@ -162,66 +180,71 @@ function createCdpClient(webSocketDebuggerUrl) {
 async function preseedExtension(extensionId) {
   const target = await createTarget(`chrome-extension://${extensionId}/src/ui/settings.html`);
   const cdp = createCdpClient(target.webSocketDebuggerUrl);
-  await cdp.open();
-  await cdp.call('Runtime.enable');
+  try {
+    await cdp.open();
+    await cdp.call('Runtime.enable');
+    await waitForExtensionPage(cdp);
 
-  const providerConfig = webbrainCloudProviderConfig();
-  const storagePatch = {
-    askBeforeConsequentialActions: false,
-    webbrainCloudBridgeEnabled: true,
-    webbrainCloudBridgeUrl: sidecarWsUrl,
-    webbrainCloudManaged: true,
-    activeProvider: 'webbrain_cloud',
-    tracingEnabled: boolEnv('WEBBRAIN_TRACING_ENABLED', true),
-  };
+    const providerConfig = webbrainCloudProviderConfig();
+    const storagePatch = {
+      askBeforeConsequentialActions: false,
+      webbrainCloudBridgeEnabled: true,
+      webbrainCloudBridgeUrl: sidecarWsUrl,
+      webbrainCloudManaged: true,
+      activeProvider: 'webbrain_cloud',
+      tracingEnabled: boolEnv('WEBBRAIN_TRACING_ENABLED', true),
+    };
 
-  const expression = `
-    (async () => {
-      const providerConfig = ${JSON.stringify(providerConfig)};
-      const storagePatch = ${JSON.stringify(storagePatch)};
-      const current = await chrome.storage.local.get(['providers']);
-      const providers = {
-        ...(current.providers || {}),
-        webbrain_cloud: {
-          ...(current.providers?.webbrain_cloud || {}),
-          ...providerConfig
-        }
-      };
-      await chrome.storage.local.set({ ...storagePatch, providers });
-      try {
-        await chrome.runtime.sendMessage({
+    const expression = `
+      (async () => {
+        const providerConfig = ${JSON.stringify(providerConfig)};
+        const storagePatch = ${JSON.stringify(storagePatch)};
+        const current = await chrome.storage.local.get(['providers']);
+        const providers = {
+          ...(current.providers || {}),
+          webbrain_cloud: {
+            ...(current.providers?.webbrain_cloud || {}),
+            ...providerConfig
+          }
+        };
+        await chrome.storage.local.set({ ...storagePatch, providers });
+        try {
+          await chrome.runtime.sendMessage({
+            target: 'background',
+            action: 'update_provider',
+            providerId: 'webbrain_cloud',
+            config: providerConfig
+          });
+        } catch (e) {}
+        try {
+          await chrome.runtime.sendMessage({
+            target: 'background',
+            action: 'set_active_provider',
+            providerId: 'webbrain_cloud'
+          });
+        } catch (e) {}
+        const bridge = await chrome.runtime.sendMessage({
           target: 'background',
-          action: 'update_provider',
-          providerId: 'webbrain_cloud',
-          config: providerConfig
+          action: 'cloud_bridge_start',
+          url: ${JSON.stringify(sidecarWsUrl)}
         });
-      } catch (e) {}
-      try {
-        await chrome.runtime.sendMessage({
-          target: 'background',
-          action: 'set_active_provider',
-          providerId: 'webbrain_cloud'
-        });
-      } catch (e) {}
-      const bridge = await chrome.runtime.sendMessage({
-        target: 'background',
-        action: 'cloud_bridge_start',
-        url: ${JSON.stringify(sidecarWsUrl)}
-      });
-      return { ok: true, bridge };
-    })()
-  `;
+        return { ok: true, bridge };
+      })()
+    `;
 
-  const result = await cdp.call('Runtime.evaluate', {
-    expression,
-    awaitPromise: true,
-    returnByValue: true,
-  });
-  cdp.close();
-  if (result.exceptionDetails) {
-    throw new Error(result.exceptionDetails.text || 'Extension preseed failed.');
+    const result = await cdp.call('Runtime.evaluate', {
+      expression,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    if (result.exceptionDetails) {
+      throw new Error(result.exceptionDetails.text || 'Extension preseed failed.');
+    }
+    return result.result?.value;
+  } finally {
+    cdp.close();
+    await closeTarget(target.id).catch(() => {});
   }
-  return result.result?.value;
 }
 
 async function main() {

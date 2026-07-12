@@ -363,6 +363,7 @@ function dashboardPage(user) {
       const session = selectedSession();
       if (!session) return;
       connectBtn.disabled = true;
+      setSessionsCollapsed(true);
       showMessage(sessionMessage, 'Creating noVNC link...');
       try {
         const body = await api('/api/browser-sessions/' + encodeURIComponent(session.id) + '/connect-token', {
