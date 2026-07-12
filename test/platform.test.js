@@ -14,6 +14,7 @@ async function startPlatform() {
   const config = loadConfig({
     WEBBRAIN_DB_DRIVER: 'memory',
     WEBBRAIN_PROVISIONER: 'null',
+    WEBBRAIN_INSTANCE_DOMAIN: 'webbrain.cloud',
     WEBBRAIN_MODEL_PROXY_BASE_URL: 'http://127.0.0.1:65530/v1',
     WEBBRAIN_RUN_POLL_INTERVAL_MS: '10',
     WEBBRAIN_RUN_WAIT_TIMEOUT_MS: '1000',
@@ -111,6 +112,8 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   assert.equal(verifyNoVncToken(connect.body.token, storedSession.connect_secret).ok, true);
   assert.match(connect.body.url, /token=/);
   const connectUrl = new URL(connect.body.url);
+  assert.equal(connectUrl.protocol, 'https:');
+  assert.equal(connectUrl.hostname, instanceHostname(sessionId, 'webbrain.cloud'));
   assert.equal(connectUrl.searchParams.get('autoconnect'), 'true');
   assert.equal(connectUrl.searchParams.get('resize'), 'scale');
   assert.equal(connectUrl.searchParams.get('path'), `websockify?token=${connect.body.token}`);

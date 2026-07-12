@@ -32,6 +32,7 @@ Platform:
 - `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`
 - `DO_API_TOKEN`, `DO_REGION`, `DO_SIZE`, `DO_IMAGE`, `DO_SSH_KEYS`
 - `WEBBRAIN_PLATFORM_URL`
+- `WEBBRAIN_INSTANCE_DOMAIN` (for example, `webbrain.cloud`; serves each browser session at an HTTPS subdomain)
 - `WEBBRAIN_MODEL_PROXY_BASE_URL`, `WEBBRAIN_MODEL_PROXY_API_KEY`
 
 Droplet cloud-init passes:
@@ -100,7 +101,7 @@ The droplet role connects outbound to the platform:
 ws(s)://<platform>/droplet/control?session_token=<session secret>
 ```
 
-The command sidecar remains local-only. noVNC is exposed through the droplet gate on `6081` and requires a short-lived signed token from `POST /api/browser-sessions/:sessionId/connect-token`.
+The command sidecar remains local-only. noVNC is exposed through the droplet gate on `6081` and requires a short-lived signed token from `POST /api/browser-sessions/:sessionId/connect-token`. When `WEBBRAIN_INSTANCE_DOMAIN` is set, the platform proxies noVNC over the wildcard HTTPS hostname `bs-<session-id>.<domain>` so browser assets and WebSockets remain same-site with the dashboard.
 
 Chrome managed storage example:
 
