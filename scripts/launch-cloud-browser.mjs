@@ -265,6 +265,7 @@ async function main() {
     '--password-store=basic',
     '--use-mock-keychain',
     '--disable-dev-shm-usage',
+    '--disable-infobars',
   ];
   if (boolEnv('WEBBRAIN_HEADLESS', false)) args.push('--headless=new');
   if (process.getuid?.() === 0) args.push('--no-sandbox');

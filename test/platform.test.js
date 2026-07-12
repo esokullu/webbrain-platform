@@ -306,7 +306,7 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
   assert.match(cloudInit, /DISPLAY=':99'/);
   assert.match(cloudInit, /WEBBRAIN_HEADLESS='false'/);
   assert.match(cloudInit, /WEBBRAIN_NOVNC_GATE_PORT='6081'/);
-  assert.match(cloudInit, /WEBBRAIN_BROWSER_BIN='\/usr\/bin\/google-chrome-stable'/);
+  assert.match(cloudInit, /WEBBRAIN_BROWSER_BIN='\/opt\/chrome-linux64\/chrome'/);
   assert.match(cloudInit, /WEBBRAIN_START_URL='https:\/\/example\.com'/);
   assert.match(cloudInit, /package_upgrade: false/);
   assert.match(cloudInit, /  - build-essential/);
@@ -320,7 +320,8 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
   assert.match(cloudInit, /ufw --force enable/);
   assert.match(cloudInit, /https:\/\/deb\.nodesource\.com\/setup_20\.x/);
   assert.match(cloudInit, /google-chrome-stable_current_amd64\.deb/);
-  assert.doesNotMatch(cloudInit, /chrome-for-testing/);
+  assert.match(cloudInit, /chrome-for-testing/);
+  assert.match(cloudInit, /\/tmp\/chrome-linux64\.zip/);
   assert.match(cloudInit, /git clone 'https:\/\/github\.com\/webbrain-one\/webbrain\.git' \/opt\/webbrain3/);
   assert.match(cloudInit, /git clone https:\/\/github\.com\/novnc\/noVNC\.git \/opt\/noVNC/);
   assert.match(cloudInit, /systemctl enable --now webbrain-sidecar\.service webbrain-xvfb\.service webbrain-x11vnc\.service webbrain-novnc\.service webbrain-browser\.service webbrain-droplet\.service/);
