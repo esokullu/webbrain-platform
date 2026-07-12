@@ -13,7 +13,7 @@ const extensionDir = path.resolve(process.env.WEBBRAIN_EXTENSION_DIR || path.joi
 const profileDir = path.resolve(process.env.WEBBRAIN_PROFILE_DIR || path.join(rootDir, '.webbrain-sessions', sessionId));
 const debuggingPort = Number(process.env.WEBBRAIN_REMOTE_DEBUGGING_PORT || 9222);
 const sidecarWsUrl = process.env.WEBBRAIN_SIDECAR_WS_URL || 'ws://127.0.0.1:17373/extension';
-const startUrl = process.env.WEBBRAIN_START_URL || 'about:blank';
+const startUrl = process.env.WEBBRAIN_START_URL || 'https://example.com';
 
 function commandExists(cmd) {
   if (path.isAbsolute(cmd)) return existsSync(cmd);
