@@ -36,7 +36,7 @@ export function loadConfig(env = process.env) {
     },
     droplet: {
       repoUrl: env.WEBBRAIN_PLATFORM_REPO_URL || 'https://github.com/esokullu/webbrain-platform.git',
-      webbrainRepoUrl: env.WEBBRAIN_REPO_URL || 'https://github.com/esokullu/webbrain.git',
+      webbrainRepoUrl: env.WEBBRAIN_REPO_URL || 'https://github.com/webbrain-one/webbrain.git',
       webbrainRef: env.WEBBRAIN_REF || 'main',
       providerBaseUrl: env.WEBBRAIN_PROVIDER_BASE_URL || `${baseUrl}/v1`,
       providerModel: env.WEBBRAIN_PROVIDER_MODEL || 'webbrain-cloud 1.0',

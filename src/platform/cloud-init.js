@@ -4,7 +4,7 @@ function shellQuote(value) {
 
 export function renderCloudInit({ session, config, providerApiKey = '' }) {
   const repoUrl = config.droplet.repoUrl || 'https://github.com/esokullu/webbrain-platform.git';
-  const webbrainRepoUrl = config.droplet.webbrainRepoUrl || 'https://github.com/esokullu/webbrain.git';
+  const webbrainRepoUrl = config.droplet.webbrainRepoUrl || 'https://github.com/webbrain-one/webbrain.git';
   const appDir = '/opt/webbrain-platform';
   const webbrainDir = '/opt/webbrain3';
   const env = {

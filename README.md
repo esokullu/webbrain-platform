@@ -7,7 +7,7 @@ The repo has two runtime roles:
 - `platform`: Express + MySQL control plane for users, API keys, browser sessions, DigitalOcean droplets, run orchestration, and signed noVNC URLs.
 - `droplet`: cloud browser runtime that runs the local WebBrain sidecar, connects outbound to the platform control WebSocket, and gates noVNC with signed tokens.
 
-`../webbrain3` remains the canonical WebBrain execution engine.
+[`webbrain-one/webbrain`](https://github.com/webbrain-one/webbrain) is the canonical WebBrain execution engine cloned into each browser VM.
 
 ## Run Locally
 

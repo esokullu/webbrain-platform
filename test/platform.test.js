@@ -291,7 +291,6 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
   const config = loadConfig({
     WEBBRAIN_PLATFORM_URL: 'http://platform.example',
     WEBBRAIN_PROVIDER_BASE_URL: 'http://platform.example/v1',
-    WEBBRAIN_REPO_URL: 'https://github.com/esokullu/webbrain3.git',
     WEBBRAIN_REF: 'main',
   });
   const cloudInit = renderCloudInit({
@@ -318,6 +317,7 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
   assert.match(cloudInit, /google-chrome-stable_current_amd64\.deb/);
   assert.match(cloudInit, /chrome-for-testing/);
   assert.match(cloudInit, /\/tmp\/chrome-linux64\.zip/);
+  assert.match(cloudInit, /git clone 'https:\/\/github\.com\/webbrain-one\/webbrain\.git' \/opt\/webbrain3/);
   assert.match(cloudInit, /git clone https:\/\/github\.com\/novnc\/noVNC\.git \/opt\/noVNC/);
   assert.match(cloudInit, /systemctl enable --now webbrain-sidecar\.service webbrain-xvfb\.service webbrain-x11vnc\.service webbrain-novnc\.service webbrain-browser\.service webbrain-droplet\.service/);
 });
