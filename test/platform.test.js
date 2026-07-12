@@ -9,8 +9,9 @@ import { createPlatformServer } from '../src/platform/server.js';
 import { chromeExtensionIdForPath, renderCloudInit } from '../src/platform/cloud-init.js';
 import { verifyNoVncToken } from '../src/shared/novnc-token.js';
 import { instanceHostname, sessionIdFromInstanceHost } from '../src/platform/instance-proxy.js';
+import { hashToken } from '../src/shared/crypto.js';
 
-async function startPlatform() {
+async function startPlatform(env = {}) {
   const config = loadConfig({
     WEBBRAIN_DB_DRIVER: 'memory',
     WEBBRAIN_PROVISIONER: 'null',
@@ -18,6 +19,7 @@ async function startPlatform() {
     WEBBRAIN_MODEL_PROXY_BASE_URL: 'http://127.0.0.1:65530/v1',
     WEBBRAIN_RUN_POLL_INTERVAL_MS: '10',
     WEBBRAIN_RUN_WAIT_TIMEOUT_MS: '1000',
+    ...env,
   });
   const store = new MemoryStore();
   const provisioner = new NullProvisioner();
@@ -98,6 +100,14 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   const storedSession = await ctx.store.getBrowserSession(sessionId);
   assert.equal(storedSession.connect_secret.length > 20, true);
 
+  const notReady = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs`, {
+    method: 'POST',
+    headers: { cookie },
+    body: JSON.stringify({ task: 'Too early' }),
+  });
+  assert.equal(notReady.status, 409);
+  assert.equal(notReady.body.extension_connected, false);
+
   const forbidden = await request(ctx.base, `/api/browser-sessions/${sessionId}`, {
     headers: { cookie: otherCookie },
   });
@@ -126,7 +136,12 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   ws.on('message', raw => {
     const msg = JSON.parse(raw.toString('utf8'));
     if (msg.type === 'hello') return;
+    if (msg.action === 'health') {
+      ws.send(JSON.stringify({ id: msg.id, ok: true, result: { ok: true, extension_connected: true } }));
+      return;
+    }
     if (msg.action === 'run') {
+      assert.equal(msg.payload.tab_id ?? null, msg.payload.task === 'Long task' ? 91 : null);
       const runId = `run_cloud_${++runSeq}`;
       statuses.set(runId, { run_id: runId, status: 'running' });
       ws.send(JSON.stringify({ id: msg.id, ok: true, result: statuses.get(runId) }));
@@ -175,7 +190,7 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   const created = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs`, {
     method: 'POST',
     headers: { cookie },
-    body: JSON.stringify({ task: 'Long task', wait: false }),
+    body: JSON.stringify({ task: 'Long task', tab_id: 91, wait: false }),
   });
   assert.equal(created.status, 202);
   const aborted = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs/${created.body.run_id}/abort`, {
@@ -188,6 +203,54 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   } finally {
     ws?.close();
     await ctx.platform.close();
+  }
+});
+
+test('model proxy replaces browser credentials and uses a stable platform-user identity', async () => {
+  let captured = null;
+  const upstream = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    captured = {
+      url: req.url,
+      authorization: req.headers.authorization || '',
+      deviceId: req.headers['x-webbrain-device-id'] || '',
+      client: req.headers['x-webbrain-client'] || '',
+      body: JSON.parse(Buffer.concat(chunks).toString('utf8')),
+    };
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.write('{"choices":[');
+    res.end('{"message":{"content":"ok"}}]}');
+  });
+  await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  const upstreamBase = `http://127.0.0.1:${upstream.address().port}/v1`;
+  const ctx = await startPlatform({ WEBBRAIN_MODEL_PROXY_BASE_URL: upstreamBase });
+  try {
+    const cookie = await register(ctx.base, 'proxy@example.com');
+    const sessionRes = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST', headers: { cookie }, body: JSON.stringify({}),
+    });
+    const stored = await ctx.store.getBrowserSession(sessionRes.body.browser_session.id);
+    const user = await ctx.store.findUserByEmail('proxy@example.com');
+    const response = await request(ctx.base, '/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${stored.connect_secret}`,
+        'x-webbrain-device-id': 'caller-controlled',
+        'x-webbrain-client': 'caller-controlled',
+      },
+      body: JSON.stringify({ model: 'webbrain-cloud 1.0', messages: [{ role: 'user', content: 'hello' }] }),
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.choices[0].message.content, 'ok');
+    assert.equal(captured.url, '/v1/chat/completions');
+    assert.equal(captured.authorization, '');
+    assert.equal(captured.deviceId, `platform-${hashToken(`webbrain-platform:${user.id}`).slice(0, 32)}`);
+    assert.equal(captured.client, 'platform');
+    assert.equal(captured.body.messages[0].content, 'hello');
+  } finally {
+    await ctx.platform.close();
+    await new Promise(resolve => upstream.close(resolve));
   }
 });
 

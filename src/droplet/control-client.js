@@ -94,11 +94,17 @@ export class DropletControlClient {
         body: JSON.stringify({
           task: payload.task,
           output_schema: payload.output_schema ?? payload.outputSchema ?? null,
+          tab_id: payload.tab_id ?? payload.tabId ?? null,
           wait: false,
           timeout_ms: payload.timeout_ms,
         }),
       });
       if (!res.ok && res.status !== 202) throw new Error(`Sidecar run failed: ${res.status} ${await res.text()}`);
+      return await readJson(res);
+    }
+    if (action === 'health') {
+      const res = await fetch(`${this.sidecarBase}/healthz`);
+      if (!res.ok) throw new Error(`Sidecar health failed: ${res.status} ${await res.text()}`);
       return await readJson(res);
     }
     if (action === 'status') {

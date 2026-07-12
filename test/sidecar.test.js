@@ -27,6 +27,7 @@ test('sidecar run lifecycle proxies cloud_run/status/abort to extension bridge',
     const msg = JSON.parse(raw.toString('utf8'));
     if (msg.type === 'hello') return;
     if (msg.action === 'cloud_run') {
+      assert.equal(msg.payload.tabId, 42);
       statuses.set('run_test', {
         runId: 'run_test',
         status: 'running',
@@ -62,6 +63,7 @@ test('sidecar run lifecycle proxies cloud_run/status/abort to extension bridge',
     body: JSON.stringify({
       task: 'Summarize',
       output_schema: { title: 'string' },
+      tab_id: 42,
       wait: false,
     }),
   });
@@ -74,6 +76,7 @@ test('sidecar run lifecycle proxies cloud_run/status/abort to extension bridge',
     body: JSON.stringify({
       task: 'Summarize and wait',
       output_schema: { title: 'string' },
+      tab_id: 42,
       wait: true,
       timeout_ms: 1000,
     }),
@@ -86,6 +89,14 @@ test('sidecar run lifecycle proxies cloud_run/status/abort to extension bridge',
   assert.equal(aborted.status, 200);
   assert.equal(aborted.body.status, 'aborted');
 
+  const interrupted = await request(base, '/api/browser-sessions/bs_1/runs', {
+    method: 'POST',
+    body: JSON.stringify({ task: 'Disconnect me', tab_id: 42, wait: false }),
+  });
+  assert.equal(interrupted.status, 202);
   ws.close();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(sidecar.runs.get(interrupted.body.run_id).status, 'failed');
+
   await sidecar.close();
 });

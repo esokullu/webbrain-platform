@@ -86,6 +86,23 @@ async function waitForDevtools() {
   throw new Error(`Chrome DevTools did not come up on port ${debuggingPort}: ${lastError?.message || lastError}`);
 }
 
+async function waitForExtensionBridge() {
+  const deadline = Date.now() + 15000;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch('http://127.0.0.1:17373/healthz');
+      const body = res.ok ? await res.json() : null;
+      if (body?.extension_connected === true) return body;
+      lastError = new Error('sidecar is running but the extension bridge is not connected');
+    } catch (error) {
+      lastError = error;
+    }
+    await sleep(250);
+  }
+  throw new Error(`WebBrain extension bridge did not connect: ${lastError?.message || lastError}`);
+}
+
 function extensionIdFromUrl(url) {
   const m = /^chrome-extension:\/\/([a-p]{32})\//.exec(url || '');
   return m?.[1] || null;
@@ -322,6 +339,10 @@ async function main() {
   await waitForDevtools();
   const extensionId = await waitForExtensionId();
   const seeded = await preseedExtension(extensionId);
+  if (!seeded?.ok || seeded?.bridge?.error) {
+    throw new Error(`WebBrain cloud bridge start failed: ${seeded?.bridge?.error || 'invalid extension response'}`);
+  }
+  const bridgeHealth = await waitForExtensionBridge();
   await normalizeStartupTabs(extensionId);
   console.log(JSON.stringify({
     ok: true,
@@ -330,6 +351,7 @@ async function main() {
     extension_dir: extensionDir,
     extension_id: extensionId,
     sidecar_ws_url: sidecarWsUrl,
+    bridge_health: bridgeHealth,
     preseed: seeded,
   }, null, 2));
 

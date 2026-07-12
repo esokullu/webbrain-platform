@@ -35,6 +35,11 @@ Platform:
 - `WEBBRAIN_INSTANCE_DOMAIN` (for example, `webbrain.cloud`; serves each browser session at an HTTPS subdomain)
 - `WEBBRAIN_MODEL_PROXY_BASE_URL`, `WEBBRAIN_MODEL_PROXY_API_KEY`
 
+Production uses `WEBBRAIN_MODEL_PROXY_BASE_URL=https://api.webbrain.one/v1`.
+The platform authenticates browser model traffic with the per-session secret,
+then replaces that credential before forwarding and assigns a stable,
+non-email WebBrain Cloud identity derived from the platform user id.
+
 Droplet cloud-init passes:
 
 - `WEBBRAIN_SESSION_ID`
@@ -72,11 +77,17 @@ Runs:
 - `GET /api/browser-sessions/:sessionId/runs/:runId`
 - `POST /api/browser-sessions/:sessionId/runs/:runId/abort`
 
+Dashboard API keys use `Authorization: Bearer wbp_...` and carry the same
+permissions as the owning user's login session. They control only that user's
+browser sessions; they are not model-provider or DigitalOcean credentials.
+The full key is shown once and should be revoked immediately if exposed.
+
 Example run:
 
 ```json
 {
   "task": "Go to nytimes.com/... and summarize the article",
+  "tab_id": 123,
   "output_schema": {
     "title": "string",
     "summary": "string",
@@ -86,6 +97,11 @@ Example run:
   "timeout_ms": 120000
 }
 ```
+
+`tab_id` is optional. Without it, a run controls the visible active webpage so
+the same actions are observable in noVNC. Session payloads expose
+`droplet_connected`, `extension_connected`, and `runtime_ready`; run creation
+returns `409` until the WebBrain extension bridge is connected.
 
 ## Droplet Internals
 
@@ -105,7 +121,8 @@ ws(s)://<platform>/droplet/control?session_token=<session secret>
 
 The command sidecar remains local-only. noVNC is exposed through the droplet gate on `6081` and requires a short-lived signed token from `POST /api/browser-sessions/:sessionId/connect-token`. When `WEBBRAIN_INSTANCE_DOMAIN` is set, the platform proxies noVNC over the wildcard HTTPS hostname `bs-<session-id>.<domain>` so browser assets and WebSockets remain same-site with the dashboard.
 
-Chrome managed storage example:
+Legacy Chrome managed-storage policy example (the VM launcher currently seeds
+the same values directly into the isolated browser profile):
 
 ```text
 config/webbrain-cloud-managed-policy.example.json
