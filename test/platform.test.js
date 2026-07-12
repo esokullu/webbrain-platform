@@ -200,6 +200,9 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /Browser Sessions/);
     assert.match(res.text, /Open noVNC/);
     assert.match(res.text, /novncFrame/);
+    assert.match(res.text, /collapseSessionsBtn/);
+    assert.match(res.text, /webbrain\.sessionsCollapsed/);
+    assert.match(res.text, /aria-controls="sessionPanelBody"/);
     assert.match(res.text, /\/api\/browser-sessions/);
     assert.match(res.text, /Create key/);
   } finally {

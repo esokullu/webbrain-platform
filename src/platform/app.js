@@ -101,13 +101,27 @@ function dashboardPage(user) {
     button.secondary { background: #fff; color: #202124; border-color: #bfc5bd; }
     button.danger { background: #8b1f14; border-color: #8b1f14; }
     button:disabled { opacity: 0.55; cursor: not-allowed; }
+    button:focus-visible, .button-link:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid rgba(32, 33, 36, 0.22); outline-offset: 2px; }
     .button-link { min-height: 38px; box-sizing: border-box; display: inline-flex; align-items: center; padding: 8px 12px; border-radius: 6px; border: 1px solid #bfc5bd; background: #fff; color: #202124; text-decoration: none; white-space: nowrap; }
     input, select { min-height: 38px; box-sizing: border-box; border: 1px solid #c6cbc3; border-radius: 6px; padding: 8px 10px; background: #fff; color: #202124; }
     .muted { color: #646b61; }
     .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .grid { display: grid; grid-template-columns: minmax(340px, 430px) 1fr; gap: 18px; margin-top: 20px; align-items: start; }
+    .grid { display: grid; grid-template-columns: minmax(340px, 430px) minmax(0, 1fr); gap: 18px; margin-top: 20px; align-items: start; }
+    .grid.sessions-collapsed { grid-template-columns: 56px minmax(0, 1fr); gap: 12px; }
     .panel { background: #fff; border: 1px solid #d9ddd6; border-radius: 8px; }
     .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 14px 12px; border-bottom: 1px solid #edf0eb; }
+    .session-heading { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex: 1; }
+    .session-panel-actions { display: flex; align-items: center; gap: 8px; }
+    .collapse-sessions { width: 30px; min-height: 30px; padding: 0; display: inline-grid; place-items: center; background: #fff; color: #202124; border-color: #c6cbc3; font-size: 22px; line-height: 1; }
+    .collapse-sessions:hover { background: #f0f2ed; }
+    .session-panel.is-collapsed { align-self: stretch; min-height: 680px; }
+    .session-panel.is-collapsed .panel-head { height: 100%; box-sizing: border-box; padding: 9px 7px; border-bottom: 0; align-items: stretch; }
+    .session-panel.is-collapsed .session-heading { flex: 1; flex-direction: column; justify-content: flex-start; gap: 12px; padding-top: 0; }
+    .session-panel.is-collapsed .session-heading h2 { order: 2; flex: 1; writing-mode: vertical-rl; transform: rotate(180deg); font-size: 11px; line-height: 1; letter-spacing: 0.1em; text-transform: uppercase; color: #646b61; }
+    .session-panel.is-collapsed .session-panel-actions { order: 1; flex-direction: column-reverse; }
+    .session-panel.is-collapsed .panel-body { display: none; }
+    .session-panel.is-collapsed .status { min-width: 24px; padding: 0; justify-content: center; }
+    .session-panel.is-collapsed .collapse-sessions span { transform: rotate(180deg); }
     .panel-body { padding: 14px; }
     .create-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; margin-bottom: 12px; }
     .sessions { display: grid; gap: 8px; }
@@ -124,11 +138,20 @@ function dashboardPage(user) {
     .message { margin-top: 10px; min-height: 20px; color: #355f1d; overflow-wrap: anywhere; }
     .message.error { color: #9b2b1f; }
     .api-key-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 10px; }
+    .api-panel { grid-column: 1 / -1; }
     .secret { display: none; margin-top: 10px; padding: 10px; border: 1px solid #d9ddd6; border-radius: 6px; background: #fafbf9; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
     @media (max-width: 900px) {
       main { padding: 20px 14px 32px; }
       header { align-items: flex-start; flex-direction: column; }
-      .grid { grid-template-columns: 1fr; }
+      .grid, .grid.sessions-collapsed { grid-template-columns: 1fr; gap: 18px; }
+      .collapse-sessions { display: none; }
+      .session-panel.is-collapsed { min-height: 0; }
+      .session-panel.is-collapsed .panel-head { height: auto; padding: 14px 14px 12px; border-bottom: 1px solid #edf0eb; flex-direction: row; }
+      .session-panel.is-collapsed .session-heading { flex-direction: row; justify-content: space-between; padding-top: 0; }
+      .session-panel.is-collapsed .session-heading h2 { order: 0; flex: 0 1 auto; writing-mode: horizontal-tb; transform: none; font-size: 17px; line-height: normal; letter-spacing: 0; text-transform: none; color: #202124; }
+      .session-panel.is-collapsed .session-panel-actions { order: 0; flex-direction: row; }
+      .session-panel.is-collapsed .panel-body { display: block; }
+      .session-panel.is-collapsed .status { min-width: auto; padding: 0 8px; }
       .create-row { grid-template-columns: 1fr; }
       iframe, .empty { height: 520px; min-height: 520px; }
     }
@@ -146,13 +169,18 @@ function dashboardPage(user) {
         <form method="post" action="/auth/logout"><button type="submit">Logout</button></form>
       </div>
     </header>
-    <div class="grid">
-      <section class="panel">
+    <div class="grid" id="dashboardGrid">
+      <section class="panel session-panel" id="sessionPanel">
         <div class="panel-head">
-          <h2>Browser Sessions</h2>
-          <span class="status" id="sessionCount">0</span>
+          <div class="session-heading">
+            <h2>Browser Sessions</h2>
+            <div class="session-panel-actions">
+              <span class="status" id="sessionCount">0</span>
+              <button class="collapse-sessions" id="collapseSessionsBtn" type="button" aria-controls="sessionPanelBody" aria-expanded="true" title="Collapse browser sessions"><span aria-hidden="true">‹</span></button>
+            </div>
+          </div>
         </div>
-        <div class="panel-body">
+        <div class="panel-body" id="sessionPanelBody">
           <div class="create-row">
             <select id="regionInput" aria-label="Region">
               <option value="nyc3">nyc3</option>
@@ -183,7 +211,7 @@ function dashboardPage(user) {
         <div id="viewerEmpty" class="empty">Create or select a browser session, then open noVNC here.</div>
         <iframe id="novncFrame" title="WebBrain cloud browser noVNC" style="display:none" referrerpolicy="no-referrer"></iframe>
       </section>
-      <section class="panel">
+      <section class="panel api-panel">
         <div class="panel-head"><h2>API Keys</h2></div>
         <div class="panel-body">
           <div class="api-key-row">
@@ -198,6 +226,9 @@ function dashboardPage(user) {
   </main>
   <script>
     const sessionsEl = document.getElementById('sessions');
+    const dashboardGrid = document.getElementById('dashboardGrid');
+    const sessionPanel = document.getElementById('sessionPanel');
+    const collapseSessionsBtn = document.getElementById('collapseSessionsBtn');
     const sessionMessage = document.getElementById('sessionMessage');
     const sessionCount = document.getElementById('sessionCount');
     const createSessionBtn = document.getElementById('createSessionBtn');
@@ -213,6 +244,17 @@ function dashboardPage(user) {
     const newApiKey = document.getElementById('newApiKey');
     const apiKeyMessage = document.getElementById('apiKeyMessage');
     const state = { sessions: [], selectedId: null };
+    const sessionsCollapsedKey = 'webbrain.sessionsCollapsed';
+
+    function setSessionsCollapsed(collapsed) {
+      dashboardGrid.classList.toggle('sessions-collapsed', collapsed);
+      sessionPanel.classList.toggle('is-collapsed', collapsed);
+      collapseSessionsBtn.setAttribute('aria-expanded', String(!collapsed));
+      collapseSessionsBtn.title = collapsed ? 'Expand browser sessions' : 'Collapse browser sessions';
+      try { localStorage.setItem(sessionsCollapsedKey, collapsed ? '1' : '0'); } catch {}
+    }
+
+    try { setSessionsCollapsed(localStorage.getItem(sessionsCollapsedKey) === '1'); } catch { setSessionsCollapsed(false); }
 
     function showMessage(el, text, isError) {
       el.textContent = text || '';
@@ -384,6 +426,7 @@ function dashboardPage(user) {
     }
 
     createSessionBtn.addEventListener('click', createSession);
+    collapseSessionsBtn.addEventListener('click', () => setSessionsCollapsed(!sessionPanel.classList.contains('is-collapsed')));
     refreshBtn.addEventListener('click', () => loadSessions().catch(e => showMessage(sessionMessage, e.message, true)));
     connectBtn.addEventListener('click', openNoVnc);
     deleteSessionBtn.addEventListener('click', deleteSession);
