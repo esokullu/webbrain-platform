@@ -4,6 +4,7 @@ import { hashPassword, verifyPassword, hashToken } from '../shared/crypto.js';
 import { publicBrowserSession, publicRun, jsonError } from '../shared/http.js';
 import { signNoVncToken } from '../shared/novnc-token.js';
 import { instanceHostname } from './instance-proxy.js';
+import { docsPage } from './docs-page.js';
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'aborted']);
 
@@ -69,7 +70,8 @@ function loginPage(error = '') {
     .brand { display: flex; align-items: center; gap: 10px; color: var(--accent); font-size: 20px; font-weight: 800; text-decoration: none; }
     .brand img { width: 30px; height: 30px; border-radius: 8px; box-shadow: 0 6px 18px var(--accent-glow); }
     .brand-domain { color: var(--accent2); opacity: .68; font-weight: 400; }
-    .nav-note { color: var(--text-dim); font-size: 13px; }
+    .nav-note { color: var(--text-dim); font-size: 13px; font-weight: 650; text-decoration: none; }
+    .nav-note:hover { color: var(--text); }
     main { max-width: 1100px; margin: 0 auto; padding: 84px 24px 72px; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(320px, .9fr); align-items: center; gap: 72px; }
     .eyebrow { margin: 0 0 16px; color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
     h1 { max-width: 680px; margin: 0 0 20px; font-size: clamp(42px, 6vw, 68px); line-height: 1.02; letter-spacing: -.045em; }
@@ -107,7 +109,7 @@ function loginPage(error = '') {
       <a class="brand" href="https://webbrain.one/">
         <img src="https://webbrain.one/logo-github.png" alt=""> WebBrain<span class="brand-domain">.cloud</span>
       </a>
-      <span class="nav-note">A private WebBrain browser, ready anywhere.</span>
+      <a class="nav-note" href="/docs">API documentation →</a>
     </div>
   </nav>
   <main>
@@ -333,7 +335,7 @@ function dashboardPage(user) {
             <h2>API keys</h2>
             <p class="api-description">Control the same visible browsers from your own tools.</p>
           </div>
-          <a class="button-link docs-link" href="https://github.com/esokullu/webbrain-platform#browser-automation-api" target="_blank" rel="noopener">API documentation ↗</a>
+          <a class="button-link docs-link" href="/docs">API documentation →</a>
         </div>
         <div class="panel-body">
           <div class="api-key-row">
@@ -658,6 +660,10 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
 
   app.get('/healthz', (req, res) => {
     res.json({ ok: true, role: 'platform' });
+  });
+
+  app.get('/docs', (req, res) => {
+    res.type('html').send(docsPage());
   });
 
   app.all('/v1/*', async (req, res, next) => {

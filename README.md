@@ -56,6 +56,9 @@ Droplet cloud-init passes:
 The production API is served from `https://webbrain.cloud`. It controls the
 same visible browser sessions shown in the dashboard and noVNC.
 
+- Interactive, tabbed guide: [`https://webbrain.cloud/docs`](https://webbrain.cloud/docs)
+- Dependency-free clients: [`clients/`](clients/) for Node.js, Python, and PHP
+
 ### Authentication
 
 Create an API key from the **API keys** section of the dashboard, then send it

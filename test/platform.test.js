@@ -275,7 +275,7 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /setSessionsCollapsed\(true\)/);
     assert.match(res.text, /\/api\/browser-sessions/);
     assert.match(res.text, /Create key/);
-    assert.match(res.text, /github\.com\/esokullu\/webbrain-platform#browser-automation-api/);
+    assert.match(res.text, /href="\/docs"/);
     assert.match(res.text, /API documentation/);
     assert.doesNotMatch(res.text, /id="regionInput"/);
     assert.doesNotMatch(res.text, /id="sizeInput"/);
@@ -296,6 +296,29 @@ test('login page uses the WebBrain visual identity', async () => {
     assert.match(res.text, /--accent: #5b52e8/);
     assert.match(res.text, /Your AI browser/);
     assert.match(res.text, /Create account/);
+    assert.match(res.text, /href="\/docs"/);
+  } finally {
+    await ctx.platform.close();
+  }
+});
+
+test('public API documentation provides accessible REST and client tabs', async () => {
+  const ctx = await startPlatform();
+  try {
+    const res = await requestText(ctx.base, '/docs');
+    assert.equal(res.status, 200);
+    assert.match(res.text, /One browser[\s\S]*Four ways to drive it/);
+    assert.match(res.text, /role="tablist"/);
+    assert.match(res.text, /data-client="rest"/);
+    assert.match(res.text, /data-client="node"/);
+    assert.match(res.text, /data-client="python"/);
+    assert.match(res.text, /data-client="php"/);
+    assert.match(res.text, /Copy example/);
+    assert.match(res.text, /\/api\/browser-sessions\/:sessionId\/runs/);
+    assert.match(res.text, /clients\/node\/webbrain-client\.js/);
+    assert.match(res.text, /clients\/python\/webbrain_client\.py/);
+    assert.match(res.text, /clients\/php\/WebBrainClient\.php/);
+    assert.match(res.text, /ArrowRight/);
   } finally {
     await ctx.platform.close();
   }
