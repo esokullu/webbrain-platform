@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS cloud_runs (
   summary TEXT NULL,
   final_url TEXT NULL,
   error TEXT NULL,
+  updates JSON NULL,
   created_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL,
   completed_at DATETIME NULL,

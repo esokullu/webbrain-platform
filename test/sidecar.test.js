@@ -43,6 +43,10 @@ test('sidecar run lifecycle proxies cloud_run/status/abort to extension bridge',
           result: { title: 'Done' },
           summary: 'Finished.',
           finalUrl: 'https://example.com',
+          updates: [
+            { seq: 1, type: 'thinking', data: { step: 1 }, ts: '2026-07-14T10:00:00.000Z' },
+            { seq: 2, type: 'tool_call', data: { name: 'read_page', args: {} }, ts: '2026-07-14T10:00:01.000Z' },
+          ],
         });
       }, 40);
       return;
@@ -84,6 +88,8 @@ test('sidecar run lifecycle proxies cloud_run/status/abort to extension bridge',
   assert.equal(waited.status, 200);
   assert.equal(waited.body.status, 'completed');
   assert.deepEqual(waited.body.result, { title: 'Done' });
+  assert.deepEqual(waited.body.updates.map(update => update.seq), [1, 2]);
+  assert.equal(waited.body.updates[1].data.name, 'read_page');
 
   const aborted = await request(base, '/api/browser-sessions/bs_1/runs/run_test/abort', { method: 'POST' });
   assert.equal(aborted.status, 200);

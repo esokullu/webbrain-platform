@@ -27,6 +27,7 @@ export function publicRun(row) {
     summary: row.summary || '',
     final_url: row.final_url || '',
     error: row.error || '',
+    updates: Array.isArray(row.updates) ? row.updates : [],
     created_at: row.created_at || null,
     updated_at: row.updated_at || null,
     completed_at: row.completed_at || null,

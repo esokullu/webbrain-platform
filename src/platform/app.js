@@ -349,6 +349,29 @@ function dashboardPage(user) {
     .run-output { max-height: 230px; margin: 0; padding: 13px; overflow: auto; border-radius: 9px; background: #211812; color: #f8ead3; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
     .run-error { margin: 0; color: var(--danger); font-size: 13px; white-space: pre-wrap; }
     .run-final-url { min-width: 0; overflow: hidden; color: var(--accent); font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+    .run-progress-shell { min-width: 0; display: grid; gap: 7px; }
+    .run-progress-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .run-progress-count { color: var(--text-dim); font: 10px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .run-progress-log { position: relative; max-height: 330px; padding: 12px 12px 12px 10px; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--border); border-radius: 10px; background: rgba(89,55,25,.022); scroll-behavior: smooth; }
+    .run-progress-log::before { content: ''; position: absolute; top: 17px; bottom: 17px; left: 21px; width: 1px; background: linear-gradient(var(--accent), rgba(91,82,232,.10)); }
+    .run-progress-empty { position: relative; padding: 16px 14px 16px 35px; color: var(--text-dim); font-size: 12px; }
+    .run-event { position: relative; min-width: 0; padding: 7px 4px 10px 35px; }
+    .run-event + .run-event { border-top: 1px solid rgba(91,82,232,.075); }
+    .run-event-node { position: absolute; top: 13px; left: 6px; z-index: 1; width: 11px; height: 11px; border: 3px solid var(--card); border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 1px rgba(91,82,232,.22); }
+    .run-event.is-success .run-event-node { background: var(--success); box-shadow: 0 0 0 1px rgba(45,136,102,.24); }
+    .run-event.is-warning .run-event-node { background: #b56b22; box-shadow: 0 0 0 1px rgba(181,107,34,.26); }
+    .run-event.is-error .run-event-node { background: var(--danger); box-shadow: 0 0 0 1px rgba(164,59,50,.24); }
+    .run-event-head { min-width: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+    .run-event-title { min-width: 0; color: var(--text); font-size: 12px; font-weight: 780; overflow-wrap: anywhere; }
+    .run-event-time { flex: 0 0 auto; color: var(--text-dim); font: 9px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .run-event-kind { display: inline-flex; margin-right: 6px; padding: 2px 5px; border-radius: 5px; background: rgba(91,82,232,.08); color: var(--accent); font: 8px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; vertical-align: 1px; }
+    .run-event.is-success .run-event-kind { background: rgba(45,136,102,.09); color: var(--success); }
+    .run-event.is-warning .run-event-kind { background: rgba(181,107,34,.10); color: #9a5718; }
+    .run-event.is-error .run-event-kind { background: rgba(164,59,50,.09); color: var(--danger); }
+    .run-event-body { margin: 5px 0 0; color: var(--text-dim); font-size: 11px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .run-event-details { margin-top: 6px; border: 1px solid rgba(91,82,232,.13); border-radius: 7px; background: rgba(255,255,255,.36); }
+    .run-event-details summary { padding: 6px 8px; color: var(--accent); cursor: pointer; font-size: 10px; font-weight: 750; user-select: none; }
+    .run-event-details pre { max-height: 190px; margin: 0; padding: 9px; overflow: auto; border-top: 1px solid rgba(91,82,232,.11); color: var(--text); font: 10px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
     .console-code-panel { margin-top: 18px; }
     @keyframes run-spin { to { transform: rotate(360deg); } }
     .connection-panel { min-width: 0; }
@@ -383,6 +406,7 @@ function dashboardPage(user) {
       * { scroll-behavior: auto !important; transition: none !important; }
       .browser-boot-track::after { width: 54%; animation: none; transform: translateX(55%); }
       .run-spinner { animation: none; border-color: var(--accent); }
+      .run-progress-log { scroll-behavior: auto; }
     }
     @media (max-width: 900px) {
       .nav-inner { padding-inline: 14px; }
@@ -1067,8 +1091,169 @@ function dashboardPage(user) {
       }
     }
 
+    function runUpdateTime(value) {
+      if (!value) return '—';
+      try {
+        return new Intl.DateTimeFormat(undefined, {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }).format(new Date(value));
+      } catch {
+        return String(value);
+      }
+    }
+
+    function runUpdatePayload(value) {
+      if (typeof value === 'string') return value;
+      try { return JSON.stringify(value, null, 2); }
+      catch { return String(value); }
+    }
+
+    function describeRunUpdate(update) {
+      const type = String(update?.type || 'update');
+      const data = update?.data || {};
+      if (type === 'thinking') {
+        return {
+          kind: 'thinking',
+          title: data.step
+            ? 'Step ' + data.step + (data.note ? ' · ' + data.note : ' · Thinking')
+            : (data.note || 'Thinking'),
+          tone: '',
+        };
+      }
+      if (type === 'text' || type === 'text_delta') {
+        return {
+          kind: type === 'text_delta' ? 'stream' : 'message',
+          title: 'WebBrain',
+          body: data.content || '',
+          tone: '',
+        };
+      }
+      if (type === 'tool_call') {
+        return {
+          kind: 'tool call',
+          title: data.name || 'Tool',
+          detailLabel: 'Arguments',
+          detail: runUpdatePayload(data.args ?? {}),
+          tone: '',
+        };
+      }
+      if (type === 'tool_result') {
+        const failed = !!(data.result && typeof data.result === 'object'
+          && (data.result.error || data.result.success === false || data.result.cloudFailed));
+        return {
+          kind: failed ? 'failed' : 'result',
+          title: data.name || 'Tool result',
+          detailLabel: 'Result',
+          detail: runUpdatePayload(data.result ?? null),
+          tone: failed ? 'is-error' : 'is-success',
+        };
+      }
+      if (type === 'error') {
+        return { kind: 'error', title: 'Run error', body: data.message || runUpdatePayload(data), tone: 'is-error' };
+      }
+      if (type === 'warning' || type === 'max_steps_reached' || type === 'plan_review') {
+        return {
+          kind: type === 'max_steps_reached' ? 'limit' : 'warning',
+          title: type === 'max_steps_reached' ? 'Maximum steps reached' : 'Run warning',
+          body: data.message || data.note || runUpdatePayload(data),
+          tone: 'is-warning',
+        };
+      }
+      return {
+        kind: type.replaceAll('_', ' '),
+        title: 'Run update',
+        detailLabel: 'Details',
+        detail: runUpdatePayload(data),
+        tone: '',
+      };
+    }
+
+    function appendRunProgress(parent, updates, active, scrollState) {
+      const shell = document.createElement('section');
+      shell.className = 'run-progress-shell';
+      const heading = document.createElement('div');
+      heading.className = 'run-progress-heading';
+      const title = document.createElement('div');
+      title.className = 'run-section-title';
+      title.textContent = 'Live progress';
+      const count = document.createElement('span');
+      count.className = 'run-progress-count';
+      count.textContent = updates.length + (updates.length === 1 ? ' event' : ' events');
+      heading.append(title, count);
+
+      const log = document.createElement('div');
+      log.className = 'run-progress-log';
+      log.tabIndex = 0;
+      log.setAttribute('aria-label', 'Live run progress');
+      if (!updates.length) {
+        const empty = document.createElement('div');
+        empty.className = 'run-progress-empty';
+        empty.textContent = active ? 'Waiting for the first progress update…' : 'No progress updates were recorded.';
+        log.append(empty);
+      }
+
+      for (const update of updates) {
+        const description = describeRunUpdate(update);
+        const event = document.createElement('article');
+        event.className = 'run-event' + (description.tone ? ' ' + description.tone : '');
+        const node = document.createElement('span');
+        node.className = 'run-event-node';
+        node.setAttribute('aria-hidden', 'true');
+        const head = document.createElement('div');
+        head.className = 'run-event-head';
+        const eventTitle = document.createElement('div');
+        eventTitle.className = 'run-event-title';
+        const kind = document.createElement('span');
+        kind.className = 'run-event-kind';
+        kind.textContent = description.kind;
+        eventTitle.append(kind, document.createTextNode(description.title));
+        const time = document.createElement('time');
+        time.className = 'run-event-time';
+        time.dateTime = update.ts || '';
+        time.textContent = runUpdateTime(update.ts);
+        head.append(eventTitle, time);
+        event.append(node, head);
+        if (description.body) {
+          const body = document.createElement('p');
+          body.className = 'run-event-body';
+          body.textContent = description.body;
+          event.append(body);
+        }
+        if (description.detail) {
+          const details = document.createElement('details');
+          details.className = 'run-event-details';
+          details.dataset.seq = String(update.seq ?? '');
+          details.open = scrollState.openSeqs.has(details.dataset.seq);
+          const summary = document.createElement('summary');
+          summary.textContent = description.detailLabel;
+          const detail = document.createElement('pre');
+          detail.textContent = description.detail;
+          details.append(summary, detail);
+          event.append(details);
+        }
+        log.append(event);
+      }
+      shell.append(heading, log);
+      parent.append(shell);
+      const restoreScroll = () => {
+        log.scrollTop = scrollState.pinned
+          ? log.scrollHeight
+          : Math.min(scrollState.top, Math.max(0, log.scrollHeight - log.clientHeight));
+      };
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(restoreScroll);
+      else restoreScroll();
+    }
+
     function renderConsoleRun() {
       const run = state.consoleRun;
+      const previousLog = consoleRunOutput.querySelector('.run-progress-log');
+      const progressScrollState = {
+        pinned: !previousLog || previousLog.scrollHeight - previousLog.scrollTop - previousLog.clientHeight < 28,
+        top: previousLog?.scrollTop || 0,
+        openSeqs: new Set([...consoleRunOutput.querySelectorAll('.run-event-details[open]')].map(item => item.dataset.seq)),
+      };
       consoleRunOutput.replaceChildren();
       if (!run) {
         consoleRunHeaderStatus.textContent = 'Idle';
@@ -1135,6 +1320,7 @@ function dashboardPage(user) {
       content.append(meta);
 
       appendRunSection(content, 'Task', state.consoleRunTask, 'run-summary');
+      appendRunProgress(content, Array.isArray(run.updates) ? run.updates : [], active, progressScrollState);
       appendRunSection(content, 'Summary', run.summary, 'run-summary');
       if (run.result != null) {
         const resultText = typeof run.result === 'string' ? run.result : JSON.stringify(run.result, null, 2);
@@ -1206,7 +1392,7 @@ function dashboardPage(user) {
       state.selectedId = session.id;
       state.consoleRunSessionId = session.id;
       state.consoleRunTask = task;
-      state.consoleRun = { status: 'starting', run_id: '', result: null, summary: '', final_url: '', error: '' };
+      state.consoleRun = { status: 'starting', run_id: '', result: null, summary: '', final_url: '', error: '', updates: [] };
       showMessage(consoleMessage, 'Starting the asynchronous run…');
       renderSessions();
       try {
@@ -1219,7 +1405,7 @@ function dashboardPage(user) {
         renderConsole();
         scheduleConsolePoll();
       } catch (e) {
-        state.consoleRun = { status: 'failed', run_id: '', result: null, summary: '', final_url: '', error: e.message };
+        state.consoleRun = { status: 'failed', run_id: '', result: null, summary: '', final_url: '', error: e.message, updates: [] };
         showMessage(consoleMessage, e.message, true);
         renderConsole();
       }
@@ -1681,6 +1867,9 @@ function normalizeRunSnapshot(snapshot, existing = {}) {
     summary: snapshot.summary || existing.summary || '',
     final_url: snapshot.final_url || snapshot.finalUrl || existing.final_url || '',
     error: snapshot.error || existing.error || '',
+    updates: Array.isArray(snapshot.updates)
+      ? snapshot.updates
+      : (Array.isArray(existing.updates) ? existing.updates : []),
     completed_at: TERMINAL_RUN_STATUSES.has(snapshot.status) ? (snapshot.completed_at || snapshot.completedAt || nowIso()) : existing.completed_at || null,
   };
 }
@@ -2058,6 +2247,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
         summary: started.summary || '',
         final_url: started.final_url || started.finalUrl || '',
         error: started.error || '',
+        updates: Array.isArray(started.updates) ? started.updates : [],
         created_at: nowIso(),
         updated_at: nowIso(),
         completed_at: null,

@@ -163,6 +163,7 @@ The response is `202 Accepted` and contains a `run_id`:
   "summary": "",
   "final_url": "",
   "error": "",
+  "updates": [],
   "created_at": "2026-07-13T06:05:00.000Z",
   "updated_at": "2026-07-13T06:05:00.000Z",
   "completed_at": null
@@ -197,6 +198,9 @@ curl -sS \
 Run statuses are `running`, `completed`, `failed`, `aborting`, and `aborted`.
 Terminal responses put the final answer in `result`, any human-readable detail
 in `summary`, the active page in `final_url`, and failure detail in `error`.
+Every run response also includes the newest 200 ordered progress events in
+`updates`. Each event has a monotonic `seq`, a `type`, type-specific `data`, and
+an ISO timestamp in `ts`.
 
 For a single blocking request, set `wait` to `true`:
 

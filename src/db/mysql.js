@@ -41,6 +41,7 @@ export function normalizeCloudRun(row) {
     // string result arrives here as a plain JavaScript string, so parsing it a
     // second time would turn a normal agent answer into the fallback `null`.
     result: row.result,
+    updates: parseJsonMaybe(row.updates, []),
     created_at: fromMysqlDate(row.created_at),
     updated_at: fromMysqlDate(row.updated_at),
     completed_at: fromMysqlDate(row.completed_at),
@@ -78,6 +79,18 @@ export class MySqlStore {
     );
     if (!displayNameColumns.length) {
       await this.pool.query('ALTER TABLE browser_sessions ADD COLUMN display_name VARCHAR(120) NULL AFTER user_id');
+    }
+    const [runUpdateColumns] = await this.pool.execute(
+      `SELECT 1
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'cloud_runs'
+         AND COLUMN_NAME = :column
+       LIMIT 1`,
+      { column: 'updates' }
+    );
+    if (!runUpdateColumns.length) {
+      await this.pool.query('ALTER TABLE cloud_runs ADD COLUMN updates JSON NULL AFTER error');
     }
   }
 
@@ -247,12 +260,13 @@ export class MySqlStore {
   async createCloudRun(row) {
     await this.pool.execute(
       `INSERT INTO cloud_runs
-       (id,browser_session_id,user_id,task,output_schema,status,result,summary,final_url,error,created_at,updated_at,completed_at)
-       VALUES (:id,:browser_session_id,:user_id,:task,:output_schema,:status,:result,:summary,:final_url,:error,:created_at,:updated_at,:completed_at)`,
+       (id,browser_session_id,user_id,task,output_schema,status,result,summary,final_url,error,updates,created_at,updated_at,completed_at)
+       VALUES (:id,:browser_session_id,:user_id,:task,:output_schema,:status,:result,:summary,:final_url,:error,:updates,:created_at,:updated_at,:completed_at)`,
       {
         ...row,
         output_schema: encodeJson(row.output_schema),
         result: encodeJson(row.result),
+        updates: encodeJson(row.updates || []),
         created_at: toMysqlDate(row.created_at),
         updated_at: toMysqlDate(row.updated_at),
         completed_at: toMysqlDate(row.completed_at),
@@ -277,6 +291,7 @@ export class MySqlStore {
     const encoded = { ...patch };
     if ('output_schema' in encoded) encoded.output_schema = encodeJson(encoded.output_schema);
     if ('result' in encoded) encoded.result = encodeJson(encoded.result);
+    if ('updates' in encoded) encoded.updates = encodeJson(encoded.updates || []);
     for (const key of ['created_at', 'updated_at', 'completed_at']) {
       if (encoded[key]) encoded[key] = toMysqlDate(encoded[key]);
     }

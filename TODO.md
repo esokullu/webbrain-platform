@@ -1,5 +1,18 @@
 # TODO
 
+## Deferred: Durable live-run event streaming
+
+The Console currently polls a bounded snapshot of the newest 200 sequenced run updates. This is sufficient for the first live-progress version and keeps the existing request/response control channel simple.
+
+If runs later need permanent unlimited history, reliable replay after long disconnects, or multiple simultaneous viewers, replace snapshot polling with:
+
+- An append-only `cloud_run_events` table keyed by run ID and monotonically increasing sequence number.
+- A cursor-based API for fetching events after a known sequence.
+- Server-Sent Events (SSE) for live delivery, with polling retained as a reconnect fallback.
+- Explicit event retention, payload-size, and sensitive-data policies.
+
+This is intentionally deferred; it is unnecessary for the initial single-viewer Console implementation.
+
 ## Deferred: Suspend browser sessions as DigitalOcean snapshots
 
 > **Status:** Not planned for implementation now. Keep this proposal for future cost optimization.

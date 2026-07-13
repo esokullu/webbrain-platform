@@ -207,6 +207,18 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
           result: { title: 'Done' },
           summary: 'Finished.',
           final_url: 'https://example.com',
+          updates: [
+            { seq: 1, type: 'thinking', data: { step: 1 }, ts: '2026-07-14T10:00:00.000Z' },
+            { seq: 2, type: 'tool_call', data: { name: 'read_page', args: {} }, ts: '2026-07-14T10:00:01.000Z' },
+            { seq: 3, type: 'tool_result', data: { name: 'read_page', result: { success: true } }, ts: '2026-07-14T10:00:02.000Z' },
+          ],
+        });
+      } else {
+        statuses.set(msg.payload.run_id, {
+          ...statuses.get(msg.payload.run_id),
+          updates: [
+            { seq: 1, type: 'thinking', data: { step: 1 }, ts: '2026-07-14T10:00:00.000Z' },
+          ],
         });
       }
       ws.send(JSON.stringify({ id: msg.id, ok: true, result: statuses.get(msg.payload.run_id) }));
@@ -236,6 +248,8 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   assert.equal(waited.status, 200);
   assert.equal(waited.body.status, 'completed');
   assert.deepEqual(waited.body.result, { title: 'Done' });
+  assert.deepEqual(waited.body.updates.map(update => update.seq), [1, 2, 3]);
+  assert.equal((await ctx.store.getCloudRun(waited.body.run_id)).updates[1].data.name, 'read_page');
 
   statusPolls = 0;
   const created = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs`, {
@@ -377,6 +391,12 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /body: \{ task, wait: false \}/);
     assert.match(res.text, /function pollConsoleRun\(\)/);
     assert.match(res.text, /terminalRunStatuses/);
+    assert.match(res.text, /function appendRunProgress\(/);
+    assert.match(res.text, /className = 'run-progress-log'/);
+    assert.match(res.text, /Live progress/);
+    assert.match(res.text, /description\.detailLabel/);
+    assert.match(res.text, /previousLog\.scrollHeight - previousLog\.scrollTop - previousLog\.clientHeight < 28/);
+    assert.match(res.text, /openSeqs: new Set/);
     assert.match(res.text, /state\.selectedId = session\.id/);
     assert.doesNotMatch(res.text, /Use this browser from code/);
     assert.match(res.text, /id="consoleCodeSessionId"/);
