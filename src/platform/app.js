@@ -192,9 +192,28 @@ function dashboardPage(user) {
     .brand-domain { color: var(--accent2); opacity: .68; font-weight: 400; }
     .account { display: flex; align-items: center; gap: 12px; }
     .header-nav { display: flex; align-items: center; gap: 4px; padding: 3px; border: 1px solid var(--border); border-radius: 9px; background: rgba(255,253,248,.55); }
-    .account-email { color: var(--text-dim); font-size: 13px; }
     .header-link { min-height: 28px; display: inline-flex; align-items: center; padding: 4px 9px; border-radius: 6px; color: var(--text-dim); font-size: 12px; font-weight: 700; text-decoration: none; }
     .header-link:hover, .header-link[aria-current="page"] { background: var(--card); color: var(--text); box-shadow: 0 2px 8px var(--shadow); }
+    .account-menu { position: relative; }
+    .account-summary { min-height: 38px; max-width: 270px; display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 5px; border: 1px solid var(--border); border-radius: 10px; background: rgba(255,253,248,.65); color: var(--text); cursor: pointer; list-style: none; user-select: none; transition: background .15s ease, border-color .15s ease, box-shadow .15s ease; }
+    .account-summary::-webkit-details-marker { display: none; }
+    .account-summary:hover, .account-menu[open] .account-summary { background: var(--card); border-color: rgba(91,82,232,.25); box-shadow: 0 4px 14px var(--shadow); }
+    .account-summary:focus-visible { outline: 3px solid var(--accent-glow); outline-offset: 2px; }
+    .account-avatar { width: 26px; height: 26px; flex: 0 0 26px; display: grid; place-items: center; border-radius: 8px; background: rgba(91,82,232,.12); color: var(--accent); font-size: 12px; font-weight: 850; text-transform: uppercase; }
+    .account-summary-email { min-width: 0; overflow: hidden; color: var(--text-dim); font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+    .account-caret { width: 7px; height: 7px; flex: 0 0 7px; margin: -3px 2px 0 1px; border-right: 1.5px solid var(--text-dim); border-bottom: 1.5px solid var(--text-dim); transform: rotate(45deg); transition: transform .15s ease; }
+    .account-menu[open] .account-caret { margin-top: 3px; transform: rotate(225deg); }
+    .account-popover { position: absolute; top: calc(100% + 8px); right: 0; width: min(292px, calc(100vw - 28px)); padding: 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); box-shadow: 0 18px 46px rgba(44,24,16,.16); }
+    .account-context { min-width: 0; margin-bottom: 4px; padding: 8px 9px 10px; border-bottom: 1px solid var(--border); }
+    .account-context-label { display: block; margin-bottom: 2px; color: var(--text-dim); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .account-context-email { display: block; overflow: hidden; font-size: 13px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+    .account-popover form { margin: 0; }
+    button.account-action { width: 100%; min-height: 38px; display: flex; align-items: center; gap: 10px; padding: 8px 9px; border: 0; border-radius: 7px; background: transparent; color: var(--text); box-shadow: none; font-size: 13px; font-weight: 650; text-align: left; }
+    button.account-action:hover { background: var(--card-hover); color: var(--text); transform: none; }
+    button.account-action svg { width: 16px; height: 16px; flex: 0 0 16px; color: var(--text-dim); }
+    button.account-action.logout-action { color: var(--danger); }
+    button.account-action.logout-action svg { color: currentColor; }
+    button.account-action.logout-action:hover { background: rgba(164,59,50,.08); color: var(--danger); }
     main { max-width: 1480px; margin: 0 auto; padding: 32px 24px 48px; }
     .dashboard-view[hidden] { display: none; }
     .page-intro { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
@@ -298,7 +317,6 @@ function dashboardPage(user) {
     @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
     @media (max-width: 900px) {
       .nav-inner { padding-inline: 14px; }
-      .account-email { display: none; }
       main { padding: 24px 14px 36px; }
       .page-intro { align-items: start; flex-direction: column; }
       .grid, .grid.sessions-collapsed { grid-template-columns: 1fr; gap: 18px; }
@@ -315,9 +333,10 @@ function dashboardPage(user) {
     @media (max-width: 620px) {
       .brand { font-size: 17px; gap: 7px; }
       .brand img { width: 27px; height: 27px; }
-      .brand-domain, #refreshBtn { display: none; }
+      .brand-domain { display: none; }
       .account { gap: 6px; }
-      .account-email { display: none; }
+      .account-summary { padding-right: 7px; }
+      .account-summary-email { display: none; }
       .header-nav { gap: 2px; }
       .page-intro { margin-bottom: 18px; }
       .viewer-actions { align-items: flex-start; flex-direction: column; }
@@ -349,9 +368,29 @@ function dashboardPage(user) {
           <a class="header-link" href="#browsers" data-view-target="browsers" aria-current="page">Browsers</a>
           <a class="header-link" href="#api-keys" data-view-target="api-keys">API keys</a>
         </div>
-        <span class="account-email">${escapeHtml(user.email)}</span>
-        <button class="secondary" id="refreshBtn" type="button">Refresh</button>
-        <form method="post" action="/auth/logout"><button class="secondary" type="submit">Log out</button></form>
+        <details class="account-menu" id="accountMenu">
+          <summary class="account-summary" aria-label="Account menu for ${escapeHtml(user.email)}">
+            <span class="account-avatar" aria-hidden="true">${escapeHtml(String(user.email).trim().slice(0, 1) || 'W')}</span>
+            <span class="account-summary-email">${escapeHtml(user.email)}</span>
+            <span class="account-caret" aria-hidden="true"></span>
+          </summary>
+          <div class="account-popover">
+            <div class="account-context">
+              <span class="account-context-label">Signed in as</span>
+              <span class="account-context-email">${escapeHtml(user.email)}</span>
+            </div>
+            <button class="account-action" id="refreshBtn" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5"/><path d="M4 17v-5h5"/><path d="M6.1 8.2a7 7 0 0 1 11.5-2.6L20 8M4 16l2.4 2.4a7 7 0 0 0 11.5-2.6"/></svg>
+              <span class="account-action-label">Refresh dashboard</span>
+            </button>
+            <form method="post" action="/auth/logout">
+              <button class="account-action logout-action" type="submit">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/><path d="M15 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/></svg>
+                <span>Log out</span>
+              </button>
+            </form>
+          </div>
+        </details>
       </div>
     </div>
   </nav>
@@ -495,6 +534,7 @@ function dashboardPage(user) {
     const sessionCount = document.getElementById('sessionCount');
     const createSessionBtn = document.getElementById('createSessionBtn');
     const newSessionName = document.getElementById('newSessionName');
+    const accountMenu = document.getElementById('accountMenu');
     const refreshBtn = document.getElementById('refreshBtn');
     const connectBtn = document.getElementById('connectBtn');
     const deleteSessionBtn = document.getElementById('deleteSessionBtn');
@@ -1008,7 +1048,29 @@ function dashboardPage(user) {
       state.showDestroyed = !state.showDestroyed;
       renderSessions();
     });
-    refreshBtn.addEventListener('click', () => Promise.all([loadSessions(), loadApiKeys()]).catch(e => showMessage(sessionMessage, e.message, true)));
+    refreshBtn.addEventListener('click', async () => {
+      const label = refreshBtn.querySelector('.account-action-label');
+      refreshBtn.disabled = true;
+      label.textContent = 'Refreshing…';
+      try {
+        await Promise.all([loadSessions(), loadApiKeys()]);
+        accountMenu.removeAttribute('open');
+      } catch (e) {
+        showMessage(browserView.hidden ? apiKeyMessage : sessionMessage, e.message, true);
+      } finally {
+        refreshBtn.disabled = false;
+        label.textContent = 'Refresh dashboard';
+      }
+    });
+    document.addEventListener('click', event => {
+      if (accountMenu.open && !accountMenu.contains(event.target)) accountMenu.removeAttribute('open');
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && accountMenu.open) {
+        accountMenu.removeAttribute('open');
+        accountMenu.querySelector('summary').focus();
+      }
+    });
     connectBtn.addEventListener('click', openNoVnc);
     renameSessionBtn.addEventListener('click', openRenameDialog);
     renameForm.addEventListener('submit', saveBrowserName);

@@ -336,6 +336,12 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /\/api\/browser-sessions/);
     assert.match(res.text, /Create key/);
     assert.match(res.text, /href="#api-keys" data-view-target="api-keys"/);
+    assert.match(res.text, /id="accountMenu"/);
+    assert.match(res.text, /Account menu for dashboard@example\.com/);
+    assert.match(res.text, /Signed in as/);
+    assert.match(res.text, /Refresh dashboard/);
+    assert.match(res.text, /class="account-action logout-action" type="submit"/);
+    assert.match(res.text, /accountMenu\.removeAttribute\('open'\)/);
     assert.match(res.text, /id="browserView"/);
     assert.match(res.text, /id="apiKeysView" hidden/);
     assert.match(res.text, /setDashboardView/);
