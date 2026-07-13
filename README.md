@@ -95,7 +95,7 @@ curl -sS -X POST \
   https://webbrain.cloud/api/browser-sessions \
   -H "Authorization: Bearer $WEBBRAIN_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{}'
+  -d '{"display_name":"Research"}'
 ```
 
 The response is `201 Created`:
@@ -262,6 +262,7 @@ Abort is cooperative. A run can briefly report `aborting` before becoming
 | `POST` | `/api/browser-sessions` | Create a browser using the configured production defaults. |
 | `GET` | `/api/browser-sessions` | List the authenticated user's browser sessions. |
 | `GET` | `/api/browser-sessions/:sessionId` | Read provisioning and runtime readiness. |
+| `PATCH` | `/api/browser-sessions/:sessionId` | Set or clear the browser's `display_name`. |
 | `DELETE` | `/api/browser-sessions/:sessionId` | Destroy the browser session and its Droplet. |
 | `POST` | `/api/browser-sessions/:sessionId/connect-token` | Create a short-lived signed noVNC URL. |
 

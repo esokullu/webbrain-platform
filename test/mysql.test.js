@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { normalizeCloudRun } from '../src/db/mysql.js';
+
+test('browser display names are present in fresh schema and existing-database migration', async () => {
+  const schema = await readFile(new URL('../db/schema.sql', import.meta.url), 'utf8');
+  const storeSource = await readFile(new URL('../src/db/mysql.js', import.meta.url), 'utf8');
+  assert.match(schema, /display_name VARCHAR\(120\) NULL/);
+  assert.match(storeSource, /ALTER TABLE browser_sessions ADD COLUMN display_name VARCHAR\(120\) NULL/);
+});
 
 test('MySQL cloud-run normalization preserves unstructured string results', () => {
   const row = {

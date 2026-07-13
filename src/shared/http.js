@@ -2,6 +2,7 @@ export function publicBrowserSession(row) {
   if (!row) return null;
   return {
     id: row.id,
+    display_name: row.display_name || null,
     status: row.status,
     droplet_id: row.droplet_id || null,
     public_ip: row.public_ip || null,

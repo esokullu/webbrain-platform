@@ -51,6 +51,12 @@ export class WebBrainClient {
     return (await this.request('GET', `/api/browser-sessions/${encodeURIComponent(sessionId)}`)).browser_session;
   }
 
+  async updateBrowserSession(sessionId, { displayName } = {}) {
+    return (await this.request('PATCH', `/api/browser-sessions/${encodeURIComponent(sessionId)}`, {
+      display_name: displayName?.trim() || null,
+    })).browser_session;
+  }
+
   async deleteBrowserSession(sessionId) {
     return (await this.request('DELETE', `/api/browser-sessions/${encodeURIComponent(sessionId)}`)).browser_session;
   }

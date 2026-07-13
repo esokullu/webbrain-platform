@@ -83,7 +83,9 @@ export class MemoryStore {
   }
 
   async listApiKeys(userId) {
-    return clone([...this.apiKeys.values()].filter(k => k.user_id === userId && !k.revoked_at));
+    return clone([...this.apiKeys.values()]
+      .filter(k => k.user_id === userId)
+      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))));
   }
 
   async revokeApiKey(userId, id, at = nowIso()) {

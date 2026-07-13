@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
 CREATE TABLE IF NOT EXISTS browser_sessions (
   id VARCHAR(40) PRIMARY KEY,
   user_id VARCHAR(40) NOT NULL,
+  display_name VARCHAR(120) NULL,
   status VARCHAR(32) NOT NULL,
   droplet_id VARCHAR(64) NULL,
   public_ip VARCHAR(64) NULL,

@@ -22,6 +22,14 @@ function wantsJson(req) {
   return req.path.startsWith('/api/') || req.headers.accept?.includes('application/json');
 }
 
+function normalizeBrowserDisplayName(value) {
+  const name = String(value ?? '').trim();
+  if (name.length > 120) {
+    throw Object.assign(new Error('Browser name must be 120 characters or fewer'), { status: 400 });
+  }
+  return name || null;
+}
+
 function apiKeyPrefixCandidates(rawKey) {
   if (!String(rawKey).startsWith('wbp_')) return [];
   const payload = String(rawKey).slice(4);
@@ -184,6 +192,8 @@ function dashboardPage(user) {
     .brand-domain { color: var(--accent2); opacity: .68; font-weight: 400; }
     .account { display: flex; align-items: center; gap: 12px; }
     .account-email { color: var(--text-dim); font-size: 13px; }
+    .header-link { color: var(--text-dim); font-size: 12px; font-weight: 700; text-decoration: none; }
+    .header-link:hover { color: var(--text); }
     main { max-width: 1480px; margin: 0 auto; padding: 32px 24px 48px; }
     .page-intro { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
     .eyebrow { margin: 0 0 5px; color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
@@ -191,7 +201,7 @@ function dashboardPage(user) {
     .intro-copy { max-width: 560px; margin: 0; color: var(--text-dim); font-size: 14px; }
     h2 { margin: 0; font-size: 16px; letter-spacing: -.01em; }
     button, input { font: inherit; }
-    button { min-height: 40px; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; font-weight: 700; cursor: pointer; white-space: nowrap; box-shadow: 0 7px 18px var(--accent-glow); transition: transform .15s ease, background .15s ease, border-color .15s ease; }
+    button { min-height: 34px; padding: 6px 10px; border-radius: 7px; border: 1px solid var(--accent); background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; box-shadow: 0 5px 14px var(--accent-glow); transition: transform .15s ease, background .15s ease, border-color .15s ease; }
     button:hover { background: #5047dc; transform: translateY(-1px); }
     button.secondary { background: rgba(255,253,248,.65); color: var(--text); border-color: var(--border); box-shadow: none; }
     button.secondary:hover { background: var(--card-hover); }
@@ -199,13 +209,13 @@ function dashboardPage(user) {
     button.danger:hover { background: rgba(164,59,50,.08); }
     button:disabled { opacity: .48; cursor: not-allowed; transform: none; }
     button:focus-visible, .button-link:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid var(--accent-glow); outline-offset: 2px; }
-    .button-link { min-height: 40px; display: inline-flex; align-items: center; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border); background: rgba(255,253,248,.65); color: var(--text); font-weight: 600; text-decoration: none; white-space: nowrap; }
+    .button-link { min-height: 34px; display: inline-flex; align-items: center; padding: 6px 10px; border-radius: 7px; border: 1px solid var(--border); background: rgba(255,253,248,.65); color: var(--text); font-size: 12px; font-weight: 600; text-decoration: none; white-space: nowrap; }
     .button-link:hover { background: var(--card-hover); }
-    input { min-height: 40px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 11px; background: rgba(89,55,25,.04); color: var(--text); }
+    input { min-height: 36px; border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; background: rgba(89,55,25,.04); color: var(--text); }
     input::placeholder { color: #8a7964; }
     .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .grid { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); gap: 18px; align-items: start; }
-    .grid.sessions-collapsed { grid-template-columns: 58px minmax(0, 1fr); gap: 12px; }
+    .grid.sessions-collapsed { grid-template-columns: 44px minmax(0, 1fr); gap: 12px; }
     .panel { overflow: hidden; background: rgba(255,253,248,.92); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 16px 42px var(--shadow); }
     .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 16px 13px; border-bottom: 1px solid var(--border); }
     .panel-kicker { color: var(--text-dim); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
@@ -214,16 +224,14 @@ function dashboardPage(user) {
     .collapse-sessions { width: 30px; min-height: 30px; padding: 0; display: inline-grid; place-items: center; background: transparent; color: var(--text-dim); border-color: var(--border); box-shadow: none; font-size: 21px; line-height: 1; }
     .collapse-sessions:hover { background: var(--card-hover); color: var(--text); }
     .session-panel.is-collapsed { align-self: stretch; min-height: 680px; }
-    .session-panel.is-collapsed .panel-head { height: 100%; padding: 10px 8px; border-bottom: 0; align-items: stretch; }
-    .session-panel.is-collapsed .session-heading { flex: 1; flex-direction: column; justify-content: flex-start; gap: 12px; }
-    .session-panel.is-collapsed .session-heading h2 { order: 2; flex: 1; writing-mode: vertical-rl; transform: rotate(180deg); font-size: 11px; line-height: 1; letter-spacing: .1em; text-transform: uppercase; color: var(--text-dim); }
-    .session-panel.is-collapsed .session-panel-actions { order: 1; flex-direction: column-reverse; }
-    .session-panel.is-collapsed .panel-body, .session-panel.is-collapsed .destroyed-toggle { display: none !important; }
-    .session-panel.is-collapsed .status { min-width: 24px; padding: 0; justify-content: center; }
+    .session-panel.is-collapsed .panel-head { height: 100%; padding: 8px 6px; border-bottom: 0; align-items: flex-start; }
+    .session-panel.is-collapsed .session-heading { justify-content: center; }
+    .session-panel.is-collapsed .session-heading > div:first-child, .session-panel.is-collapsed .destroyed-toggle, .session-panel.is-collapsed #sessionCount { display: none !important; }
+    .session-panel.is-collapsed .session-panel-actions { display: block; }
+    .session-panel.is-collapsed .panel-body { display: none !important; }
     .session-panel.is-collapsed .collapse-sessions span { transform: rotate(180deg); }
     .panel-body { padding: 16px; }
-    .create-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
-    .create-note { color: var(--text-dim); font-size: 12px; }
+    .create-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; margin-bottom: 14px; }
     .sessions { display: grid; gap: 8px; }
     .session { text-align: left; width: 100%; color: var(--text); background: rgba(89,55,25,.025); border: 1px solid var(--border); display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 11px 12px; box-shadow: none; }
     .session:hover { background: var(--card-hover); border-color: rgba(91,82,232,.25); }
@@ -236,6 +244,8 @@ function dashboardPage(user) {
     .viewer-wrap { min-height: 680px; display: grid; grid-template-rows: auto 1fr; }
     .viewer-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--border); }
     .viewer-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; }
+    .viewer-title-button { min-width: 0; max-width: 52%; display: inline-flex; align-items: center; gap: 6px; padding-inline: 4px 7px; border-color: transparent; background: transparent; color: var(--text); box-shadow: none; }
+    .viewer-title-button:hover { background: var(--card-hover); }
     iframe { width: 100%; height: 640px; border: 0; background: #0b0e17; border-radius: 0 0 16px 16px; }
     .empty { min-height: 640px; display: grid; place-items: center; color: var(--text-dim); text-align: center; padding: 20px; }
     .empty-small { min-height: 180px; border: 1px dashed var(--border); border-radius: 10px; }
@@ -246,6 +256,22 @@ function dashboardPage(user) {
     .api-description { margin: 3px 0 0; color: var(--text-dim); font-size: 12px; }
     .docs-link { align-self: center; }
     .secret { display: none; margin-top: 10px; padding: 11px; border: 1px solid var(--border); border-radius: 8px; background: rgba(89,55,25,.04); overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    .api-key-list { display: grid; gap: 8px; margin-top: 14px; }
+    .api-key-list .empty-small { min-height: 100px; }
+    .api-key-item { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 12px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 10px; background: rgba(89,55,25,.025); }
+    .api-key-name { font-size: 13px; font-weight: 700; }
+    .api-key-meta { margin-top: 3px; color: var(--text-dim); font-size: 11px; }
+    .api-key-actions { display: flex; align-items: center; gap: 8px; }
+    .api-key-state { color: var(--success); font-size: 11px; font-weight: 700; }
+    .api-key-state.revoked { color: var(--text-dim); }
+    dialog { width: min(440px, calc(100vw - 28px)); padding: 0; border: 1px solid var(--border); border-radius: 16px; background: var(--card); color: var(--text); box-shadow: 0 28px 80px rgba(44,24,16,.24); }
+    dialog::backdrop { background: rgba(15,12,20,.46); backdrop-filter: blur(3px); }
+    .dialog-body { padding: 22px; }
+    .dialog-body h2 { font-size: 21px; }
+    .dialog-body p { color: var(--text-dim); font-size: 13px; }
+    .dialog-body input { width: 100%; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+    .confirm-phrase { padding: 2px 6px; border: 1px solid var(--border); border-radius: 5px; background: rgba(89,55,25,.05); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); }
     @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
     @media (max-width: 900px) {
       .nav-inner { padding-inline: 14px; }
@@ -257,8 +283,8 @@ function dashboardPage(user) {
       .session-panel.is-collapsed { min-height: 0; }
       .session-panel.is-collapsed .panel-head { height: auto; padding: 15px 16px 13px; border-bottom: 1px solid var(--border); }
       .session-panel.is-collapsed .session-heading { flex-direction: row; justify-content: space-between; }
-      .session-panel.is-collapsed .session-heading h2 { order: 0; flex: 0 1 auto; writing-mode: horizontal-tb; transform: none; font-size: 16px; line-height: normal; letter-spacing: normal; text-transform: none; color: var(--text); }
-      .session-panel.is-collapsed .session-panel-actions { order: 0; flex-direction: row; }
+      .session-panel.is-collapsed .session-heading > div:first-child, .session-panel.is-collapsed #sessionCount { display: block !important; }
+      .session-panel.is-collapsed .session-panel-actions { order: 0; display: flex; flex-direction: row; }
       .session-panel.is-collapsed .panel-body { display: block; }
       .session-panel.is-collapsed .status { min-width: auto; padding: 0 8px; }
       iframe, .empty { height: 520px; min-height: 520px; }
@@ -267,14 +293,16 @@ function dashboardPage(user) {
       .brand { font-size: 17px; gap: 7px; }
       .brand img { width: 27px; height: 27px; }
       .account { gap: 6px; }
-      .account button { min-height: 36px; padding: 7px 10px; }
+      .account-email { display: none; }
       .page-intro { margin-bottom: 18px; }
       .viewer-actions { align-items: flex-start; flex-direction: column; }
       .viewer-actions .toolbar { width: 100%; }
       .viewer-actions .toolbar > * { flex: 1; justify-content: center; }
-      .create-row { align-items: stretch; flex-direction: column; }
+      .create-row { grid-template-columns: 1fr; }
       .create-row button { width: 100%; }
       .api-key-row { grid-template-columns: 1fr; }
+      .api-key-item { grid-template-columns: 1fr; }
+      .api-key-actions { justify-content: space-between; }
       .api-panel .panel-head { align-items: stretch; flex-direction: column; }
       .docs-link { justify-content: center; }
     }
@@ -288,6 +316,7 @@ function dashboardPage(user) {
         <img src="https://webbrain.one/logo-github.png" alt=""> WebBrain<span class="brand-domain">.cloud</span>
       </a>
       <div class="account">
+        <a class="header-link" href="#apiKeysPanel">API keys</a>
         <span class="account-email">${escapeHtml(user.email)}</span>
         <button class="secondary" id="refreshBtn" type="button">Refresh</button>
         <form method="post" action="/auth/logout"><button class="secondary" type="submit">Log out</button></form>
@@ -319,7 +348,7 @@ function dashboardPage(user) {
         </div>
         <div class="panel-body" id="sessionPanelBody">
           <div class="create-row">
-            <span class="create-note">A private browser with WebBrain preinstalled.</span>
+            <input id="newSessionName" aria-label="Browser name" maxlength="120" placeholder="Name this browser (optional)">
             <button id="createSessionBtn" type="button">+ New browser</button>
           </div>
           <div class="sessions" id="sessions"></div>
@@ -328,17 +357,17 @@ function dashboardPage(user) {
       </section>
       <section class="panel viewer-wrap">
         <div class="viewer-actions">
-          <div class="viewer-title" id="viewerTitle">Browser preview</div>
+          <button class="viewer-title-button" id="renameSessionBtn" type="button" disabled title="Rename browser"><span class="viewer-title" id="viewerTitle">Browser preview</span><span aria-hidden="true">✎</span></button>
           <div class="toolbar">
-            <button class="secondary" id="connectBtn" type="button" disabled>Open noVNC</button>
-            <a class="button-link" id="externalLink" href="#" target="_blank" rel="noopener" style="display:none">New tab</a>
+            <button class="secondary" id="connectBtn" type="button" disabled>Connect</button>
+            <a class="button-link" id="externalLink" href="#" target="_blank" rel="noopener" style="display:none">Open separately</a>
             <button class="danger" id="deleteSessionBtn" type="button" disabled>Delete</button>
           </div>
         </div>
-        <div id="viewerEmpty" class="empty">Create or select a browser session, then open noVNC here.</div>
+        <div id="viewerEmpty" class="empty">Create or select a browser, then connect here.</div>
         <iframe id="novncFrame" title="WebBrain cloud browser noVNC" style="display:none" referrerpolicy="no-referrer"></iframe>
       </section>
-      <section class="panel api-panel">
+      <section class="panel api-panel" id="apiKeysPanel">
         <div class="panel-head">
           <div>
             <div class="panel-kicker">Developer access</div>
@@ -354,10 +383,34 @@ function dashboardPage(user) {
           </div>
           <div class="secret" id="newApiKey"></div>
           <div class="message" id="apiKeyMessage"></div>
+          <div class="api-key-list" id="apiKeysList"></div>
         </div>
       </section>
     </div>
   </main>
+  <dialog id="renameDialog">
+    <form class="dialog-body" method="dialog" id="renameForm">
+      <h2>Name this browser</h2>
+      <p>Use a short name you will recognize later.</p>
+      <input id="renameInput" aria-label="Browser name" maxlength="120" placeholder="Research, Personal, Client work…">
+      <div class="dialog-actions">
+        <button class="secondary" type="button" id="cancelRenameBtn">Cancel</button>
+        <button type="submit" id="saveRenameBtn">Save name</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="deleteDialog">
+    <div class="dialog-body">
+      <h2>Delete this browser?</h2>
+      <p id="deleteDialogDescription">This permanently destroys the cloud browser and cannot be undone.</p>
+      <p>Type <span class="confirm-phrase">I confirm</span> to continue.</p>
+      <input id="deleteConfirmInput" aria-label="Type I confirm to delete" autocomplete="off" placeholder="I confirm">
+      <div class="dialog-actions">
+        <button class="secondary" type="button" id="cancelDeleteBtn">Cancel</button>
+        <button class="danger" type="button" id="confirmDeleteBtn" disabled>Delete browser</button>
+      </div>
+    </div>
+  </dialog>
   <script>
     const sessionsEl = document.getElementById('sessions');
     const dashboardGrid = document.getElementById('dashboardGrid');
@@ -367,9 +420,11 @@ function dashboardPage(user) {
     const sessionMessage = document.getElementById('sessionMessage');
     const sessionCount = document.getElementById('sessionCount');
     const createSessionBtn = document.getElementById('createSessionBtn');
+    const newSessionName = document.getElementById('newSessionName');
     const refreshBtn = document.getElementById('refreshBtn');
     const connectBtn = document.getElementById('connectBtn');
     const deleteSessionBtn = document.getElementById('deleteSessionBtn');
+    const renameSessionBtn = document.getElementById('renameSessionBtn');
     const viewerTitle = document.getElementById('viewerTitle');
     const viewerEmpty = document.getElementById('viewerEmpty');
     const novncFrame = document.getElementById('novncFrame');
@@ -378,7 +433,17 @@ function dashboardPage(user) {
     const apiKeyName = document.getElementById('apiKeyName');
     const newApiKey = document.getElementById('newApiKey');
     const apiKeyMessage = document.getElementById('apiKeyMessage');
-    const state = { sessions: [], selectedId: null, showDestroyed: false };
+    const apiKeysList = document.getElementById('apiKeysList');
+    const renameDialog = document.getElementById('renameDialog');
+    const renameForm = document.getElementById('renameForm');
+    const renameInput = document.getElementById('renameInput');
+    const cancelRenameBtn = document.getElementById('cancelRenameBtn');
+    const deleteDialog = document.getElementById('deleteDialog');
+    const deleteDialogDescription = document.getElementById('deleteDialogDescription');
+    const deleteConfirmInput = document.getElementById('deleteConfirmInput');
+    const cancelDeleteBtn = document.getElementById('cancelDeleteBtn');
+    const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
+    const state = { sessions: [], apiKeys: [], selectedId: null, showDestroyed: false, deleteTargetId: null };
     const sessionsCollapsedKey = 'webbrain.sessionsCollapsed';
 
     function setSessionsCollapsed(collapsed) {
@@ -417,6 +482,16 @@ function dashboardPage(user) {
       return state.sessions.find(s => s.id === state.selectedId) || null;
     }
 
+    function browserName(session) {
+      return session?.display_name || ('Browser ' + String(session?.id || '').slice(-4).toUpperCase());
+    }
+
+    function formatDate(value) {
+      if (!value) return 'Never';
+      try { return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)); }
+      catch { return String(value); }
+    }
+
     function visibleSessions() {
       return state.showDestroyed ? state.sessions : state.sessions.filter(s => s.status !== 'destroyed');
     }
@@ -445,7 +520,7 @@ function dashboardPage(user) {
         const details = document.createElement('div');
         const title = document.createElement('div');
         title.className = 'session-title';
-        title.textContent = session.id;
+        title.textContent = browserName(session);
         const meta = document.createElement('div');
         meta.className = 'session-meta';
         meta.textContent = session.public_ip || (session.status === 'provisioning' ? 'Preparing browser…' : 'Waiting for browser');
@@ -469,7 +544,8 @@ function dashboardPage(user) {
       const session = selectedSession();
       connectBtn.disabled = !session || !session.public_ip || session.status !== 'ready';
       deleteSessionBtn.disabled = !session || session.status === 'destroyed';
-      viewerTitle.textContent = session ? session.id + ' · ' + session.status : 'Browser preview';
+      renameSessionBtn.disabled = !session || session.status === 'destroyed';
+      viewerTitle.textContent = session ? browserName(session) + ' · ' + session.status : 'Browser preview';
     }
 
     async function loadSessions() {
@@ -486,15 +562,47 @@ function dashboardPage(user) {
       return next;
     }
 
+    function openRenameDialog() {
+      const session = selectedSession();
+      if (!session || session.status === 'destroyed') return;
+      renameInput.value = session.display_name || '';
+      renameDialog.showModal();
+      renameInput.focus();
+      renameInput.select();
+    }
+
+    async function saveBrowserName(event) {
+      event.preventDefault();
+      const session = selectedSession();
+      if (!session) return;
+      const saveButton = document.getElementById('saveRenameBtn');
+      saveButton.disabled = true;
+      try {
+        const body = await api('/api/browser-sessions/' + encodeURIComponent(session.id), {
+          method: 'PATCH',
+          body: { display_name: renameInput.value.trim() || null },
+        });
+        state.sessions = state.sessions.map(item => item.id === body.browser_session.id ? body.browser_session : item);
+        renameDialog.close();
+        renderSessions();
+        showMessage(sessionMessage, 'Browser name saved.');
+      } catch (e) {
+        showMessage(sessionMessage, e.message, true);
+      } finally {
+        saveButton.disabled = false;
+      }
+    }
+
     async function createSession() {
       createSessionBtn.disabled = true;
       showMessage(sessionMessage, 'Creating droplet...');
       try {
         const body = await api('/api/browser-sessions', {
           method: 'POST',
-          body: {},
+          body: { display_name: newSessionName.value.trim() || null },
         });
         state.selectedId = body.browser_session.id;
+        newSessionName.value = '';
         await loadSessions();
         showMessage(sessionMessage, 'Session created. It may take a few minutes before noVNC is ready.');
       } catch (e) {
@@ -529,13 +637,27 @@ function dashboardPage(user) {
       }
     }
 
-    async function deleteSession() {
+    function openDeleteDialog() {
       const session = selectedSession();
-      if (!session || !confirm('Delete browser session ' + session.id + '?')) return;
+      if (!session || session.status === 'destroyed') return;
+      state.deleteTargetId = session.id;
+      deleteDialogDescription.textContent = 'This permanently destroys “' + browserName(session) + '” and cannot be undone.';
+      deleteConfirmInput.value = '';
+      confirmDeleteBtn.disabled = true;
+      deleteDialog.showModal();
+      deleteConfirmInput.focus();
+    }
+
+    async function deleteSession() {
+      const session = state.sessions.find(item => item.id === state.deleteTargetId);
+      if (!session || deleteConfirmInput.value !== 'I confirm') return;
       deleteSessionBtn.disabled = true;
+      confirmDeleteBtn.disabled = true;
       showMessage(sessionMessage, 'Deleting session...');
       try {
         await api('/api/browser-sessions/' + encodeURIComponent(session.id), { method: 'DELETE' });
+        deleteDialog.close();
+        state.deleteTargetId = null;
         if (state.selectedId === session.id) {
           state.selectedId = null;
           novncFrame.removeAttribute('src');
@@ -549,6 +671,60 @@ function dashboardPage(user) {
         showMessage(sessionMessage, e.message, true);
       } finally {
         deleteSessionBtn.disabled = false;
+        confirmDeleteBtn.disabled = deleteConfirmInput.value !== 'I confirm';
+      }
+    }
+
+    function renderApiKeys() {
+      apiKeysList.innerHTML = '';
+      if (!state.apiKeys.length) {
+        apiKeysList.innerHTML = '<div class="empty empty-small">No API keys yet.</div>';
+        return;
+      }
+      for (const key of state.apiKeys) {
+        const row = document.createElement('div');
+        row.className = 'api-key-item';
+        const details = document.createElement('div');
+        const name = document.createElement('div');
+        name.className = 'api-key-name';
+        name.textContent = key.name;
+        const meta = document.createElement('div');
+        meta.className = 'api-key-meta';
+        meta.textContent = 'wbp_' + key.prefix + '_… · Created ' + formatDate(key.created_at) + ' · Last used ' + formatDate(key.last_used_at);
+        details.append(name, meta);
+        const actions = document.createElement('div');
+        actions.className = 'api-key-actions';
+        const stateLabel = document.createElement('span');
+        stateLabel.className = 'api-key-state' + (key.revoked_at ? ' revoked' : '');
+        stateLabel.textContent = key.revoked_at ? 'Revoked ' + formatDate(key.revoked_at) : 'Active';
+        actions.appendChild(stateLabel);
+        if (!key.revoked_at) {
+          const revokeButton = document.createElement('button');
+          revokeButton.type = 'button';
+          revokeButton.className = 'danger';
+          revokeButton.textContent = 'Revoke';
+          revokeButton.addEventListener('click', () => revokeApiKey(key));
+          actions.appendChild(revokeButton);
+        }
+        row.append(details, actions);
+        apiKeysList.appendChild(row);
+      }
+    }
+
+    async function loadApiKeys() {
+      const body = await api('/api/api-keys');
+      state.apiKeys = body.api_keys || [];
+      renderApiKeys();
+    }
+
+    async function revokeApiKey(key) {
+      if (!confirm('Revoke API key “' + key.name + '”? Applications using it will stop working.')) return;
+      try {
+        await api('/api/api-keys/' + encodeURIComponent(key.id), { method: 'DELETE' });
+        await loadApiKeys();
+        showMessage(apiKeyMessage, 'API key revoked.');
+      } catch (e) {
+        showMessage(apiKeyMessage, e.message, true);
       }
     }
 
@@ -564,6 +740,7 @@ function dashboardPage(user) {
         newApiKey.textContent = body.key;
         newApiKey.style.display = 'block';
         showMessage(apiKeyMessage, 'Copy this key now. It will not be shown again.');
+        await loadApiKeys();
       } catch (e) {
         showMessage(apiKeyMessage, e.message, true);
       } finally {
@@ -572,16 +749,33 @@ function dashboardPage(user) {
     }
 
     createSessionBtn.addEventListener('click', createSession);
+    newSessionName.addEventListener('keydown', event => {
+      if (event.key === 'Enter') createSession();
+    });
     collapseSessionsBtn.addEventListener('click', () => setSessionsCollapsed(!sessionPanel.classList.contains('is-collapsed')));
     toggleDestroyedBtn.addEventListener('click', () => {
       state.showDestroyed = !state.showDestroyed;
       renderSessions();
     });
-    refreshBtn.addEventListener('click', () => loadSessions().catch(e => showMessage(sessionMessage, e.message, true)));
+    refreshBtn.addEventListener('click', () => Promise.all([loadSessions(), loadApiKeys()]).catch(e => showMessage(sessionMessage, e.message, true)));
     connectBtn.addEventListener('click', openNoVnc);
-    deleteSessionBtn.addEventListener('click', deleteSession);
+    renameSessionBtn.addEventListener('click', openRenameDialog);
+    renameForm.addEventListener('submit', saveBrowserName);
+    cancelRenameBtn.addEventListener('click', () => renameDialog.close());
+    deleteSessionBtn.addEventListener('click', openDeleteDialog);
+    deleteConfirmInput.addEventListener('input', () => {
+      confirmDeleteBtn.disabled = deleteConfirmInput.value !== 'I confirm';
+    });
+    cancelDeleteBtn.addEventListener('click', () => deleteDialog.close());
+    confirmDeleteBtn.addEventListener('click', deleteSession);
+    deleteDialog.addEventListener('close', () => {
+      state.deleteTargetId = null;
+      deleteConfirmInput.value = '';
+      confirmDeleteBtn.disabled = true;
+    });
     createApiKeyBtn.addEventListener('click', createApiKey);
     loadSessions().catch(e => showMessage(sessionMessage, e.message, true));
+    loadApiKeys().catch(e => showMessage(apiKeyMessage, e.message, true));
     setInterval(() => loadSessions().catch(() => {}), 15000);
   </script>
 </body>
@@ -778,6 +972,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
       name: k.name,
       prefix: k.prefix,
       last_used_at: k.last_used_at || null,
+      revoked_at: k.revoked_at || null,
       created_at: k.created_at,
     })) });
   });
@@ -822,6 +1017,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
       const session = await store.createBrowserSession({
         id: randomId('bs'),
         user_id: req.auth.user.id,
+        display_name: normalizeBrowserDisplayName(req.body.display_name ?? req.body.name),
         status: 'provisioning',
         droplet_id: null,
         public_ip: null,
@@ -859,6 +1055,22 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
     res.json({
       browser_session: publicBrowserSession(session),
     });
+  });
+
+  app.patch('/api/browser-sessions/:sessionId', requireAuth, async (req, res, next) => {
+    try {
+      const session = await ownedBrowserSession(req, res);
+      if (!session) return;
+      const displayName = normalizeBrowserDisplayName(req.body.display_name ?? req.body.name);
+      const updated = await store.updateBrowserSession(session.id, {
+        display_name: displayName,
+        updated_at: nowIso(),
+      });
+      await audit(req, 'browser_session.rename', 'browser_session', session.id, { display_name: displayName });
+      res.json({ browser_session: publicBrowserSession(updated) });
+    } catch (e) {
+      next(e);
+    }
   });
 
   async function browserRuntimeState(session) {

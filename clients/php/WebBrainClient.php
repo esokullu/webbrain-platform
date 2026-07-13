@@ -77,6 +77,12 @@ final class WebBrainClient
         return $this->request('GET', '/api/browser-sessions/' . self::id($sessionId))['browser_session'];
     }
 
+    public function updateBrowserSession(string $sessionId, ?string $displayName): array
+    {
+        $name = $displayName === null ? null : trim($displayName);
+        return $this->request('PATCH', '/api/browser-sessions/' . self::id($sessionId), ['display_name' => $name ?: null])['browser_session'];
+    }
+
     public function deleteBrowserSession(string $sessionId): array
     {
         return $this->request('DELETE', '/api/browser-sessions/' . self::id($sessionId))['browser_session'];

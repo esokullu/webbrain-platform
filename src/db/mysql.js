@@ -67,6 +67,13 @@ export class MySqlStore {
     for (const statement of statements) {
       await this.pool.query(statement);
     }
+    const [displayNameColumns] = await this.pool.execute(
+      'SHOW COLUMNS FROM browser_sessions LIKE :column',
+      { column: 'display_name' }
+    );
+    if (!displayNameColumns.length) {
+      await this.pool.query('ALTER TABLE browser_sessions ADD COLUMN display_name VARCHAR(120) NULL AFTER user_id');
+    }
   }
 
   async queryOne(sql, params = {}) {
@@ -166,7 +173,7 @@ export class MySqlStore {
 
   async listApiKeys(userId) {
     const [rows] = await this.pool.execute(
-      'SELECT * FROM api_keys WHERE user_id = :userId AND revoked_at IS NULL ORDER BY created_at DESC',
+      'SELECT * FROM api_keys WHERE user_id = :userId ORDER BY created_at DESC',
       { userId }
     );
     return rows.map(row => ({
@@ -188,9 +195,9 @@ export class MySqlStore {
   async createBrowserSession(row) {
     await this.pool.execute(
       `INSERT INTO browser_sessions
-       (id,user_id,status,droplet_id,public_ip,region,size,connect_secret,expires_at,created_at,updated_at)
-       VALUES (:id,:user_id,:status,:droplet_id,:public_ip,:region,:size,:connect_secret,:expires_at,:created_at,:updated_at)`,
-      { ...row, expires_at: toMysqlDate(row.expires_at), created_at: toMysqlDate(row.created_at), updated_at: toMysqlDate(row.updated_at) }
+       (id,user_id,display_name,status,droplet_id,public_ip,region,size,connect_secret,expires_at,created_at,updated_at)
+       VALUES (:id,:user_id,:display_name,:status,:droplet_id,:public_ip,:region,:size,:connect_secret,:expires_at,:created_at,:updated_at)`,
+      { ...row, display_name: row.display_name || null, expires_at: toMysqlDate(row.expires_at), created_at: toMysqlDate(row.created_at), updated_at: toMysqlDate(row.updated_at) }
     );
     return await this.getBrowserSession(row.id);
   }

@@ -5,9 +5,9 @@ Small, dependency-free clients for the browser automation API at
 
 | Runtime | File | Requirement |
 | --- | --- | --- |
-| Node.js | [`node/webbrain-client.js`](node/webbrain-client.js) | Node.js 18+ |
-| Python | [`python/webbrain_client.py`](python/webbrain_client.py) | Python 3.9+ |
-| PHP | [`php/WebBrainClient.php`](php/WebBrainClient.php) | PHP 8.1+ with cURL |
+| Node.js | [`node/README.md`](node/README.md) | Node.js 18+ |
+| Python | [`python/README.md`](python/README.md) | Python 3.9+ |
+| PHP | [`php/README.md`](php/README.md) | PHP 8.1+ with cURL |
 
 Each client supports browser-session creation and deletion, readiness polling,
 run creation and polling, structured output, aborting, and signed noVNC links.

@@ -107,16 +107,47 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   });
   assert.equal(legacyAuth.status, 200);
 
+  const revokedLegacy = await request(ctx.base, '/api/api-keys/key_legacy_underscore', {
+    method: 'DELETE',
+    headers: { cookie },
+  });
+  assert.equal(revokedLegacy.status, 200);
+  const keyHistory = await request(ctx.base, '/api/api-keys', { headers: { cookie } });
+  assert.equal(keyHistory.status, 200);
+  assert.equal(keyHistory.body.api_keys.length, 2);
+  assert.equal(keyHistory.body.api_keys.find(key => key.id === 'key_legacy_underscore').revoked_at !== null, true);
+  const revokedAuth = await request(ctx.base, '/api/me', {
+    headers: { authorization: `Bearer ${legacyRawKey}` },
+  });
+  assert.equal(revokedAuth.status, 401);
+
   const sessionRes = await request(ctx.base, '/api/browser-sessions', {
     method: 'POST',
     headers: { authorization: `Bearer ${keyRes.body.key}` },
-    body: JSON.stringify({ region: 'nyc3', size: 's-1vcpu-1gb' }),
+    body: JSON.stringify({ region: 'nyc3', size: 's-1vcpu-1gb', display_name: 'Daily research' }),
   });
   assert.equal(sessionRes.status, 201);
   assert.equal(sessionRes.body.browser_session.status, 'ready');
+  assert.equal(sessionRes.body.browser_session.display_name, 'Daily research');
   const sessionId = sessionRes.body.browser_session.id;
   const storedSession = await ctx.store.getBrowserSession(sessionId);
   assert.equal(storedSession.connect_secret.length > 20, true);
+
+  const renamed = await request(ctx.base, `/api/browser-sessions/${sessionId}`, {
+    method: 'PATCH',
+    headers: { cookie },
+    body: JSON.stringify({ display_name: 'Client work' }),
+  });
+  assert.equal(renamed.status, 200);
+  assert.equal(renamed.body.browser_session.display_name, 'Client work');
+  assert.equal((await ctx.store.getBrowserSession(sessionId)).display_name, 'Client work');
+
+  const tooLongName = await request(ctx.base, `/api/browser-sessions/${sessionId}`, {
+    method: 'PATCH',
+    headers: { cookie },
+    body: JSON.stringify({ display_name: 'x'.repeat(121) }),
+  });
+  assert.equal(tooLongName.status, 400);
 
   const notReady = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs`, {
     method: 'POST',
@@ -281,8 +312,16 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /WebBrain<span class="brand-domain">\.cloud/);
     assert.match(res.text, /--bg: #f7f1e6/);
     assert.match(res.text, /Browser sessions/);
-    assert.match(res.text, /Open noVNC/);
+    assert.match(res.text, />Connect</);
+    assert.doesNotMatch(res.text, /Open noVNC/);
     assert.match(res.text, /novncFrame/);
+    assert.match(res.text, /id="newSessionName"/);
+    assert.match(res.text, /id="renameDialog"/);
+    assert.match(res.text, /method: 'PATCH'/);
+    assert.match(res.text, /display_name/);
+    assert.match(res.text, /Type I confirm to delete/);
+    assert.match(res.text, /deleteConfirmInput\.value !== 'I confirm'/);
+    assert.doesNotMatch(res.text, /confirm\('Delete browser session/);
     assert.match(res.text, /collapseSessionsBtn/);
     assert.match(res.text, /toggleDestroyedBtn/);
     assert.match(res.text, /showDestroyed: false/);
@@ -291,8 +330,16 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /webbrain\.sessionsCollapsed/);
     assert.match(res.text, /aria-controls="sessionPanelBody"/);
     assert.match(res.text, /setSessionsCollapsed\(true\)/);
+    assert.match(res.text, /\.session-heading > div:first-child[\s\S]*display: none !important/);
     assert.match(res.text, /\/api\/browser-sessions/);
     assert.match(res.text, /Create key/);
+    assert.match(res.text, /href="#apiKeysPanel"/);
+    assert.doesNotMatch(res.text, /\.header-link\s*\{\s*display:\s*none/);
+    assert.match(res.text, /id="apiKeysList"/);
+    assert.match(res.text, /loadApiKeys/);
+    assert.match(res.text, /revokeApiKey/);
+    assert.match(res.text, /revoked_at/);
+    assert.match(res.text, /min-height: 34px/);
     assert.match(res.text, /href="\/docs"/);
     assert.match(res.text, /API documentation/);
     assert.doesNotMatch(res.text, /id="regionInput"/);
@@ -338,9 +385,10 @@ test('public API documentation provides accessible REST and client tabs', async 
     assert.match(res.text, /class="tok-variable"/);
     assert.match(res.text, /class="tok-function"/);
     assert.match(res.text, /\/api\/browser-sessions\/:sessionId\/runs/);
-    assert.match(res.text, /clients\/node\/webbrain-client\.js/);
-    assert.match(res.text, /clients\/python\/webbrain_client\.py/);
-    assert.match(res.text, /clients\/php\/WebBrainClient\.php/);
+    assert.match(res.text, /PATCH[\s\S]*\/api\/browser-sessions\/:sessionId/);
+    assert.match(res.text, /tree\/main\/clients\/node/);
+    assert.match(res.text, /tree\/main\/clients\/python/);
+    assert.match(res.text, /tree\/main\/clients\/php/);
     assert.match(res.text, /ArrowRight/);
   } finally {
     await ctx.platform.close();

@@ -58,6 +58,10 @@ class WebBrainClient:
     def get_browser_session(self, session_id: str):
         return self._request("GET", f"/api/browser-sessions/{self._id(session_id)}")["browser_session"]
 
+    def update_browser_session(self, session_id: str, *, display_name: Optional[str] = None):
+        name = display_name.strip() if display_name else None
+        return self._request("PATCH", f"/api/browser-sessions/{self._id(session_id)}", {"display_name": name})["browser_session"]
+
     def delete_browser_session(self, session_id: str):
         return self._request("DELETE", f"/api/browser-sessions/{self._id(session_id)}")["browser_session"]
 

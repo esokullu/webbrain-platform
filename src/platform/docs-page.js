@@ -328,6 +328,7 @@ export function docsPage() {
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions</code><span>Create a browser.</span></div>
             <div class="endpoint"><span class="method">GET</span><code>/api/browser-sessions</code><span>List your sessions.</span></div>
             <div class="endpoint"><span class="method">GET</span><code>/api/browser-sessions/:sessionId</code><span>Read readiness.</span></div>
+            <div class="endpoint"><span class="method">PATCH</span><code>/api/browser-sessions/:sessionId</code><span>Set its display name.</span></div>
             <div class="endpoint"><span class="method">DELETE</span><code>/api/browser-sessions/:sessionId</code><span>Destroy a browser.</span></div>
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/connect-token</code><span>Create a noVNC link.</span></div>
           </div>
@@ -374,9 +375,9 @@ export function docsPage() {
           <h2>Use your language</h2>
           <p>The repository includes small clients with the same core operations: session lifecycle, readiness, runs, polling, aborting, structured output, and noVNC links.</p>
           <div class="client-cards">
-            <a class="client-card" href="https://github.com/esokullu/webbrain-platform/blob/main/clients/node/webbrain-client.js"><strong>Node.js</strong><span>Node 18+ · native fetch</span></a>
-            <a class="client-card" href="https://github.com/esokullu/webbrain-platform/blob/main/clients/python/webbrain_client.py"><strong>Python</strong><span>Python 3.9+ · standard library</span></a>
-            <a class="client-card" href="https://github.com/esokullu/webbrain-platform/blob/main/clients/php/WebBrainClient.php"><strong>PHP</strong><span>PHP 8.1+ · cURL</span></a>
+            <a class="client-card" href="https://github.com/esokullu/webbrain-platform/tree/main/clients/node"><strong>Node.js</strong><span>Node 18+ · native fetch</span></a>
+            <a class="client-card" href="https://github.com/esokullu/webbrain-platform/tree/main/clients/python"><strong>Python</strong><span>Python 3.9+ · standard library</span></a>
+            <a class="client-card" href="https://github.com/esokullu/webbrain-platform/tree/main/clients/php"><strong>PHP</strong><span>PHP 8.1+ · cURL</span></a>
           </div>
         </section>
       </article>
