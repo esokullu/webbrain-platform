@@ -5,7 +5,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
-import { buildCloudStoragePatch, storagePatchMismatches } from '../src/shared/cloud-preset.js';
+import {
+  buildCloudStartupTabPlan,
+  buildCloudStoragePatch,
+  storagePatchMismatches,
+} from '../src/shared/cloud-preset.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
@@ -153,33 +157,41 @@ async function waitForExtensionId() {
   throw new Error('Could not detect the WebBrain extension ID from DevTools targets or profile preferences.');
 }
 
-function normalizedPageKey(value) {
-  try {
-    const url = new URL(value);
-    const hostname = url.hostname.replace(/^www\./, '');
-    const pathname = url.pathname.replace(/\/+$/, '') || '/';
-    return `${url.protocol}//${hostname}${pathname}${url.search}`;
-  } catch {
-    return String(value || '');
-  }
-}
-
 async function normalizeStartupTabs(extensionId) {
   const targets = await devtoolsJson('/json/list').catch(() => []);
-  const startKey = normalizedPageKey(startUrl);
-  let keptStartPage = false;
-  for (const target of targets) {
-    if (target.type !== 'page') continue;
-    const targetExtensionId = extensionIdFromUrl(target.url);
-    const wrongSeedPage = targetExtensionId
-      && targetExtensionId !== extensionId
-      && /\/src\/ui\/settings\.html(?:$|[?#])/.test(target.url);
-    const isStartPage = normalizedPageKey(target.url) === startKey;
-    if (wrongSeedPage || (isStartPage && keptStartPage)) {
-      await closeTarget(target.id).catch(() => {});
-      continue;
+  const plan = buildCloudStartupTabPlan(targets, startUrl);
+  for (const targetId of plan.closeTargetIds) {
+    await closeTarget(targetId).catch(() => {});
+  }
+
+  if (!plan.startPageUrl) throw new Error('WebBrain cloud start page was not found after startup.');
+  const worker = targets.find(target => target.type === 'service_worker'
+    && extensionIdFromUrl(target.url) === extensionId);
+  if (!worker?.webSocketDebuggerUrl) throw new Error('WebBrain extension service worker was not available for tab normalization.');
+
+  const cdp = createCdpClient(worker.webSocketDebuggerUrl);
+  try {
+    await cdp.open();
+    await cdp.call('Runtime.enable');
+    const result = await cdp.call('Runtime.evaluate', {
+      expression: `
+        (async () => {
+          const tabs = await chrome.tabs.query({});
+          const tab = tabs.find(item => item.url === ${JSON.stringify(plan.startPageUrl)});
+          if (!tab?.id) return { ok: false, error: 'start tab not found' };
+          await chrome.tabs.update(tab.id, { active: true, pinned: true });
+          return { ok: true, tab_id: tab.id };
+        })()
+      `,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    const normalized = result.result?.value;
+    if (result.exceptionDetails || !normalized?.ok) {
+      throw new Error(normalized?.error || result.exceptionDetails?.text || 'could not pin the WebBrain start tab');
     }
-    if (isStartPage) keptStartPage = true;
+  } finally {
+    cdp.close();
   }
 }
 

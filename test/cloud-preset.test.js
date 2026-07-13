@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   WEBBRAIN_CLOUD_PRESET_VERSION,
+  buildCloudStartupTabPlan,
   buildCloudStoragePatch,
   storagePatchMismatches,
 } from '../src/shared/cloud-preset.js';
@@ -51,4 +52,19 @@ test('cloud storage verification identifies only mismatched keys', () => {
     storagePatchMismatches({ ...expected, onboardingComplete: false }, expected),
     ['onboardingComplete'],
   );
+});
+
+test('cloud startup keeps one start page and closes extension settings pages', () => {
+  const plan = buildCloudStartupTabPlan([
+    { id: 'settings-current', type: 'page', url: 'chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/src/ui/settings.html' },
+    { id: 'start-one', type: 'page', url: 'https://www.webbrain.one/' },
+    { id: 'start-two', type: 'page', url: 'https://webbrain.one' },
+    { id: 'worker', type: 'service_worker', url: 'chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/background.js' },
+    { id: 'other', type: 'page', url: 'https://example.com/' },
+  ], 'https://webbrain.one');
+
+  assert.deepEqual(plan, {
+    closeTargetIds: ['settings-current', 'start-two'],
+    startPageUrl: 'https://www.webbrain.one/',
+  });
 });
