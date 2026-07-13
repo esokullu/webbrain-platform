@@ -78,6 +78,22 @@ const TABS = [
   ['php', 'PHP'],
 ];
 
+const TOKEN_PATTERNS = {
+  rest: /#[^\n]*|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|\$[A-Za-z_][A-Za-z0-9_]*|\b(?:export|until|do|done|sleep|curl|jq)\b|\b(?:true|false|null)\b|\b\d+\b/gm,
+  node: /\/\/[^\n]*|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`|\b(?:import|from|const|let|await|new|export|class|async|throw|return|true|false|null|undefined)\b|\b\d+(?:\.\d+)?\b|\b[A-Za-z_$][A-Za-z0-9_$]*(?=\()/gm,
+  python: /#[^\n]*|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|\b(?:import|from|as|class|def|return|raise|if|else|elif|while|for|in|with|try|except|True|False|None)\b|\b\d+(?:\.\d+)?\b|\b[A-Za-z_][A-Za-z0-9_]*(?=\()/gm,
+  php: /<\?php|\/\/[^\n]*|#[^\n]*|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|\$[A-Za-z_][A-Za-z0-9_]*|\b(?:require_once|new|print_r|true|false|null|function|public|private|class|final|return|throw)\b|\b\d+(?:\.\d+)?\b|(?:->|::)[A-Za-z_][A-Za-z0-9_]*/gm,
+};
+
+const KEYWORDS = {
+  rest: new Set(['export', 'until', 'do', 'done']),
+  node: new Set(['import', 'from', 'const', 'let', 'await', 'new', 'export', 'class', 'async', 'throw', 'return']),
+  python: new Set(['import', 'from', 'as', 'class', 'def', 'return', 'raise', 'if', 'else', 'elif', 'while', 'for', 'in', 'with', 'try', 'except']),
+  php: new Set(['<?php', 'require_once', 'new', 'function', 'public', 'private', 'class', 'final', 'return', 'throw']),
+};
+
+const LITERALS = new Set(['true', 'false', 'null', 'undefined', 'True', 'False', 'None']);
+
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, char => ({
     '&': '&amp;',
@@ -88,11 +104,31 @@ function escapeHtml(value) {
   }[char]));
 }
 
+function highlightedCode(source, language) {
+  const pattern = TOKEN_PATTERNS[language];
+  let html = '';
+  let cursor = 0;
+  for (const match of source.matchAll(pattern)) {
+    html += escapeHtml(source.slice(cursor, match.index));
+    const token = match[0];
+    let kind = 'function';
+    if (token.startsWith('#') || token.startsWith('//')) kind = 'comment';
+    else if (/^['"`]/.test(token)) kind = 'string';
+    else if (token.startsWith('$')) kind = 'variable';
+    else if (/^\d/.test(token)) kind = 'number';
+    else if (LITERALS.has(token)) kind = 'literal';
+    else if (KEYWORDS[language].has(token)) kind = 'keyword';
+    html += `<span class="tok-${kind}">${escapeHtml(token)}</span>`;
+    cursor = match.index + token.length;
+  }
+  return html + escapeHtml(source.slice(cursor));
+}
+
 export function docsPage() {
   const tabButtons = TABS.map(([id, label], index) => `
     <button class="code-tab" id="tab-${id}" type="button" role="tab" aria-selected="${index === 0}" aria-controls="panel-${id}" tabindex="${index === 0 ? 0 : -1}" data-client="${id}">${label}</button>`).join('');
   const tabPanels = TABS.map(([id, label], index) => `
-    <pre class="code-panel" id="panel-${id}" role="tabpanel" aria-labelledby="tab-${id}" ${index === 0 ? '' : 'hidden'}><code>${escapeHtml(EXAMPLES[id])}</code></pre>`).join('');
+    <pre class="code-panel language-${id}" id="panel-${id}" role="tabpanel" aria-labelledby="tab-${id}" ${index === 0 ? '' : 'hidden'}><code>${highlightedCode(EXAMPLES[id], id)}</code></pre>`).join('');
 
   return `<!doctype html>
 <html lang="en">
@@ -158,6 +194,12 @@ export function docsPage() {
     .copy-button:hover { background: rgba(255,255,255,.10); color: white; }
     .code-panel { min-height: 420px; max-height: 580px; margin: 0; padding: 28px; overflow: auto; color: #dfe5f5; font: 13px/1.75 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; tab-size: 2; white-space: pre; }
     .code-panel[hidden] { display: none; }
+    .tok-comment { color: #77849f; font-style: italic; }
+    .tok-keyword { color: #c8a7ff; font-weight: 650; }
+    .tok-string { color: #9de2b0; }
+    .tok-variable { color: #f2c879; }
+    .tok-number, .tok-literal { color: #ff9f7a; }
+    .tok-function { color: #82b7ff; }
     .docs-grid { display: grid; grid-template-columns: 220px minmax(0,1fr); gap: 56px; margin-top: 76px; align-items: start; }
     .toc { position: sticky; top: 94px; display: grid; gap: 5px; }
     .toc-label { margin-bottom: 7px; color: var(--text-dim); font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
