@@ -88,6 +88,24 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   });
   assert.equal(keyRes.status, 201);
   assert.match(keyRes.body.key, /^wbp_/);
+  assert.match(keyRes.body.api_key.prefix, /^[a-f0-9]{8}$/);
+
+  const legacyRawKey = 'wbp_ab_cd12_legacy-secret';
+  const legacyUser = await ctx.store.findUserByEmail('a@example.com');
+  await ctx.store.createApiKey({
+    id: 'key_legacy_underscore',
+    user_id: legacyUser.id,
+    name: 'legacy underscore prefix',
+    prefix: 'ab_cd12',
+    key_hash: hashToken(legacyRawKey),
+    last_used_at: null,
+    revoked_at: null,
+    created_at: new Date().toISOString(),
+  });
+  const legacyAuth = await request(ctx.base, '/api/me', {
+    headers: { authorization: `Bearer ${legacyRawKey}` },
+  });
+  assert.equal(legacyAuth.status, 200);
 
   const sessionRes = await request(ctx.base, '/api/browser-sessions', {
     method: 'POST',

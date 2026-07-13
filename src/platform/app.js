@@ -22,6 +22,16 @@ function wantsJson(req) {
   return req.path.startsWith('/api/') || req.headers.accept?.includes('application/json');
 }
 
+function apiKeyPrefixCandidates(rawKey) {
+  if (!String(rawKey).startsWith('wbp_')) return [];
+  const payload = String(rawKey).slice(4);
+  return [...new Set([
+    payload.slice(0, 8),
+    payload.slice(0, 7),
+    payload.split('_')[0],
+  ].filter(Boolean))];
+}
+
 function setSessionCookie(res, config, token, expiresAt) {
   const attrs = [
     `${config.cookieName}=${encodeURIComponent(token)}`,
@@ -610,8 +620,12 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
       const authHeader = req.headers.authorization || '';
       if (authHeader.toLowerCase().startsWith('bearer ')) {
         const rawKey = authHeader.slice(7).trim();
-        const prefix = rawKey.split('_')[1] || '';
-        const apiKey = prefix ? await store.findApiKey(prefix, hashToken(rawKey)) : null;
+        const keyHash = hashToken(rawKey);
+        let apiKey = null;
+        for (const prefix of apiKeyPrefixCandidates(rawKey)) {
+          apiKey = await store.findApiKey(prefix, keyHash);
+          if (apiKey) break;
+        }
         if (apiKey) {
           await store.touchApiKey(apiKey.id, nowIso());
           req.auth = { type: 'api_key', user: apiKey.user, apiKey };
@@ -769,7 +783,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
   });
 
   app.post('/api/api-keys', requireAuth, async (req, res) => {
-    const prefix = randomSecret(5).slice(0, 8);
+    const prefix = hashToken(randomSecret(16)).slice(0, 8);
     const secret = randomSecret(24);
     const rawKey = `wbp_${prefix}_${secret}`;
     const now = nowIso();
