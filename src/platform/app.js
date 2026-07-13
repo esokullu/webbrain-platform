@@ -191,10 +191,12 @@ function dashboardPage(user) {
     .brand img { width: 30px; height: 30px; border-radius: 8px; box-shadow: 0 6px 18px var(--accent-glow); }
     .brand-domain { color: var(--accent2); opacity: .68; font-weight: 400; }
     .account { display: flex; align-items: center; gap: 12px; }
+    .header-nav { display: flex; align-items: center; gap: 4px; padding: 3px; border: 1px solid var(--border); border-radius: 9px; background: rgba(255,253,248,.55); }
     .account-email { color: var(--text-dim); font-size: 13px; }
-    .header-link { color: var(--text-dim); font-size: 12px; font-weight: 700; text-decoration: none; }
-    .header-link:hover { color: var(--text); }
+    .header-link { min-height: 28px; display: inline-flex; align-items: center; padding: 4px 9px; border-radius: 6px; color: var(--text-dim); font-size: 12px; font-weight: 700; text-decoration: none; }
+    .header-link:hover, .header-link[aria-current="page"] { background: var(--card); color: var(--text); box-shadow: 0 2px 8px var(--shadow); }
     main { max-width: 1480px; margin: 0 auto; padding: 32px 24px 48px; }
+    .dashboard-view[hidden] { display: none; }
     .page-intro { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
     .eyebrow { margin: 0 0 5px; color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
     h1 { margin: 0; font-size: clamp(30px, 4vw, 44px); line-height: 1.05; letter-spacing: -.035em; }
@@ -216,6 +218,7 @@ function dashboardPage(user) {
     .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .grid { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); gap: 18px; align-items: start; }
     .grid.sessions-collapsed { grid-template-columns: 44px minmax(0, 1fr); gap: 12px; }
+    .workspace-column { min-width: 0; display: grid; gap: 18px; }
     .panel { overflow: hidden; background: rgba(255,253,248,.92); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 16px 42px var(--shadow); }
     .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 16px 13px; border-bottom: 1px solid var(--border); }
     .panel-kicker { color: var(--text-dim); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
@@ -252,7 +255,7 @@ function dashboardPage(user) {
     .message { margin-top: 10px; min-height: 20px; color: var(--success); font-size: 12px; overflow-wrap: anywhere; }
     .message.error { color: var(--danger); }
     .api-key-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
-    .api-panel { grid-column: 1 / -1; }
+    .api-panel { max-width: 980px; margin: 0 auto; }
     .api-description { margin: 3px 0 0; color: var(--text-dim); font-size: 12px; }
     .docs-link { align-self: center; }
     .secret { display: none; margin-top: 10px; padding: 11px; border: 1px solid var(--border); border-radius: 8px; background: rgba(89,55,25,.04); overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
@@ -264,6 +267,19 @@ function dashboardPage(user) {
     .api-key-actions { display: flex; align-items: center; gap: 8px; }
     .api-key-state { color: var(--success); font-size: 11px; font-weight: 700; }
     .api-key-state.revoked { color: var(--text-dim); }
+    .connection-panel { min-width: 0; }
+    .connection-head { align-items: flex-start; }
+    .connection-session { max-width: 48%; padding: 5px 8px; border: 1px solid var(--border); border-radius: 7px; background: rgba(89,55,25,.035); color: var(--text-dim); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .code-tabs { display: flex; gap: 4px; margin-bottom: 8px; padding: 4px; border-radius: 9px; background: var(--surface); overflow-x: auto; }
+    .code-tab { min-height: 29px; flex: 0 0 auto; padding: 4px 10px; border-color: transparent; background: transparent; color: var(--text-dim); box-shadow: none; }
+    .code-tab:hover, .code-tab[aria-selected="true"] { background: var(--card); border-color: var(--border); color: var(--text); box-shadow: 0 2px 8px var(--shadow); }
+    .code-shell { overflow: hidden; border-radius: 11px; background: #211812; color: #f8ead3; }
+    .code-shell pre { min-height: 230px; margin: 0; padding: 18px; overflow: auto; font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; tab-size: 2; }
+    .code-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 10px; border-top: 1px solid rgba(248,234,211,.12); background: rgba(255,255,255,.03); }
+    .code-note { color: #cbbda8; font-size: 11px; }
+    .code-actions { display: flex; align-items: center; gap: 7px; }
+    .code-actions .button-link, .code-actions button { min-height: 29px; border-color: rgba(248,234,211,.22); background: transparent; color: #f8ead3; box-shadow: none; }
+    .code-actions .button-link:hover, .code-actions button:hover { background: rgba(255,255,255,.09); }
     dialog { width: min(440px, calc(100vw - 28px)); padding: 0; border: 1px solid var(--border); border-radius: 16px; background: var(--card); color: var(--text); box-shadow: 0 28px 80px rgba(44,24,16,.24); }
     dialog::backdrop { background: rgba(15,12,20,.46); backdrop-filter: blur(3px); }
     .dialog-body { padding: 22px; }
@@ -292,8 +308,10 @@ function dashboardPage(user) {
     @media (max-width: 620px) {
       .brand { font-size: 17px; gap: 7px; }
       .brand img { width: 27px; height: 27px; }
+      .brand-domain, #refreshBtn { display: none; }
       .account { gap: 6px; }
       .account-email { display: none; }
+      .header-nav { gap: 2px; }
       .page-intro { margin-bottom: 18px; }
       .viewer-actions { align-items: flex-start; flex-direction: column; }
       .viewer-actions .toolbar { width: 100%; }
@@ -304,6 +322,10 @@ function dashboardPage(user) {
       .api-key-item { grid-template-columns: 1fr; }
       .api-key-actions { justify-content: space-between; }
       .api-panel .panel-head { align-items: stretch; flex-direction: column; }
+      .connection-head { align-items: stretch; flex-direction: column; }
+      .connection-session { max-width: 100%; }
+      .code-footer { align-items: stretch; flex-direction: column; }
+      .code-actions > * { flex: 1; justify-content: center; }
       .docs-link { justify-content: center; }
     }
   </style>
@@ -316,7 +338,10 @@ function dashboardPage(user) {
         <img src="https://webbrain.one/logo-github.png" alt=""> WebBrain<span class="brand-domain">.cloud</span>
       </a>
       <div class="account">
-        <a class="header-link" href="#apiKeysPanel">API keys</a>
+        <div class="header-nav" aria-label="Dashboard sections">
+          <a class="header-link" href="#browsers" data-view-target="browsers" aria-current="page">Browsers</a>
+          <a class="header-link" href="#api-keys" data-view-target="api-keys">API keys</a>
+        </div>
         <span class="account-email">${escapeHtml(user.email)}</span>
         <button class="secondary" id="refreshBtn" type="button">Refresh</button>
         <form method="post" action="/auth/logout"><button class="secondary" type="submit">Log out</button></form>
@@ -324,55 +349,97 @@ function dashboardPage(user) {
     </div>
   </nav>
   <main>
-    <section class="page-intro">
-      <div>
-        <p class="eyebrow">WebBrain Cloud</p>
-        <h1>Cloud browsers</h1>
-      </div>
-      <p class="intro-copy">Your persistent WebBrain sessions—visible here and controllable through the API.</p>
-    </section>
-    <div class="grid" id="dashboardGrid">
-      <section class="panel session-panel" id="sessionPanel">
-        <div class="panel-head">
-          <div class="session-heading">
-            <div>
-              <div class="panel-kicker">Workspace</div>
-              <h2>Browser sessions</h2>
-            </div>
-            <div class="session-panel-actions">
-              <button class="destroyed-toggle" id="toggleDestroyedBtn" type="button" aria-pressed="false" style="display:none">Show destroyed</button>
-              <span class="status" id="sessionCount">0</span>
-              <button class="collapse-sessions" id="collapseSessionsBtn" type="button" aria-controls="sessionPanelBody" aria-expanded="true" title="Collapse browser sessions"><span aria-hidden="true">‹</span></button>
-            </div>
-          </div>
+    <section class="dashboard-view" id="browserView">
+      <section class="page-intro">
+        <div>
+          <p class="eyebrow">WebBrain Cloud</p>
+          <h1>Cloud browsers</h1>
         </div>
-        <div class="panel-body" id="sessionPanelBody">
-          <div class="create-row">
-            <input id="newSessionName" aria-label="Browser name" maxlength="120" placeholder="Name this browser (optional)">
-            <button id="createSessionBtn" type="button">+ New browser</button>
-          </div>
-          <div class="sessions" id="sessions"></div>
-          <div class="message" id="sessionMessage"></div>
-        </div>
+        <p class="intro-copy">Your persistent WebBrain sessions—visible here and controllable through the API.</p>
       </section>
-      <section class="panel viewer-wrap">
-        <div class="viewer-actions">
-          <button class="viewer-title-button" id="renameSessionBtn" type="button" disabled title="Rename browser"><span class="viewer-title" id="viewerTitle">Browser preview</span><span aria-hidden="true">✎</span></button>
-          <div class="toolbar">
-            <button class="secondary" id="connectBtn" type="button" disabled>Connect</button>
-            <a class="button-link" id="externalLink" href="#" target="_blank" rel="noopener" style="display:none">Open separately</a>
-            <button class="danger" id="deleteSessionBtn" type="button" disabled>Delete</button>
+      <div class="grid" id="dashboardGrid">
+        <section class="panel session-panel" id="sessionPanel">
+          <div class="panel-head">
+            <div class="session-heading">
+              <div>
+                <div class="panel-kicker">Workspace</div>
+                <h2>Browser sessions</h2>
+              </div>
+              <div class="session-panel-actions">
+                <button class="destroyed-toggle" id="toggleDestroyedBtn" type="button" aria-pressed="false" style="display:none">Show destroyed</button>
+                <span class="status" id="sessionCount">0</span>
+                <button class="collapse-sessions" id="collapseSessionsBtn" type="button" aria-controls="sessionPanelBody" aria-expanded="true" title="Collapse browser sessions"><span aria-hidden="true">‹</span></button>
+              </div>
+            </div>
           </div>
+          <div class="panel-body" id="sessionPanelBody">
+            <div class="create-row">
+              <input id="newSessionName" aria-label="Browser name" maxlength="120" placeholder="Name this browser (optional)">
+              <button id="createSessionBtn" type="button">+ New browser</button>
+            </div>
+            <div class="sessions" id="sessions"></div>
+            <div class="message" id="sessionMessage"></div>
+          </div>
+        </section>
+        <div class="workspace-column">
+          <section class="panel viewer-wrap">
+            <div class="viewer-actions">
+              <button class="viewer-title-button" id="renameSessionBtn" type="button" disabled title="Rename browser"><span class="viewer-title" id="viewerTitle">Browser preview</span><span aria-hidden="true">✎</span></button>
+              <div class="toolbar">
+                <button class="secondary" id="connectBtn" type="button" disabled>Connect</button>
+                <a class="button-link" id="externalLink" href="#" target="_blank" rel="noopener" style="display:none">Open separately</a>
+                <button class="danger" id="deleteSessionBtn" type="button" disabled>Delete</button>
+              </div>
+            </div>
+            <div id="viewerEmpty" class="empty">Create or select a browser, then connect here.</div>
+            <iframe id="novncFrame" title="WebBrain cloud browser noVNC" style="display:none" referrerpolicy="no-referrer"></iframe>
+          </section>
+          <section class="panel connection-panel" aria-labelledby="connectionTitle">
+            <div class="panel-head connection-head">
+              <div>
+                <div class="panel-kicker">Use this browser from code</div>
+                <h2 id="connectionTitle">Run a task</h2>
+                <p class="api-description">The selected session stays visible above while your code controls it.</p>
+              </div>
+              <span class="connection-session" id="connectionSessionId">Select a browser</span>
+            </div>
+            <div class="panel-body">
+              <div class="code-tabs" role="tablist" aria-label="Choose a language">
+                <button class="code-tab" id="connectionTabRest" type="button" role="tab" aria-selected="true" data-code-client="rest">REST</button>
+                <button class="code-tab" type="button" role="tab" aria-selected="false" data-code-client="node">Node.js</button>
+                <button class="code-tab" type="button" role="tab" aria-selected="false" data-code-client="python">Python</button>
+                <button class="code-tab" type="button" role="tab" aria-selected="false" data-code-client="php">PHP</button>
+              </div>
+              <div class="code-shell">
+                <pre aria-live="polite"><code id="connectionCode"></code></pre>
+                <div class="code-footer">
+                  <span class="code-note" id="connectionNote">Examples use the selected session ID and <code>WEBBRAIN_API_KEY</code>.</span>
+                  <div class="code-actions">
+                    <a class="button-link" href="#api-keys" data-view-target="api-keys">Get an API key</a>
+                    <a class="button-link" href="/docs">Full docs</a>
+                    <button id="copyConnectionCode" type="button">Copy</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
-        <div id="viewerEmpty" class="empty">Create or select a browser, then connect here.</div>
-        <iframe id="novncFrame" title="WebBrain cloud browser noVNC" style="display:none" referrerpolicy="no-referrer"></iframe>
+      </div>
+    </section>
+    <section class="dashboard-view" id="apiKeysView" hidden>
+      <section class="page-intro">
+        <div>
+          <p class="eyebrow">Developer access</p>
+          <h1>API keys</h1>
+        </div>
+        <p class="intro-copy">Create and revoke the keys your tools use to control these browser sessions.</p>
       </section>
       <section class="panel api-panel" id="apiKeysPanel">
         <div class="panel-head">
           <div>
-            <div class="panel-kicker">Developer access</div>
-            <h2>API keys</h2>
-            <p class="api-description">Control the same visible browsers from your own tools.</p>
+            <div class="panel-kicker">Credentials</div>
+            <h2>Your API keys</h2>
+            <p class="api-description">Keys grant access to your browsers. Store them like passwords.</p>
           </div>
           <a class="button-link docs-link" href="/docs">API documentation →</a>
         </div>
@@ -386,7 +453,7 @@ function dashboardPage(user) {
           <div class="api-key-list" id="apiKeysList"></div>
         </div>
       </section>
-    </div>
+    </section>
   </main>
   <dialog id="renameDialog">
     <form class="dialog-body" method="dialog" id="renameForm">
@@ -434,6 +501,14 @@ function dashboardPage(user) {
     const newApiKey = document.getElementById('newApiKey');
     const apiKeyMessage = document.getElementById('apiKeyMessage');
     const apiKeysList = document.getElementById('apiKeysList');
+    const browserView = document.getElementById('browserView');
+    const apiKeysView = document.getElementById('apiKeysView');
+    const viewLinks = [...document.querySelectorAll('[data-view-target]')];
+    const connectionSessionId = document.getElementById('connectionSessionId');
+    const connectionCode = document.getElementById('connectionCode');
+    const connectionTabs = [...document.querySelectorAll('[data-code-client]')];
+    const copyConnectionCode = document.getElementById('copyConnectionCode');
+    const connectionNote = document.getElementById('connectionNote');
     const renameDialog = document.getElementById('renameDialog');
     const renameForm = document.getElementById('renameForm');
     const renameInput = document.getElementById('renameInput');
@@ -443,8 +518,20 @@ function dashboardPage(user) {
     const deleteConfirmInput = document.getElementById('deleteConfirmInput');
     const cancelDeleteBtn = document.getElementById('cancelDeleteBtn');
     const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
-    const state = { sessions: [], apiKeys: [], selectedId: null, showDestroyed: false, deleteTargetId: null };
+    const state = { sessions: [], apiKeys: [], selectedId: null, showDestroyed: false, deleteTargetId: null, codeClient: 'rest' };
     const sessionsCollapsedKey = 'webbrain.sessionsCollapsed';
+
+    function setDashboardView(view, updateUrl) {
+      const nextView = view === 'api-keys' ? 'api-keys' : 'browsers';
+      browserView.hidden = nextView !== 'browsers';
+      apiKeysView.hidden = nextView !== 'api-keys';
+      for (const link of viewLinks) {
+        if (link.dataset.viewTarget === nextView) link.setAttribute('aria-current', 'page');
+        else link.removeAttribute('aria-current');
+      }
+      if (updateUrl) history.pushState(null, '', nextView === 'api-keys' ? '#api-keys' : '#browsers');
+      if (nextView === 'api-keys') loadApiKeys().catch(e => showMessage(apiKeyMessage, e.message, true));
+    }
 
     function setSessionsCollapsed(collapsed) {
       dashboardGrid.classList.toggle('sessions-collapsed', collapsed);
@@ -486,6 +573,49 @@ function dashboardPage(user) {
       return session?.display_name || ('Browser ' + String(session?.id || '').slice(-4).toUpperCase());
     }
 
+    function connectionExamples(sessionId) {
+      return {
+        rest: 'curl -X POST "https://webbrain.cloud/api/browser-sessions/' + sessionId + '/runs" -H "Authorization: Bearer $WEBBRAIN_API_KEY" -H "Content-Type: application/json" --data ' + JSON.stringify('{"task":"Open example.com and tell me the page title","wait":true}'),
+        node: [
+          "import { WebBrainClient } from './webbrain-client.js';",
+          '',
+          'const client = new WebBrainClient({',
+          '  apiKey: process.env.WEBBRAIN_API_KEY,',
+          '});',
+          "const run = await client.createRun('" + sessionId + "', {",
+          "  task: 'Open example.com and tell me the page title',",
+          '  wait: true,',
+          '});',
+          'console.log(run.result);',
+        ].join(String.fromCharCode(10)),
+        python: [
+          'import os',
+          'from webbrain_client import WebBrainClient',
+          '',
+          "client = WebBrainClient(os.environ['WEBBRAIN_API_KEY'])",
+          "run = client.create_run('" + sessionId + "', 'Open example.com and tell me the page title', wait=True)",
+          "print(run['result'])",
+        ].join(String.fromCharCode(10)),
+        php: [
+          '<?php',
+          "require_once __DIR__ . '/WebBrainClient.php';",
+          '',
+          "$client = new WebBrainClient(getenv('WEBBRAIN_API_KEY') ?: '');",
+          "$run = $client->createRun('" + sessionId + "', 'Open example.com and tell me the page title', ['wait' => true]);",
+          "print_r($run['result']);",
+        ].join(String.fromCharCode(10)),
+      };
+    }
+
+    function renderConnectionExample() {
+      const session = selectedSession();
+      const sessionId = session?.id || 'bs_your_session';
+      connectionSessionId.textContent = session ? session.id : 'Select a browser';
+      connectionSessionId.title = session ? session.id : '';
+      connectionCode.textContent = connectionExamples(sessionId)[state.codeClient];
+      for (const tab of connectionTabs) tab.setAttribute('aria-selected', String(tab.dataset.codeClient === state.codeClient));
+    }
+
     function formatDate(value) {
       if (!value) return 'Never';
       try { return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)); }
@@ -523,7 +653,7 @@ function dashboardPage(user) {
         title.textContent = browserName(session);
         const meta = document.createElement('div');
         meta.className = 'session-meta';
-        meta.textContent = session.public_ip || (session.status === 'provisioning' ? 'Preparing browser…' : 'Waiting for browser');
+        meta.textContent = session.id;
         details.append(title, meta);
         const status = document.createElement('span');
         status.className = 'status';
@@ -546,6 +676,7 @@ function dashboardPage(user) {
       deleteSessionBtn.disabled = !session || session.status === 'destroyed';
       renameSessionBtn.disabled = !session || session.status === 'destroyed';
       viewerTitle.textContent = session ? browserName(session) + ' · ' + session.status : 'Browser preview';
+      renderConnectionExample();
     }
 
     async function loadSessions() {
@@ -774,6 +905,33 @@ function dashboardPage(user) {
       confirmDeleteBtn.disabled = true;
     });
     createApiKeyBtn.addEventListener('click', createApiKey);
+    for (const link of viewLinks) {
+      link.addEventListener('click', event => {
+        event.preventDefault();
+        setDashboardView(link.dataset.viewTarget, true);
+      });
+    }
+    for (const tab of connectionTabs) {
+      tab.addEventListener('click', () => {
+        state.codeClient = tab.dataset.codeClient;
+        renderConnectionExample();
+      });
+    }
+    copyConnectionCode.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(connectionCode.textContent);
+        copyConnectionCode.textContent = 'Copied';
+        connectionNote.textContent = 'Code copied to your clipboard.';
+        setTimeout(() => {
+          copyConnectionCode.textContent = 'Copy';
+          connectionNote.textContent = 'Examples use the selected session ID and WEBBRAIN_API_KEY.';
+        }, 1800);
+      } catch {
+        connectionNote.textContent = 'Copy failed. Select the code and copy it manually.';
+      }
+    });
+    window.addEventListener('hashchange', () => setDashboardView(location.hash === '#api-keys' ? 'api-keys' : 'browsers', false));
+    setDashboardView(location.hash === '#api-keys' ? 'api-keys' : 'browsers', false);
     loadSessions().catch(e => showMessage(sessionMessage, e.message, true));
     loadApiKeys().catch(e => showMessage(apiKeyMessage, e.message, true));
     setInterval(() => loadSessions().catch(() => {}), 15000);
