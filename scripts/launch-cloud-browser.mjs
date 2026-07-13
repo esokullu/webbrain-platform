@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
+import { buildCloudStoragePatch, storagePatchMismatches } from '../src/shared/cloud-preset.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
@@ -247,27 +248,35 @@ async function preseedExtension(extensionId) {
     await waitForExtensionPage(cdp);
 
     const providerConfig = webbrainCloudProviderConfig();
-    const storagePatch = {
-      askBeforeConsequentialActions: false,
-      webbrainCloudBridgeEnabled: true,
-      webbrainCloudBridgeUrl: sidecarWsUrl,
-      webbrainCloudManaged: true,
-      activeProvider: 'webbrain_cloud',
-      tracingEnabled: boolEnv('WEBBRAIN_TRACING_ENABLED', true),
+    const currentResult = await cdp.call('Runtime.evaluate', {
+      expression: "chrome.storage.local.get(['webbrainCloudPresetVersion', 'providers'])",
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    if (currentResult.exceptionDetails) {
+      throw new Error(currentResult.exceptionDetails.text || 'Could not read WebBrain cloud preset state.');
+    }
+    const { patch: storagePatch, presetApplied, presetVersion } = buildCloudStoragePatch(
+      currentResult.result?.value || {},
+      {
+        bridgeUrl: sidecarWsUrl,
+        tracingEnabled: boolEnv('WEBBRAIN_TRACING_ENABLED', true),
+      },
+    );
+    const currentProviders = currentResult.result?.value?.providers || {};
+    const providers = {
+      ...currentProviders,
+      webbrain_cloud: {
+        ...(currentProviders.webbrain_cloud || {}),
+        ...providerConfig,
+      },
     };
 
     const expression = `
       (async () => {
         const providerConfig = ${JSON.stringify(providerConfig)};
         const storagePatch = ${JSON.stringify(storagePatch)};
-        const current = await chrome.storage.local.get(['providers']);
-        const providers = {
-          ...(current.providers || {}),
-          webbrain_cloud: {
-            ...(current.providers?.webbrain_cloud || {}),
-            ...providerConfig
-          }
-        };
+        const providers = ${JSON.stringify(providers)};
         await chrome.storage.local.set({ ...storagePatch, providers });
         try {
           await chrome.runtime.sendMessage({
@@ -289,7 +298,11 @@ async function preseedExtension(extensionId) {
           action: 'cloud_bridge_start',
           url: ${JSON.stringify(sidecarWsUrl)}
         });
-        return { ok: true, bridge };
+        return {
+          ok: true,
+          bridge,
+          preset: { applied: ${JSON.stringify(presetApplied)}, version: ${JSON.stringify(presetVersion)} },
+        };
       })()
     `;
 
@@ -301,7 +314,27 @@ async function preseedExtension(extensionId) {
     if (result.exceptionDetails) {
       throw new Error(result.exceptionDetails.text || 'Extension preseed failed.');
     }
-    return result.result?.value;
+    const seeded = result.result?.value;
+    if (!seeded?.ok) return seeded;
+
+    const expected = { ...storagePatch, providers };
+    const verifiedResult = await cdp.call('Runtime.evaluate', {
+      expression: `chrome.storage.local.get(${JSON.stringify(Object.keys(expected))})`,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    if (verifiedResult.exceptionDetails) {
+      throw new Error(verifiedResult.exceptionDetails.text || 'Could not verify WebBrain cloud preset state.');
+    }
+    const mismatches = storagePatchMismatches(verifiedResult.result?.value || {}, expected);
+    if (mismatches.length) {
+      return {
+        ...seeded,
+        ok: false,
+        error: `WebBrain cloud storage verification failed: ${mismatches.join(', ')}`,
+      };
+    }
+    return { ...seeded, storage_verified: true };
   } finally {
     cdp.close();
     await closeTarget(target.id).catch(() => {});
@@ -340,7 +373,7 @@ async function main() {
   const extensionId = await waitForExtensionId();
   const seeded = await preseedExtension(extensionId);
   if (!seeded?.ok || seeded?.bridge?.error) {
-    throw new Error(`WebBrain cloud bridge start failed: ${seeded?.bridge?.error || 'invalid extension response'}`);
+    throw new Error(`WebBrain cloud startup failed: ${seeded?.error || seeded?.bridge?.error || 'invalid extension response'}`);
   }
   const bridgeHealth = await waitForExtensionBridge();
   await normalizeStartupTabs(extensionId);
