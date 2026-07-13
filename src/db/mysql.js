@@ -68,7 +68,12 @@ export class MySqlStore {
       await this.pool.query(statement);
     }
     const [displayNameColumns] = await this.pool.execute(
-      'SHOW COLUMNS FROM browser_sessions LIKE :column',
+      `SELECT 1
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'browser_sessions'
+         AND COLUMN_NAME = :column
+       LIMIT 1`,
       { column: 'display_name' }
     );
     if (!displayNameColumns.length) {

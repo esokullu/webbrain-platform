@@ -7,6 +7,8 @@ test('browser display names are present in fresh schema and existing-database mi
   const schema = await readFile(new URL('../db/schema.sql', import.meta.url), 'utf8');
   const storeSource = await readFile(new URL('../src/db/mysql.js', import.meta.url), 'utf8');
   assert.match(schema, /display_name VARCHAR\(120\) NULL/);
+  assert.match(storeSource, /FROM information_schema\.COLUMNS/);
+  assert.doesNotMatch(storeSource, /SHOW COLUMNS FROM browser_sessions LIKE/);
   assert.match(storeSource, /ALTER TABLE browser_sessions ADD COLUMN display_name VARCHAR\(120\) NULL/);
 });
 
