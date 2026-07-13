@@ -43,36 +43,90 @@ function loginPage(error = '') {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>WebBrain Platform</title>
+  <title>WebBrain Cloud</title>
   <style>
-    body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f7f7f4; color: #202124; }
-    main { max-width: 920px; margin: 0 auto; padding: 64px 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-    h1 { font-size: 34px; margin: 0 0 12px; }
-    p { color: #5f6368; line-height: 1.5; }
-    form { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 20px; display: grid; gap: 12px; }
-    input, button { font: inherit; padding: 11px 12px; border-radius: 6px; border: 1px solid #c9c9c9; }
-    button { background: #202124; color: white; border-color: #202124; cursor: pointer; }
-    .forms { display: grid; gap: 16px; }
-    .error { color: #a33020; }
-    @media (max-width: 760px) { main { grid-template-columns: 1fr; padding-top: 36px; } }
+    :root {
+      --bg: #f7f1e6;
+      --card: #fffdf8;
+      --card-hover: #f2e9d4;
+      --surface: #ede2cb;
+      --border: rgba(89,55,25,0.15);
+      --text: #2c1810;
+      --text-dim: #6b5b47;
+      --accent: #5b52e8;
+      --accent2: #7c6ce6;
+      --accent-glow: rgba(91,82,232,0.20);
+      --danger: #a43b32;
+      --shadow: rgba(89,55,25,0.10);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+    .glow-bg { position: fixed; inset: 0; z-index: -1; overflow: hidden; }
+    .glow-bg::before { content: ''; position: absolute; width: 640px; height: 640px; top: -220px; left: 45%; transform: translateX(-50%); background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%); filter: blur(70px); }
+    .glow-bg::after { content: ''; position: absolute; width: 460px; height: 460px; bottom: -140px; right: -80px; background: radial-gradient(circle, rgba(167,139,250,0.14) 0%, transparent 70%); filter: blur(60px); }
+    nav { border-bottom: 1px solid var(--border); background: rgba(247,241,230,0.85); backdrop-filter: blur(20px); }
+    .nav-inner { max-width: 1100px; margin: 0 auto; min-height: 68px; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+    .brand { display: flex; align-items: center; gap: 10px; color: var(--accent); font-size: 20px; font-weight: 800; text-decoration: none; }
+    .brand img { width: 30px; height: 30px; border-radius: 8px; box-shadow: 0 6px 18px var(--accent-glow); }
+    .brand-domain { color: var(--accent2); opacity: .68; font-weight: 400; }
+    .nav-note { color: var(--text-dim); font-size: 13px; }
+    main { max-width: 1100px; margin: 0 auto; padding: 84px 24px 72px; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(320px, .9fr); align-items: center; gap: 72px; }
+    .eyebrow { margin: 0 0 16px; color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    h1 { max-width: 680px; margin: 0 0 20px; font-size: clamp(42px, 6vw, 68px); line-height: 1.02; letter-spacing: -.045em; }
+    h1 span { color: var(--accent); }
+    .intro { max-width: 620px; margin: 0; color: var(--text-dim); font-size: 18px; }
+    .trust-line { display: flex; align-items: center; gap: 10px; margin-top: 28px; color: var(--text-dim); font-size: 13px; }
+    .trust-dot { width: 8px; height: 8px; border-radius: 50%; background: #2d8866; box-shadow: 0 0 0 5px rgba(45,136,102,.10); }
+    .forms { display: grid; gap: 14px; }
+    form { position: relative; overflow: hidden; background: rgba(255,253,248,.9); border: 1px solid var(--border); border-radius: 16px; padding: 24px; display: grid; gap: 12px; box-shadow: 0 18px 46px var(--shadow); }
+    form::before { content: ''; position: absolute; inset: 0 0 auto; height: 3px; background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+    form strong { font-size: 16px; }
+    input, button { width: 100%; min-height: 44px; font: inherit; padding: 10px 12px; border-radius: 9px; border: 1px solid var(--border); }
+    input { background: rgba(89,55,25,.04); color: var(--text); }
+    input::placeholder { color: #8a7964; }
+    input:focus-visible, button:focus-visible, a:focus-visible { outline: 3px solid var(--accent-glow); outline-offset: 2px; }
+    button { border-color: var(--accent); background: var(--accent); color: white; font-weight: 700; cursor: pointer; box-shadow: 0 8px 22px var(--accent-glow); }
+    button:hover { background: #5047dc; transform: translateY(-1px); }
+    .register-form { box-shadow: none; background: rgba(255,253,248,.62); }
+    .register-form::before { display: none; }
+    .register-form button { background: transparent; border-color: var(--border); color: var(--text); box-shadow: none; }
+    .register-form button:hover { background: var(--card-hover); }
+    .error { padding: 12px 14px; border: 1px solid rgba(164,59,50,.25); border-radius: 10px; background: rgba(164,59,50,.07); color: var(--danger); }
+    @media (max-width: 800px) {
+      .nav-inner { padding-inline: 16px; }
+      .nav-note { display: none; }
+      main { grid-template-columns: 1fr; gap: 40px; padding: 48px 18px 56px; }
+      h1 { font-size: clamp(40px, 12vw, 58px); }
+    }
   </style>
 </head>
 <body>
+  <div class="glow-bg" aria-hidden="true"></div>
+  <nav>
+    <div class="nav-inner">
+      <a class="brand" href="https://webbrain.one/">
+        <img src="https://webbrain.one/logo-github.png" alt=""> WebBrain<span class="brand-domain">.cloud</span>
+      </a>
+      <span class="nav-note">A private WebBrain browser, ready anywhere.</span>
+    </div>
+  </nav>
   <main>
-    <section>
-      <h1>WebBrain Platform</h1>
-      <p>Run programmable WebBrain browser sessions in the cloud. Sign in to create a browser session, log into sites through noVNC, then call the API against that same browser profile.</p>
+    <section class="hero-copy">
+      <p class="eyebrow">WebBrain Cloud</p>
+      <h1>Your AI browser, <span>always within reach.</span></h1>
+      <p class="intro">Create a private WebBrain browser, sign in to the sites you use, and control the same visible session from the API.</p>
       ${error ? `<p class="error">${escapeHtml(error)}</p>` : ''}
+      <div class="trust-line"><span class="trust-dot"></span>Your browser profile stays isolated in its own cloud machine.</div>
     </section>
     <section class="forms">
       <form method="post" action="/auth/login">
-        <strong>Login</strong>
+        <strong>Sign in</strong>
         <input required type="email" name="email" placeholder="Email">
         <input required type="password" name="password" placeholder="Password">
-        <button type="submit">Login</button>
+        <button type="submit">Sign in</button>
       </form>
-      <form method="post" action="/auth/register">
-        <strong>Register</strong>
+      <form class="register-form" method="post" action="/auth/register">
+        <strong>New to WebBrain Cloud?</strong>
         <input required type="email" name="email" placeholder="Email">
         <input required minlength="8" type="password" name="password" placeholder="Password">
         <button type="submit">Create account</button>
@@ -89,92 +143,160 @@ function dashboardPage(user) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>WebBrain Platform</title>
+  <title>WebBrain Cloud</title>
   <style>
-    body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f6f7f5; color: #202124; }
-    main { max-width: 1280px; margin: 0 auto; padding: 28px 24px 40px; }
-    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #d9ddd6; padding-bottom: 16px; }
-    h1 { margin: 0; font-size: 26px; letter-spacing: 0; }
-    h2 { margin: 0; font-size: 17px; letter-spacing: 0; }
-    button, input, select { font: inherit; }
-    button { min-height: 38px; padding: 8px 12px; border-radius: 6px; border: 1px solid #202124; background: #202124; color: #fff; cursor: pointer; white-space: nowrap; }
-    button.secondary { background: #fff; color: #202124; border-color: #bfc5bd; }
-    button.danger { background: #8b1f14; border-color: #8b1f14; }
-    button:disabled { opacity: 0.55; cursor: not-allowed; }
-    button:focus-visible, .button-link:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid rgba(32, 33, 36, 0.22); outline-offset: 2px; }
-    .button-link { min-height: 38px; box-sizing: border-box; display: inline-flex; align-items: center; padding: 8px 12px; border-radius: 6px; border: 1px solid #bfc5bd; background: #fff; color: #202124; text-decoration: none; white-space: nowrap; }
-    input, select { min-height: 38px; box-sizing: border-box; border: 1px solid #c6cbc3; border-radius: 6px; padding: 8px 10px; background: #fff; color: #202124; }
-    .muted { color: #646b61; }
+    :root {
+      --bg: #f7f1e6;
+      --card: #fffdf8;
+      --card-hover: #f2e9d4;
+      --surface: #ede2cb;
+      --border: rgba(89,55,25,0.15);
+      --text: #2c1810;
+      --text-dim: #6b5b47;
+      --accent: #5b52e8;
+      --accent2: #7c6ce6;
+      --accent-glow: rgba(91,82,232,0.20);
+      --success: #2d8866;
+      --danger: #a43b32;
+      --shadow: rgba(89,55,25,0.10);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
+    .glow-bg { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+    .glow-bg::before { content: ''; position: absolute; width: 720px; height: 720px; top: -300px; left: 52%; transform: translateX(-50%); background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%); filter: blur(80px); }
+    .glow-bg::after { content: ''; position: absolute; width: 460px; height: 460px; top: 44%; right: -180px; background: radial-gradient(circle, rgba(167,139,250,.13) 0%, transparent 70%); filter: blur(60px); }
+    nav { position: sticky; top: 0; z-index: 20; border-bottom: 1px solid var(--border); background: rgba(247,241,230,.86); backdrop-filter: blur(20px); }
+    .nav-inner { max-width: 1480px; min-height: 68px; margin: 0 auto; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+    .brand { display: flex; align-items: center; gap: 10px; color: var(--accent); font-size: 20px; font-weight: 800; text-decoration: none; }
+    .brand img { width: 30px; height: 30px; border-radius: 8px; box-shadow: 0 6px 18px var(--accent-glow); }
+    .brand-domain { color: var(--accent2); opacity: .68; font-weight: 400; }
+    .account { display: flex; align-items: center; gap: 12px; }
+    .account-email { color: var(--text-dim); font-size: 13px; }
+    main { max-width: 1480px; margin: 0 auto; padding: 32px 24px 48px; }
+    .page-intro { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
+    .eyebrow { margin: 0 0 5px; color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: clamp(30px, 4vw, 44px); line-height: 1.05; letter-spacing: -.035em; }
+    .intro-copy { max-width: 560px; margin: 0; color: var(--text-dim); font-size: 14px; }
+    h2 { margin: 0; font-size: 16px; letter-spacing: -.01em; }
+    button, input { font: inherit; }
+    button { min-height: 40px; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; font-weight: 700; cursor: pointer; white-space: nowrap; box-shadow: 0 7px 18px var(--accent-glow); transition: transform .15s ease, background .15s ease, border-color .15s ease; }
+    button:hover { background: #5047dc; transform: translateY(-1px); }
+    button.secondary { background: rgba(255,253,248,.65); color: var(--text); border-color: var(--border); box-shadow: none; }
+    button.secondary:hover { background: var(--card-hover); }
+    button.danger { background: transparent; border-color: rgba(164,59,50,.28); color: var(--danger); box-shadow: none; }
+    button.danger:hover { background: rgba(164,59,50,.08); }
+    button:disabled { opacity: .48; cursor: not-allowed; transform: none; }
+    button:focus-visible, .button-link:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid var(--accent-glow); outline-offset: 2px; }
+    .button-link { min-height: 40px; display: inline-flex; align-items: center; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border); background: rgba(255,253,248,.65); color: var(--text); font-weight: 600; text-decoration: none; white-space: nowrap; }
+    .button-link:hover { background: var(--card-hover); }
+    input { min-height: 40px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 11px; background: rgba(89,55,25,.04); color: var(--text); }
+    input::placeholder { color: #8a7964; }
     .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .grid { display: grid; grid-template-columns: minmax(340px, 430px) minmax(0, 1fr); gap: 18px; margin-top: 20px; align-items: start; }
-    .grid.sessions-collapsed { grid-template-columns: 56px minmax(0, 1fr); gap: 12px; }
-    .panel { background: #fff; border: 1px solid #d9ddd6; border-radius: 8px; }
-    .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 14px 12px; border-bottom: 1px solid #edf0eb; }
+    .grid { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); gap: 18px; align-items: start; }
+    .grid.sessions-collapsed { grid-template-columns: 58px minmax(0, 1fr); gap: 12px; }
+    .panel { overflow: hidden; background: rgba(255,253,248,.92); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 16px 42px var(--shadow); }
+    .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 16px 13px; border-bottom: 1px solid var(--border); }
+    .panel-kicker { color: var(--text-dim); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
     .session-heading { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex: 1; }
-    .session-panel-actions { display: flex; align-items: center; gap: 8px; }
-    .collapse-sessions { width: 30px; min-height: 30px; padding: 0; display: inline-grid; place-items: center; background: #fff; color: #202124; border-color: #c6cbc3; font-size: 22px; line-height: 1; }
-    .collapse-sessions:hover { background: #f0f2ed; }
+    .session-panel-actions { display: flex; align-items: center; gap: 7px; }
+    .collapse-sessions { width: 30px; min-height: 30px; padding: 0; display: inline-grid; place-items: center; background: transparent; color: var(--text-dim); border-color: var(--border); box-shadow: none; font-size: 21px; line-height: 1; }
+    .collapse-sessions:hover { background: var(--card-hover); color: var(--text); }
     .session-panel.is-collapsed { align-self: stretch; min-height: 680px; }
-    .session-panel.is-collapsed .panel-head { height: 100%; box-sizing: border-box; padding: 9px 7px; border-bottom: 0; align-items: stretch; }
-    .session-panel.is-collapsed .session-heading { flex: 1; flex-direction: column; justify-content: flex-start; gap: 12px; padding-top: 0; }
-    .session-panel.is-collapsed .session-heading h2 { order: 2; flex: 1; writing-mode: vertical-rl; transform: rotate(180deg); font-size: 11px; line-height: 1; letter-spacing: 0.1em; text-transform: uppercase; color: #646b61; }
+    .session-panel.is-collapsed .panel-head { height: 100%; padding: 10px 8px; border-bottom: 0; align-items: stretch; }
+    .session-panel.is-collapsed .session-heading { flex: 1; flex-direction: column; justify-content: flex-start; gap: 12px; }
+    .session-panel.is-collapsed .session-heading h2 { order: 2; flex: 1; writing-mode: vertical-rl; transform: rotate(180deg); font-size: 11px; line-height: 1; letter-spacing: .1em; text-transform: uppercase; color: var(--text-dim); }
     .session-panel.is-collapsed .session-panel-actions { order: 1; flex-direction: column-reverse; }
-    .session-panel.is-collapsed .panel-body { display: none; }
+    .session-panel.is-collapsed .panel-body, .session-panel.is-collapsed .destroyed-toggle { display: none !important; }
     .session-panel.is-collapsed .status { min-width: 24px; padding: 0; justify-content: center; }
     .session-panel.is-collapsed .collapse-sessions span { transform: rotate(180deg); }
-    .panel-body { padding: 14px; }
-    .create-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; margin-bottom: 12px; }
+    .panel-body { padding: 16px; }
+    .create-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    .create-note { color: var(--text-dim); font-size: 12px; }
     .sessions { display: grid; gap: 8px; }
-    .session { text-align: left; width: 100%; color: #202124; background: #fafbf9; border: 1px solid #dfe4dc; display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 10px; }
-    .session.active { border-color: #202124; background: #f0f2ed; }
-    .session-title { font-weight: 650; overflow-wrap: anywhere; }
-    .session-meta { color: #646b61; font-size: 12px; margin-top: 4px; overflow-wrap: anywhere; }
-    .status { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border-radius: 999px; background: #edf0eb; color: #394034; font-size: 12px; }
+    .session { text-align: left; width: 100%; color: var(--text); background: rgba(89,55,25,.025); border: 1px solid var(--border); display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 11px 12px; box-shadow: none; }
+    .session:hover { background: var(--card-hover); border-color: rgba(91,82,232,.25); }
+    .session.active { border-color: var(--accent); background: rgba(91,82,232,.08); box-shadow: 0 0 0 1px rgba(91,82,232,.08); }
+    .session-title { font-weight: 700; font-size: 13px; overflow-wrap: anywhere; }
+    .session-meta { color: var(--text-dim); font-size: 12px; margin-top: 3px; overflow-wrap: anywhere; }
+    .status { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border-radius: 999px; background: rgba(89,55,25,.07); color: var(--text-dim); font-size: 11px; font-weight: 700; }
+    .destroyed-toggle { min-height: 30px; padding: 4px 8px; border: 0; background: transparent; color: var(--text-dim); box-shadow: none; font-size: 11px; font-weight: 600; }
+    .destroyed-toggle:hover { background: var(--card-hover); color: var(--text); }
     .viewer-wrap { min-height: 680px; display: grid; grid-template-rows: auto 1fr; }
-    .viewer-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #edf0eb; }
-    .viewer-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    iframe { width: 100%; height: 640px; border: 0; background: #111; border-radius: 0 0 8px 8px; }
-    .empty { min-height: 640px; display: grid; place-items: center; color: #646b61; text-align: center; padding: 20px; }
-    .message { margin-top: 10px; min-height: 20px; color: #355f1d; overflow-wrap: anywhere; }
-    .message.error { color: #9b2b1f; }
-    .api-key-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 10px; }
+    .viewer-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--border); }
+    .viewer-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; }
+    iframe { width: 100%; height: 640px; border: 0; background: #0b0e17; border-radius: 0 0 16px 16px; }
+    .empty { min-height: 640px; display: grid; place-items: center; color: var(--text-dim); text-align: center; padding: 20px; }
+    .empty-small { min-height: 180px; border: 1px dashed var(--border); border-radius: 10px; }
+    .message { margin-top: 10px; min-height: 20px; color: var(--success); font-size: 12px; overflow-wrap: anywhere; }
+    .message.error { color: var(--danger); }
+    .api-key-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
     .api-panel { grid-column: 1 / -1; }
-    .secret { display: none; margin-top: 10px; padding: 10px; border: 1px solid #d9ddd6; border-radius: 6px; background: #fafbf9; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    .api-description { margin: 3px 0 0; color: var(--text-dim); font-size: 12px; }
+    .secret { display: none; margin-top: 10px; padding: 11px; border: 1px solid var(--border); border-radius: 8px; background: rgba(89,55,25,.04); overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
     @media (max-width: 900px) {
-      main { padding: 20px 14px 32px; }
-      header { align-items: flex-start; flex-direction: column; }
+      .nav-inner { padding-inline: 14px; }
+      .account-email { display: none; }
+      main { padding: 24px 14px 36px; }
+      .page-intro { align-items: start; flex-direction: column; }
       .grid, .grid.sessions-collapsed { grid-template-columns: 1fr; gap: 18px; }
       .collapse-sessions { display: none; }
       .session-panel.is-collapsed { min-height: 0; }
-      .session-panel.is-collapsed .panel-head { height: auto; padding: 14px 14px 12px; border-bottom: 1px solid #edf0eb; flex-direction: row; }
-      .session-panel.is-collapsed .session-heading { flex-direction: row; justify-content: space-between; padding-top: 0; }
-      .session-panel.is-collapsed .session-heading h2 { order: 0; flex: 0 1 auto; writing-mode: horizontal-tb; transform: none; font-size: 17px; line-height: normal; letter-spacing: 0; text-transform: none; color: #202124; }
+      .session-panel.is-collapsed .panel-head { height: auto; padding: 15px 16px 13px; border-bottom: 1px solid var(--border); }
+      .session-panel.is-collapsed .session-heading { flex-direction: row; justify-content: space-between; }
+      .session-panel.is-collapsed .session-heading h2 { order: 0; flex: 0 1 auto; writing-mode: horizontal-tb; transform: none; font-size: 16px; line-height: normal; letter-spacing: normal; text-transform: none; color: var(--text); }
       .session-panel.is-collapsed .session-panel-actions { order: 0; flex-direction: row; }
       .session-panel.is-collapsed .panel-body { display: block; }
       .session-panel.is-collapsed .status { min-width: auto; padding: 0 8px; }
-      .create-row { grid-template-columns: 1fr; }
       iframe, .empty { height: 520px; min-height: 520px; }
+    }
+    @media (max-width: 620px) {
+      .brand { font-size: 17px; gap: 7px; }
+      .brand img { width: 27px; height: 27px; }
+      .account { gap: 6px; }
+      .account button { min-height: 36px; padding: 7px 10px; }
+      .page-intro { margin-bottom: 18px; }
+      .viewer-actions { align-items: flex-start; flex-direction: column; }
+      .viewer-actions .toolbar { width: 100%; }
+      .viewer-actions .toolbar > * { flex: 1; justify-content: center; }
+      .create-row { align-items: stretch; flex-direction: column; }
+      .create-row button { width: 100%; }
+      .api-key-row { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
-  <main>
-    <header>
-      <div>
-        <h1>Cloud browsers</h1>
-        <div class="muted">${escapeHtml(user.email)}</div>
-      </div>
-      <div class="toolbar">
+  <div class="glow-bg" aria-hidden="true"></div>
+  <nav>
+    <div class="nav-inner">
+      <a class="brand" href="https://webbrain.one/">
+        <img src="https://webbrain.one/logo-github.png" alt=""> WebBrain<span class="brand-domain">.cloud</span>
+      </a>
+      <div class="account">
+        <span class="account-email">${escapeHtml(user.email)}</span>
         <button class="secondary" id="refreshBtn" type="button">Refresh</button>
-        <form method="post" action="/auth/logout"><button type="submit">Logout</button></form>
+        <form method="post" action="/auth/logout"><button class="secondary" type="submit">Log out</button></form>
       </div>
-    </header>
+    </div>
+  </nav>
+  <main>
+    <section class="page-intro">
+      <div>
+        <p class="eyebrow">WebBrain Cloud</p>
+        <h1>Cloud browsers</h1>
+      </div>
+      <p class="intro-copy">Your persistent WebBrain sessions—visible here and controllable through the API.</p>
+    </section>
     <div class="grid" id="dashboardGrid">
       <section class="panel session-panel" id="sessionPanel">
         <div class="panel-head">
           <div class="session-heading">
-            <h2>Browser Sessions</h2>
+            <div>
+              <div class="panel-kicker">Workspace</div>
+              <h2>Browser sessions</h2>
+            </div>
             <div class="session-panel-actions">
+              <button class="destroyed-toggle" id="toggleDestroyedBtn" type="button" aria-pressed="false" style="display:none">Show destroyed</button>
               <span class="status" id="sessionCount">0</span>
               <button class="collapse-sessions" id="collapseSessionsBtn" type="button" aria-controls="sessionPanelBody" aria-expanded="true" title="Collapse browser sessions"><span aria-hidden="true">‹</span></button>
             </div>
@@ -182,18 +304,8 @@ function dashboardPage(user) {
         </div>
         <div class="panel-body" id="sessionPanelBody">
           <div class="create-row">
-            <select id="regionInput" aria-label="Region">
-              <option value="nyc3">nyc3</option>
-              <option value="nyc1">nyc1</option>
-              <option value="sfo3">sfo3</option>
-              <option value="ams3">ams3</option>
-            </select>
-            <select id="sizeInput" aria-label="Size">
-              <option value="s-1vcpu-1gb">Small</option>
-              <option value="s-2vcpu-2gb">Medium</option>
-              <option value="s-2vcpu-4gb">Browser</option>
-            </select>
-            <button id="createSessionBtn" type="button">Create</button>
+            <span class="create-note">A private browser with WebBrain preinstalled.</span>
+            <button id="createSessionBtn" type="button">+ New browser</button>
           </div>
           <div class="sessions" id="sessions"></div>
           <div class="message" id="sessionMessage"></div>
@@ -201,7 +313,7 @@ function dashboardPage(user) {
       </section>
       <section class="panel viewer-wrap">
         <div class="viewer-actions">
-          <div class="viewer-title" id="viewerTitle">noVNC</div>
+          <div class="viewer-title" id="viewerTitle">Browser preview</div>
           <div class="toolbar">
             <button class="secondary" id="connectBtn" type="button" disabled>Open noVNC</button>
             <a class="button-link" id="externalLink" href="#" target="_blank" rel="noopener" style="display:none">New tab</a>
@@ -212,10 +324,16 @@ function dashboardPage(user) {
         <iframe id="novncFrame" title="WebBrain cloud browser noVNC" style="display:none" referrerpolicy="no-referrer"></iframe>
       </section>
       <section class="panel api-panel">
-        <div class="panel-head"><h2>API Keys</h2></div>
+        <div class="panel-head">
+          <div>
+            <div class="panel-kicker">Developer access</div>
+            <h2>API keys</h2>
+            <p class="api-description">Control the same visible browsers from your own tools.</p>
+          </div>
+        </div>
         <div class="panel-body">
           <div class="api-key-row">
-            <input id="apiKeyName" placeholder="API key name" value="Default API key">
+            <input id="apiKeyName" aria-label="API key name" placeholder="API key name" value="Default API key">
             <button id="createApiKeyBtn" type="button">Create key</button>
           </div>
           <div class="secret" id="newApiKey"></div>
@@ -229,6 +347,7 @@ function dashboardPage(user) {
     const dashboardGrid = document.getElementById('dashboardGrid');
     const sessionPanel = document.getElementById('sessionPanel');
     const collapseSessionsBtn = document.getElementById('collapseSessionsBtn');
+    const toggleDestroyedBtn = document.getElementById('toggleDestroyedBtn');
     const sessionMessage = document.getElementById('sessionMessage');
     const sessionCount = document.getElementById('sessionCount');
     const createSessionBtn = document.getElementById('createSessionBtn');
@@ -243,7 +362,7 @@ function dashboardPage(user) {
     const apiKeyName = document.getElementById('apiKeyName');
     const newApiKey = document.getElementById('newApiKey');
     const apiKeyMessage = document.getElementById('apiKeyMessage');
-    const state = { sessions: [], selectedId: null };
+    const state = { sessions: [], selectedId: null, showDestroyed: false };
     const sessionsCollapsedKey = 'webbrain.sessionsCollapsed';
 
     function setSessionsCollapsed(collapsed) {
@@ -282,13 +401,28 @@ function dashboardPage(user) {
       return state.sessions.find(s => s.id === state.selectedId) || null;
     }
 
+    function visibleSessions() {
+      return state.showDestroyed ? state.sessions : state.sessions.filter(s => s.status !== 'destroyed');
+    }
+
+    function ensureVisibleSelection(sessions) {
+      if (state.selectedId && !sessions.some(s => s.id === state.selectedId)) state.selectedId = null;
+      if (!state.selectedId && sessions[0]) state.selectedId = sessions[0].id;
+    }
+
     function renderSessions() {
-      sessionCount.textContent = String(state.sessions.length);
+      const sessions = visibleSessions();
+      const destroyedCount = state.sessions.filter(s => s.status === 'destroyed').length;
+      ensureVisibleSelection(sessions);
+      sessionCount.textContent = String(sessions.length);
+      toggleDestroyedBtn.style.display = destroyedCount ? '' : 'none';
+      toggleDestroyedBtn.textContent = state.showDestroyed ? 'Hide destroyed' : 'Show ' + destroyedCount + ' destroyed';
+      toggleDestroyedBtn.setAttribute('aria-pressed', String(state.showDestroyed));
       sessionsEl.innerHTML = '';
-      if (!state.sessions.length) {
-        sessionsEl.innerHTML = '<div class="empty" style="min-height:180px">No browser sessions yet.</div>';
+      if (!sessions.length) {
+        sessionsEl.innerHTML = '<div class="empty empty-small">No active browser sessions yet.</div>';
       }
-      for (const session of state.sessions) {
+      for (const session of sessions) {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'session' + (session.id === state.selectedId ? ' active' : '');
@@ -298,7 +432,7 @@ function dashboardPage(user) {
         title.textContent = session.id;
         const meta = document.createElement('div');
         meta.className = 'session-meta';
-        meta.textContent = (session.public_ip || 'waiting for IP') + ' | ' + session.region + ' | ' + session.size;
+        meta.textContent = session.public_ip || (session.status === 'provisioning' ? 'Preparing browser…' : 'Waiting for browser');
         details.append(title, meta);
         const status = document.createElement('span');
         status.className = 'status';
@@ -319,14 +453,12 @@ function dashboardPage(user) {
       const session = selectedSession();
       connectBtn.disabled = !session || !session.public_ip || session.status !== 'ready';
       deleteSessionBtn.disabled = !session || session.status === 'destroyed';
-      viewerTitle.textContent = session ? session.id + ' | ' + session.status : 'noVNC';
+      viewerTitle.textContent = session ? session.id + ' · ' + session.status : 'Browser preview';
     }
 
     async function loadSessions() {
       const body = await api('/api/browser-sessions');
       state.sessions = body.browser_sessions || [];
-      if (state.selectedId && !state.sessions.some(s => s.id === state.selectedId)) state.selectedId = null;
-      if (!state.selectedId && state.sessions[0]) state.selectedId = state.sessions[0].id;
       renderSessions();
     }
 
@@ -344,10 +476,7 @@ function dashboardPage(user) {
       try {
         const body = await api('/api/browser-sessions', {
           method: 'POST',
-          body: {
-            region: document.getElementById('regionInput').value,
-            size: document.getElementById('sizeInput').value,
-          },
+          body: {},
         });
         state.selectedId = body.browser_session.id;
         await loadSessions();
@@ -428,6 +557,10 @@ function dashboardPage(user) {
 
     createSessionBtn.addEventListener('click', createSession);
     collapseSessionsBtn.addEventListener('click', () => setSessionsCollapsed(!sessionPanel.classList.contains('is-collapsed')));
+    toggleDestroyedBtn.addEventListener('click', () => {
+      state.showDestroyed = !state.showDestroyed;
+      renderSessions();
+    });
     refreshBtn.addEventListener('click', () => loadSessions().catch(e => showMessage(sessionMessage, e.message, true)));
     connectBtn.addEventListener('click', openNoVnc);
     deleteSessionBtn.addEventListener('click', deleteSession);

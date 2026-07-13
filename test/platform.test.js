@@ -260,15 +260,40 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     const cookie = await register(ctx.base, 'dashboard@example.com');
     const res = await requestText(ctx.base, '/', { headers: { cookie } });
     assert.equal(res.status, 200);
-    assert.match(res.text, /Browser Sessions/);
+    assert.match(res.text, /WebBrain<span class="brand-domain">\.cloud/);
+    assert.match(res.text, /--bg: #f7f1e6/);
+    assert.match(res.text, /Browser sessions/);
     assert.match(res.text, /Open noVNC/);
     assert.match(res.text, /novncFrame/);
     assert.match(res.text, /collapseSessionsBtn/);
+    assert.match(res.text, /toggleDestroyedBtn/);
+    assert.match(res.text, /showDestroyed: false/);
+    assert.match(res.text, /filter\(s => s\.status !== 'destroyed'\)/);
+    assert.match(res.text, /Show ' \+ destroyedCount \+ ' destroyed/);
     assert.match(res.text, /webbrain\.sessionsCollapsed/);
     assert.match(res.text, /aria-controls="sessionPanelBody"/);
     assert.match(res.text, /setSessionsCollapsed\(true\)/);
     assert.match(res.text, /\/api\/browser-sessions/);
     assert.match(res.text, /Create key/);
+    assert.doesNotMatch(res.text, /id="regionInput"/);
+    assert.doesNotMatch(res.text, /id="sizeInput"/);
+    assert.doesNotMatch(res.text, /session\.region/);
+    assert.doesNotMatch(res.text, /session\.size/);
+  } finally {
+    await ctx.platform.close();
+  }
+});
+
+test('login page uses the WebBrain visual identity', async () => {
+  const ctx = await startPlatform();
+  try {
+    const res = await requestText(ctx.base, '/');
+    assert.equal(res.status, 200);
+    assert.match(res.text, /WebBrain<span class="brand-domain">\.cloud/);
+    assert.match(res.text, /https:\/\/webbrain\.one\/logo-github\.png/);
+    assert.match(res.text, /--accent: #5b52e8/);
+    assert.match(res.text, /Your AI browser/);
+    assert.match(res.text, /Create account/);
   } finally {
     await ctx.platform.close();
   }
