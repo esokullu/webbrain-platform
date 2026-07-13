@@ -56,7 +56,7 @@ function clearSessionCookie(res, config) {
   res.setHeader('set-cookie', `${config.cookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
 }
 
-function loginPage(error = '') {
+function loginPage(error = '', registrationEnabled = false) {
   return `<!doctype html>
 <html>
 <head>
@@ -111,6 +111,10 @@ function loginPage(error = '') {
     .register-form::before { display: none; }
     .register-form button { background: transparent; border-color: var(--border); color: var(--text); box-shadow: none; }
     .register-form button:hover { background: var(--card-hover); }
+    .register-form[aria-disabled="true"] { opacity: .72; }
+    .register-form[aria-disabled="true"] input, .register-form[aria-disabled="true"] button { cursor: not-allowed; }
+    .register-form[aria-disabled="true"] button, .register-form[aria-disabled="true"] button:hover { background: transparent; border-color: var(--border); color: var(--text-dim); transform: none; }
+    .registration-note { margin: 0; color: var(--text-dim); font-size: 12px; }
     .error { padding: 12px 14px; border: 1px solid rgba(164,59,50,.25); border-radius: 10px; background: rgba(164,59,50,.07); color: var(--danger); }
     @media (max-width: 800px) {
       .nav-inner { padding-inline: 16px; }
@@ -145,11 +149,12 @@ function loginPage(error = '') {
         <input required type="password" name="password" placeholder="Password">
         <button type="submit">Sign in</button>
       </form>
-      <form class="register-form" method="post" action="/auth/register">
+      <form class="register-form" method="post" action="/auth/register" aria-disabled="${String(!registrationEnabled)}">
         <strong>New to WebBrain Cloud?</strong>
-        <input required type="email" name="email" placeholder="Email">
-        <input required minlength="8" type="password" name="password" placeholder="Password">
-        <button type="submit">Create account</button>
+        <input required type="email" name="email" placeholder="Email"${registrationEnabled ? '' : ' disabled'}>
+        <input required minlength="8" type="password" name="password" placeholder="Password"${registrationEnabled ? '' : ' disabled'}>
+        <button type="submit"${registrationEnabled ? '' : ' disabled'}>Create account</button>
+        ${registrationEnabled ? '' : '<p class="registration-note">Registration is currently closed.</p>'}
       </form>
     </section>
   </main>
@@ -1349,10 +1354,15 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
   });
 
   app.get('/', (req, res) => {
-    res.type('html').send(req.auth?.user ? dashboardPage(req.auth.user) : loginPage());
+    res.type('html').send(req.auth?.user ? dashboardPage(req.auth.user) : loginPage('', config.registrationEnabled));
   });
 
   app.post('/auth/register', async (req, res, next) => {
+    if (!config.registrationEnabled) {
+      const message = 'Registration is currently closed.';
+      if (wantsJson(req)) return jsonError(res, 403, message);
+      return res.status(403).type('html').send(loginPage(message, false));
+    }
     try {
       const email = String(req.body.email || '').trim().toLowerCase();
       const password = String(req.body.password || '');
@@ -1373,7 +1383,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
       res.redirect('/');
     } catch (e) {
       if (wantsJson(req)) return next(e);
-      res.status(e.status || 400).type('html').send(loginPage(e.message));
+      res.status(e.status || 400).type('html').send(loginPage(e.message, config.registrationEnabled));
     }
   });
 
@@ -1391,7 +1401,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
       res.redirect('/');
     } catch (e) {
       if (wantsJson(req)) return next(e);
-      res.status(e.status || 400).type('html').send(loginPage(e.message));
+      res.status(e.status || 400).type('html').send(loginPage(e.message, config.registrationEnabled));
     }
   });
 

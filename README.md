@@ -33,6 +33,7 @@ Platform:
 - `DO_API_TOKEN`, `DO_REGION`, `DO_SIZE`, `DO_IMAGE`, `DO_SSH_KEYS`
 - `WEBBRAIN_PLATFORM_URL`
 - `WEBBRAIN_INSTANCE_DOMAIN` (for example, `webbrain.cloud`; serves each browser session at an HTTPS subdomain)
+- `WEBBRAIN_REGISTRATION_ENABLED=true` only when public account creation should be available (disabled by default)
 - `WEBBRAIN_MODEL_PROXY_BASE_URL`, `WEBBRAIN_MODEL_PROXY_API_KEY`
 
 Production uses `WEBBRAIN_MODEL_PROXY_BASE_URL=https://api.webbrain.one/v1`.
@@ -80,7 +81,7 @@ The account and key-management endpoints are:
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `POST` | `/auth/register` | Create an account and login cookie. |
+| `POST` | `/auth/register` | Create an account and login cookie when registration is enabled. |
 | `POST` | `/auth/login` | Create a login cookie. |
 | `POST` | `/auth/logout` | Delete the current login session. |
 | `GET` | `/api/me` | Return the authenticated user and authentication type. |

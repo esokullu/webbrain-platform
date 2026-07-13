@@ -7,6 +7,7 @@ export function loadConfig(env = process.env) {
     baseUrl,
     cookieName: env.WEBBRAIN_COOKIE_NAME || 'wbp_session',
     cookieSecure: env.WEBBRAIN_COOKIE_SECURE === 'true',
+    registrationEnabled: env.WEBBRAIN_REGISTRATION_ENABLED === 'true',
     sessionTtlMs: Number(env.WEBBRAIN_WEB_SESSION_TTL_MS || 30 * 24 * 60 * 60 * 1000),
     browserSessionTtlMs: Number(env.WEBBRAIN_BROWSER_SESSION_TTL_MS || 6 * 60 * 60 * 1000),
     connectTokenTtlMs: Number(env.WEBBRAIN_CONNECT_TOKEN_TTL_MS || 5 * 60 * 1000),

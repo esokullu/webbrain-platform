@@ -16,6 +16,7 @@ async function startPlatform(env = {}) {
     WEBBRAIN_DB_DRIVER: 'memory',
     WEBBRAIN_PROVISIONER: 'null',
     WEBBRAIN_INSTANCE_DOMAIN: 'webbrain.cloud',
+    WEBBRAIN_REGISTRATION_ENABLED: 'true',
     WEBBRAIN_MODEL_PROXY_BASE_URL: 'http://127.0.0.1:65530/v1',
     WEBBRAIN_RUN_POLL_INTERVAL_MS: '10',
     WEBBRAIN_RUN_WAIT_TIMEOUT_MS: '1000',
@@ -387,7 +388,7 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
 });
 
 test('login page uses the WebBrain visual identity', async () => {
-  const ctx = await startPlatform();
+  const ctx = await startPlatform({ WEBBRAIN_REGISTRATION_ENABLED: 'false' });
   try {
     const res = await requestText(ctx.base, '/');
     assert.equal(res.status, 200);
@@ -396,7 +397,20 @@ test('login page uses the WebBrain visual identity', async () => {
     assert.match(res.text, /--accent: #5b52e8/);
     assert.match(res.text, /Your AI browser/);
     assert.match(res.text, /Create account/);
+    assert.match(res.text, /aria-disabled="true"/);
+    assert.match(res.text, /type="email" name="email" placeholder="Email" disabled/);
+    assert.match(res.text, /type="submit" disabled>Create account/);
+    assert.match(res.text, /Registration is currently closed\./);
     assert.match(res.text, /href="\/docs"/);
+
+    const registerRes = await request(ctx.base, '/auth/register', {
+      method: 'POST',
+      headers: { accept: 'application/json' },
+      body: JSON.stringify({ email: 'closed@example.com', password: 'password123' }),
+    });
+    assert.equal(registerRes.status, 403);
+    assert.equal(registerRes.body.error, 'Registration is currently closed.');
+    assert.equal(await ctx.store.findUserByEmail('closed@example.com'), null);
   } finally {
     await ctx.platform.close();
   }
