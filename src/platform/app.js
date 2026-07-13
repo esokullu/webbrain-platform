@@ -226,7 +226,7 @@ function dashboardPage(user) {
     h1 { margin: 0; font-size: clamp(30px, 4vw, 44px); line-height: 1.05; letter-spacing: -.035em; }
     .intro-copy { max-width: 560px; margin: 0; color: var(--text-dim); font-size: 14px; }
     h2 { margin: 0; font-size: 16px; letter-spacing: -.01em; }
-    button, input { font: inherit; }
+    button, input, select, textarea { font: inherit; }
     button { min-height: 34px; padding: 6px 10px; border-radius: 7px; border: 1px solid var(--accent); background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; box-shadow: 0 5px 14px var(--accent-glow); transition: transform .15s ease, background .15s ease, border-color .15s ease; }
     button:hover { background: #5047dc; transform: translateY(-1px); }
     button.secondary { background: rgba(255,253,248,.65); color: var(--text); border-color: var(--border); box-shadow: none; }
@@ -234,11 +234,13 @@ function dashboardPage(user) {
     button.danger { background: transparent; border-color: rgba(164,59,50,.28); color: var(--danger); box-shadow: none; }
     button.danger:hover { background: rgba(164,59,50,.08); }
     button:disabled { opacity: .48; cursor: not-allowed; transform: none; }
-    button:focus-visible, .button-link:focus-visible, input:focus-visible, a:focus-visible { outline: 3px solid var(--accent-glow); outline-offset: 2px; }
+    button:focus-visible, .button-link:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible { outline: 3px solid var(--accent-glow); outline-offset: 2px; }
     .button-link { min-height: 34px; display: inline-flex; align-items: center; padding: 6px 10px; border-radius: 7px; border: 1px solid var(--border); background: rgba(255,253,248,.65); color: var(--text); font-size: 12px; font-weight: 600; text-decoration: none; white-space: nowrap; }
     .button-link:hover { background: var(--card-hover); }
-    input { min-height: 36px; border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; background: rgba(89,55,25,.04); color: var(--text); }
-    input::placeholder { color: #8a7964; }
+    input, select, textarea { min-height: 36px; border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; background: rgba(89,55,25,.04); color: var(--text); }
+    input::placeholder, textarea::placeholder { color: #8a7964; }
+    select { width: 100%; background-color: rgba(89,55,25,.04); }
+    textarea { width: 100%; resize: vertical; }
     .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .grid { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); gap: 18px; align-items: start; }
     .grid.sessions-collapsed { grid-template-columns: 44px minmax(0, 1fr); gap: 12px; }
@@ -310,6 +312,45 @@ function dashboardPage(user) {
     .api-key-actions { display: flex; align-items: center; gap: 8px; }
     .api-key-state { color: var(--success); font-size: 11px; font-weight: 700; }
     .api-key-state.revoked { color: var(--text-dim); }
+    .console-grid { display: grid; grid-template-columns: minmax(310px, .86fr) minmax(0, 1.14fr); gap: 18px; align-items: stretch; }
+    .console-grid > .panel { min-width: 0; }
+    .console-form { display: grid; gap: 16px; }
+    .form-field { display: grid; gap: 6px; }
+    .form-label { color: var(--text); font-size: 12px; font-weight: 750; }
+    .field-hint { min-height: 18px; color: var(--text-dim); font-size: 11px; }
+    .field-hint.is-ready { color: var(--success); }
+    .console-task { min-height: 156px; padding: 11px 12px; line-height: 1.55; }
+    .console-action-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .console-action-row .message { flex: 1; margin: 0; }
+    .execute-button { min-height: 42px; padding: 8px 18px; border-radius: 9px; }
+    .async-notice { position: relative; margin-top: 16px; padding: 12px 13px 12px 39px; overflow: hidden; border: 1px solid rgba(91,82,232,.20); border-radius: 10px; background: rgba(91,82,232,.055); }
+    .async-notice::before { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 3px; background: var(--accent); }
+    .async-notice-dot { position: absolute; top: 17px; left: 18px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 5px rgba(91,82,232,.12); }
+    .async-notice strong { display: block; margin-bottom: 2px; font-size: 12px; }
+    .async-notice p { margin: 0; color: var(--text-dim); font-size: 11px; line-height: 1.55; }
+    .async-notice a { color: var(--accent); font-weight: 750; }
+    .run-panel .panel-body { min-height: 330px; }
+    .run-empty { min-height: 296px; display: grid; place-items: center; padding: 28px; border: 1px dashed var(--border); border-radius: 11px; color: var(--text-dim); text-align: center; }
+    .run-empty strong { display: block; margin-bottom: 4px; color: var(--text); font-size: 14px; }
+    .run-state { display: grid; gap: 15px; }
+    .run-status-line { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding-bottom: 13px; border-bottom: 1px solid var(--border); }
+    .run-status-title { min-width: 0; display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 800; }
+    .run-spinner { width: 16px; height: 16px; flex: 0 0 16px; border: 2px solid rgba(91,82,232,.18); border-top-color: var(--accent); border-radius: 50%; animation: run-spin .8s linear infinite; }
+    .run-status-badge { min-height: 24px; display: inline-flex; align-items: center; padding: 0 8px; border-radius: 999px; background: rgba(91,82,232,.09); color: var(--accent); font-size: 10px; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
+    .run-status-badge.completed { background: rgba(45,136,102,.10); color: var(--success); }
+    .run-status-badge.failed, .run-status-badge.aborted { background: rgba(164,59,50,.09); color: var(--danger); }
+    .run-meta { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 10px; }
+    .run-meta-item { min-width: 0; padding: 9px 10px; border-radius: 8px; background: rgba(89,55,25,.035); }
+    .run-meta-label { display: block; margin-bottom: 2px; color: var(--text-dim); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .run-meta-value { display: block; overflow: hidden; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .run-section { display: grid; gap: 6px; }
+    .run-section-title { color: var(--text-dim); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .run-summary { margin: 0; color: var(--text); font-size: 13px; white-space: pre-wrap; }
+    .run-output { max-height: 230px; margin: 0; padding: 13px; overflow: auto; border-radius: 9px; background: #211812; color: #f8ead3; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .run-error { margin: 0; color: var(--danger); font-size: 13px; white-space: pre-wrap; }
+    .run-final-url { min-width: 0; overflow: hidden; color: var(--accent); font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+    .console-code-panel { margin-top: 18px; }
+    @keyframes run-spin { to { transform: rotate(360deg); } }
     .connection-panel { min-width: 0; }
     .connection-head { align-items: flex-start; }
     .connection-session { max-width: 48%; padding: 5px 8px; border: 1px solid var(--border); border-radius: 7px; background: rgba(89,55,25,.035); color: var(--text-dim); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -341,12 +382,14 @@ function dashboardPage(user) {
     @media (prefers-reduced-motion: reduce) {
       * { scroll-behavior: auto !important; transition: none !important; }
       .browser-boot-track::after { width: 54%; animation: none; transform: translateX(55%); }
+      .run-spinner { animation: none; border-color: var(--accent); }
     }
     @media (max-width: 900px) {
       .nav-inner { padding-inline: 14px; }
       main { padding: 24px 14px 36px; }
       .page-intro { align-items: start; flex-direction: column; }
       .grid, .grid.sessions-collapsed { grid-template-columns: 1fr; gap: 18px; }
+      .console-grid { grid-template-columns: 1fr; }
       .collapse-sessions { display: none; }
       .session-panel.is-collapsed { min-height: 0; }
       .session-panel.is-collapsed .panel-head { height: auto; padding: 15px 16px 13px; border-bottom: 1px solid var(--border); }
@@ -374,12 +417,19 @@ function dashboardPage(user) {
       .api-key-row { grid-template-columns: 1fr; }
       .api-key-item { grid-template-columns: 1fr; }
       .api-key-actions { justify-content: space-between; }
+      .console-action-row { align-items: stretch; flex-direction: column; }
+      .execute-button { width: 100%; }
+      .run-meta { grid-template-columns: 1fr; }
       .api-panel .panel-head { align-items: stretch; flex-direction: column; }
       .connection-head { align-items: stretch; flex-direction: column; }
       .connection-session { max-width: 100%; }
       .code-footer { align-items: stretch; flex-direction: column; }
       .code-actions > * { flex: 1; justify-content: center; }
       .docs-link { justify-content: center; }
+    }
+    @media (max-width: 420px) {
+      .brand-name { display: none; }
+      .header-link { padding-inline: 7px; }
     }
   </style>
 </head>
@@ -388,11 +438,12 @@ function dashboardPage(user) {
   <nav>
     <div class="nav-inner">
       <a class="brand" href="https://webbrain.one/">
-        <img src="https://webbrain.one/logo-github.png" alt=""> WebBrain<span class="brand-domain">.cloud</span>
+        <img src="https://webbrain.one/logo-github.png" alt=""><span class="brand-name">WebBrain</span><span class="brand-domain">.cloud</span>
       </a>
       <div class="account">
         <div class="header-nav" aria-label="Dashboard sections">
           <a class="header-link" href="#browsers" data-view-target="browsers" aria-current="page">Browsers</a>
+          <a class="header-link" href="#console" data-view-target="console">Console</a>
           <a class="header-link" href="#api-keys" data-view-target="api-keys">API keys</a>
         </div>
         <details class="account-menu" id="accountMenu">
@@ -477,37 +528,92 @@ function dashboardPage(user) {
             </div>
             <div class="viewer-frames" id="viewerFrames"></div>
           </section>
-          <section class="panel connection-panel" aria-labelledby="connectionTitle">
-            <div class="panel-head connection-head">
-              <div>
-                <div class="panel-kicker">Use this browser from code</div>
-                <h2 id="connectionTitle">Run a task</h2>
-                <p class="api-description">The selected session stays visible above while your code controls it.</p>
-              </div>
-              <span class="connection-session" id="connectionSessionId">Select a browser</span>
-            </div>
-            <div class="panel-body">
-              <div class="code-tabs" role="tablist" aria-label="Choose a language">
-                <button class="code-tab" id="connectionTabRest" type="button" role="tab" aria-selected="true" data-code-client="rest">REST</button>
-                <button class="code-tab" type="button" role="tab" aria-selected="false" data-code-client="node">Node.js</button>
-                <button class="code-tab" type="button" role="tab" aria-selected="false" data-code-client="python">Python</button>
-                <button class="code-tab" type="button" role="tab" aria-selected="false" data-code-client="php">PHP</button>
-              </div>
-              <div class="code-shell">
-                <pre aria-live="polite"><code id="connectionCode"></code></pre>
-                <div class="code-footer">
-                  <span class="code-note" id="connectionNote">Examples use the selected session ID and <code>WEBBRAIN_API_KEY</code>.</span>
-                  <div class="code-actions">
-                    <a class="button-link" href="#api-keys" data-view-target="api-keys">Get an API key</a>
-                    <a class="button-link" href="/docs">Full docs</a>
-                    <button id="copyConnectionCode" type="button">Copy</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
         </div>
       </div>
+    </section>
+    <section class="dashboard-view" id="consoleView" hidden>
+      <section class="page-intro">
+        <div>
+          <p class="eyebrow">Run workspace</p>
+          <h1>Console</h1>
+        </div>
+        <p class="intro-copy">Send a task to one of your browsers, follow its progress, and reuse the exact request in your own code.</p>
+      </section>
+      <div class="console-grid">
+        <section class="panel" aria-labelledby="consoleCommandTitle">
+          <div class="panel-head">
+            <div>
+              <div class="panel-kicker">Command</div>
+              <h2 id="consoleCommandTitle">Run a browser task</h2>
+              <p class="api-description">Choose an existing browser and describe the outcome you want.</p>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="console-form">
+              <label class="form-field" for="consoleSessionSelect">
+                <span class="form-label">Browser</span>
+                <select id="consoleSessionSelect" aria-describedby="consoleSessionStatus"></select>
+                <span class="field-hint" id="consoleSessionStatus">Loading your browsers…</span>
+              </label>
+              <label class="form-field" for="consoleTask">
+                <span class="form-label">Task</span>
+                <textarea class="console-task" id="consoleTask" placeholder="Open example.com and tell me the page title">Open example.com and tell me the page title</textarea>
+              </label>
+              <div class="console-action-row">
+                <div class="message" id="consoleMessage" aria-live="polite"></div>
+                <button class="execute-button" id="executeConsoleBtn" type="button">Execute task</button>
+              </div>
+            </div>
+            <div class="async-notice">
+              <span class="async-notice-dot" aria-hidden="true"></span>
+              <strong>Runs are asynchronous</strong>
+              <p>This console keeps checking the result if you switch away. Open <a href="#browsers" data-view-target="browsers">Browsers</a> to connect and watch the selected browser work.</p>
+            </div>
+          </div>
+        </section>
+        <section class="panel run-panel" aria-labelledby="consoleRunTitle">
+          <div class="panel-head">
+            <div>
+              <div class="panel-kicker">Live run</div>
+              <h2 id="consoleRunTitle">Result</h2>
+              <p class="api-description">Progress continues even while this tab is hidden.</p>
+            </div>
+            <span class="status" id="consoleRunHeaderStatus">Idle</span>
+          </div>
+          <div class="panel-body" id="consoleRunOutput" aria-live="polite">
+            <div class="run-empty"><div><strong>No run yet</strong>Choose a browser, enter a task, and execute it.</div></div>
+          </div>
+        </section>
+      </div>
+      <section class="panel connection-panel console-code-panel" aria-labelledby="consoleCodeTitle">
+        <div class="panel-head connection-head">
+          <div>
+            <div class="panel-kicker">Use the same request from code</div>
+            <h2 id="consoleCodeTitle">Exact API commands</h2>
+            <p class="api-description">Examples update with the selected browser and task. They start asynchronously, then poll for the result.</p>
+          </div>
+          <span class="connection-session" id="consoleCodeSessionId">Select a browser</span>
+        </div>
+        <div class="panel-body">
+          <div class="code-tabs" role="tablist" aria-label="Choose a language">
+            <button class="code-tab" id="consoleCodeTabRest" type="button" role="tab" aria-selected="true" data-code-client="rest">REST</button>
+            <button class="code-tab" type="button" role="tab" aria-selected="false" data-code-client="node">Node.js</button>
+            <button class="code-tab" type="button" role="tab" aria-selected="false" data-code-client="python">Python</button>
+            <button class="code-tab" type="button" role="tab" aria-selected="false" data-code-client="php">PHP</button>
+          </div>
+          <div class="code-shell">
+            <pre aria-live="polite"><code id="consoleCode"></code></pre>
+            <div class="code-footer">
+              <span class="code-note" id="consoleCodeNote">REST uses <code>jq</code>. Examples use <code>WEBBRAIN_API_KEY</code> and the current Console values.</span>
+              <div class="code-actions">
+                <a class="button-link" href="#api-keys" data-view-target="api-keys">Get an API key</a>
+                <a class="button-link" href="/docs">Full docs</a>
+                <button id="copyConsoleCode" type="button">Copy</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
     </section>
     <section class="dashboard-view" id="apiKeysView" hidden>
       <section class="page-intro">
@@ -590,13 +696,21 @@ function dashboardPage(user) {
     const apiKeyMessage = document.getElementById('apiKeyMessage');
     const apiKeysList = document.getElementById('apiKeysList');
     const browserView = document.getElementById('browserView');
+    const consoleView = document.getElementById('consoleView');
     const apiKeysView = document.getElementById('apiKeysView');
     const viewLinks = [...document.querySelectorAll('[data-view-target]')];
-    const connectionSessionId = document.getElementById('connectionSessionId');
-    const connectionCode = document.getElementById('connectionCode');
-    const connectionTabs = [...document.querySelectorAll('[data-code-client]')];
-    const copyConnectionCode = document.getElementById('copyConnectionCode');
-    const connectionNote = document.getElementById('connectionNote');
+    const consoleSessionSelect = document.getElementById('consoleSessionSelect');
+    const consoleSessionStatus = document.getElementById('consoleSessionStatus');
+    const consoleTask = document.getElementById('consoleTask');
+    const consoleMessage = document.getElementById('consoleMessage');
+    const executeConsoleBtn = document.getElementById('executeConsoleBtn');
+    const consoleRunHeaderStatus = document.getElementById('consoleRunHeaderStatus');
+    const consoleRunOutput = document.getElementById('consoleRunOutput');
+    const consoleCodeSessionId = document.getElementById('consoleCodeSessionId');
+    const consoleCode = document.getElementById('consoleCode');
+    const consoleCodeTabs = [...document.querySelectorAll('[data-code-client]')];
+    const copyConsoleCode = document.getElementById('copyConsoleCode');
+    const consoleCodeNote = document.getElementById('consoleCodeNote');
     const renameDialog = document.getElementById('renameDialog');
     const renameForm = document.getElementById('renameForm');
     const renameInput = document.getElementById('renameInput');
@@ -606,21 +720,36 @@ function dashboardPage(user) {
     const deleteConfirmInput = document.getElementById('deleteConfirmInput');
     const cancelDeleteBtn = document.getElementById('cancelDeleteBtn');
     const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
-    const state = { sessions: [], apiKeys: [], selectedId: null, showDestroyed: false, deleteTargetId: null, codeClient: 'rest' };
+    const state = {
+      sessions: [],
+      apiKeys: [],
+      selectedId: null,
+      consoleSessionId: null,
+      consoleRun: null,
+      consoleRunSessionId: null,
+      consoleRunTask: '',
+      showDestroyed: false,
+      deleteTargetId: null,
+      codeClient: 'rest',
+    };
     const viewerConnections = new Map();
     const connectingSessionIds = new Set();
+    const terminalRunStatuses = new Set(['completed', 'failed', 'aborted']);
+    let consolePollTimer = null;
     const sessionsCollapsedKey = 'webbrain.sessionsCollapsed';
 
     function setDashboardView(view, updateUrl) {
-      const nextView = view === 'api-keys' ? 'api-keys' : 'browsers';
+      const nextView = view === 'api-keys' || view === 'console' ? view : 'browsers';
       browserView.hidden = nextView !== 'browsers';
+      consoleView.hidden = nextView !== 'console';
       apiKeysView.hidden = nextView !== 'api-keys';
       for (const link of viewLinks) {
         if (link.dataset.viewTarget === nextView) link.setAttribute('aria-current', 'page');
         else link.removeAttribute('aria-current');
       }
-      if (updateUrl) history.pushState(null, '', nextView === 'api-keys' ? '#api-keys' : '#browsers');
+      if (updateUrl) history.pushState(null, '', '#' + nextView);
       if (nextView === 'api-keys') loadApiKeys().catch(e => showMessage(apiKeyMessage, e.message, true));
+      if (nextView === 'console') renderConsole();
     }
 
     function setSessionsCollapsed(collapsed) {
@@ -663,27 +792,68 @@ function dashboardPage(user) {
       return session?.display_name || ('Browser ' + String(session?.id || '').slice(-4).toUpperCase());
     }
 
-    function connectionExamples(sessionId) {
+    function shellDoubleQuoted(value) {
+      const slash = String.fromCharCode(92);
+      return '"' + String(value)
+        .split(slash).join(slash + slash)
+        .split('"').join(slash + '"')
+        .split('$').join(slash + '$')
+        .split(String.fromCharCode(96)).join(slash + String.fromCharCode(96)) + '"';
+    }
+
+    function phpSingleQuoted(value) {
+      const slash = String.fromCharCode(92);
+      const quote = "'";
+      return quote + String(value)
+        .split(slash).join(slash + slash)
+        .split(quote).join(slash + quote) + quote;
+    }
+
+    function consoleExamples(sessionId, task) {
+      const taskText = task || 'Open example.com and tell me the page title';
+      const taskLiteral = JSON.stringify(taskText);
+      const sessionLiteral = JSON.stringify(sessionId);
+      const endpoint = 'https://webbrain.cloud/api/browser-sessions/' + sessionId + '/runs';
+      const requestBody = shellDoubleQuoted(JSON.stringify({ task: taskText, wait: false }));
       return {
-        rest: 'curl -X POST "https://webbrain.cloud/api/browser-sessions/' + sessionId + '/runs" -H "Authorization: Bearer $WEBBRAIN_API_KEY" -H "Content-Type: application/json" --data ' + JSON.stringify('{"task":"Open example.com and tell me the page title","wait":true}'),
+        rest: [
+          'WEBBRAIN_RUN_ID=$(curl -sS -X POST "' + endpoint + '" -H "Authorization: Bearer $WEBBRAIN_API_KEY" -H "Content-Type: application/json" --data ' + requestBody + ' | jq -r .run_id)',
+          '',
+          '# Poll while the asynchronous run continues.',
+          'while true; do',
+          '  RUN=$(curl -sS "' + endpoint + '/$WEBBRAIN_RUN_ID" -H "Authorization: Bearer $WEBBRAIN_API_KEY")',
+          '  echo "$RUN" | jq',
+          '  STATUS=$(echo "$RUN" | jq -r .status)',
+          '  case "$STATUS" in completed|failed|aborted) break ;; esac',
+          '  sleep 1',
+          'done',
+        ].join(String.fromCharCode(10)),
         node: [
           "import { WebBrainClient } from './webbrain-client.js';",
           '',
           'const client = new WebBrainClient({',
           '  apiKey: process.env.WEBBRAIN_API_KEY,',
           '});',
-          "const run = await client.createRun('" + sessionId + "', {",
-          "  task: 'Open example.com and tell me the page title',",
-          '  wait: true,',
+          'let run = await client.createRun(' + sessionLiteral + ', {',
+          '  task: ' + taskLiteral + ',',
+          '  wait: false,',
           '});',
+          "while (!['completed', 'failed', 'aborted'].includes(run.status)) {",
+          '  await new Promise(resolve => setTimeout(resolve, 1000));',
+          '  run = await client.getRun(' + sessionLiteral + ', run.run_id);',
+          '}',
           'console.log(run.result);',
         ].join(String.fromCharCode(10)),
         python: [
           'import os',
+          'import time',
           'from webbrain_client import WebBrainClient',
           '',
           "client = WebBrainClient(os.environ['WEBBRAIN_API_KEY'])",
-          "run = client.create_run('" + sessionId + "', 'Open example.com and tell me the page title', wait=True)",
+          'run = client.create_run(' + sessionLiteral + ', ' + taskLiteral + ', wait=False)',
+          "while run['status'] not in {'completed', 'failed', 'aborted'}:",
+          '    time.sleep(1)',
+          '    run = client.get_run(' + sessionLiteral + ", run['run_id'])",
           "print(run['result'])",
         ].join(String.fromCharCode(10)),
         php: [
@@ -691,19 +861,24 @@ function dashboardPage(user) {
           "require_once __DIR__ . '/WebBrainClient.php';",
           '',
           "$client = new WebBrainClient(getenv('WEBBRAIN_API_KEY') ?: '');",
-          "$run = $client->createRun('" + sessionId + "', 'Open example.com and tell me the page title', ['wait' => true]);",
+          '$run = $client->createRun(' + phpSingleQuoted(sessionId) + ', ' + phpSingleQuoted(taskText) + ", ['wait' => false]);",
+          "$terminal = ['completed', 'failed', 'aborted'];",
+          "while (!in_array($run['status'], $terminal, true)) {",
+          '    sleep(1);',
+          '    $run = $client->getRun(' + phpSingleQuoted(sessionId) + ", $run['run_id']);",
+          '}',
           "print_r($run['result']);",
         ].join(String.fromCharCode(10)),
       };
     }
 
-    const connectionKeywords = {
-      rest: new Set(['curl']),
+    const codeKeywords = {
+      rest: new Set(['curl', 'while', 'do', 'done', 'case', 'in', 'esac', 'sleep']),
       node: new Set(['import', 'from', 'const', 'let', 'await', 'new', 'export', 'class', 'async', 'throw', 'return']),
       python: new Set(['import', 'from', 'as', 'class', 'def', 'return', 'raise', 'if', 'else', 'elif', 'while', 'for', 'in', 'with', 'try', 'except']),
-      php: new Set(['<?php', 'require_once', 'new', 'function', 'public', 'private', 'class', 'final', 'return', 'throw']),
+      php: new Set(['<?php', 'require_once', 'new', 'function', 'public', 'private', 'class', 'final', 'return', 'throw', 'while']),
     };
-    const connectionLiterals = new Set(['true', 'false', 'null', 'undefined', 'True', 'False', 'None']);
+    const codeLiterals = new Set(['true', 'false', 'null', 'undefined', 'True', 'False', 'None']);
 
     function isCodeWordStart(char) {
       if (!char) return false;
@@ -729,7 +904,7 @@ function dashboardPage(user) {
       fragment.append(span);
     }
 
-    function highlightConnectionCode(target, source, language) {
+    function highlightCode(target, source, language) {
       const fragment = document.createDocumentFragment();
       let cursor = 0;
       let plainStart = 0;
@@ -792,8 +967,8 @@ function dashboardPage(user) {
           let lookahead = end;
           while (source[lookahead] === ' ' || source.charCodeAt(lookahead) === 10) lookahead += 1;
           let kind = '';
-          if (connectionKeywords[language].has(word)) kind = 'keyword';
-          else if (connectionLiterals.has(word)) kind = 'literal';
+          if (codeKeywords[language].has(word)) kind = 'keyword';
+          else if (codeLiterals.has(word)) kind = 'literal';
           else if (source[lookahead] === '(') kind = 'function';
           if (kind) addToken(end, kind);
           else cursor = end;
@@ -810,19 +985,244 @@ function dashboardPage(user) {
       target.replaceChildren(fragment);
     }
 
-    function renderConnectionExample() {
-      const session = selectedSession();
+    function renderConsoleCode() {
+      const session = state.sessions.find(item => item.id === state.consoleSessionId) || null;
       const sessionId = session?.id || 'bs_your_session';
-      connectionSessionId.textContent = session ? session.id : 'Select a browser';
-      connectionSessionId.title = session ? session.id : '';
-      highlightConnectionCode(connectionCode, connectionExamples(sessionId)[state.codeClient], state.codeClient);
-      for (const tab of connectionTabs) tab.setAttribute('aria-selected', String(tab.dataset.codeClient === state.codeClient));
+      const task = consoleTask.value.trim() || consoleTask.placeholder;
+      consoleCodeSessionId.textContent = session ? session.id : 'Select a browser';
+      consoleCodeSessionId.title = session ? session.id : '';
+      highlightCode(consoleCode, consoleExamples(sessionId, task)[state.codeClient], state.codeClient);
+      for (const tab of consoleCodeTabs) tab.setAttribute('aria-selected', String(tab.dataset.codeClient === state.codeClient));
     }
 
     function formatDate(value) {
       if (!value) return 'Never';
       try { return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)); }
       catch { return String(value); }
+    }
+
+    function consoleSelectedSession() {
+      return state.sessions.find(session => session.id === state.consoleSessionId) || null;
+    }
+
+    function consoleRunIsActive() {
+      return !!state.consoleRun && !terminalRunStatuses.has(state.consoleRun.status);
+    }
+
+    function renderConsoleBrowsers() {
+      const sessions = state.sessions.filter(session => session.status !== 'destroyed');
+      if (!state.consoleSessionId || !sessions.some(session => session.id === state.consoleSessionId)) {
+        const preferred = sessions.find(session => session.id === state.selectedId && session.runtime_ready)
+          || sessions.find(session => session.runtime_ready)
+          || sessions[0];
+        state.consoleSessionId = preferred?.id || null;
+      }
+
+      consoleSessionSelect.replaceChildren();
+      if (!sessions.length) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No browser sessions';
+        consoleSessionSelect.append(option);
+      }
+      for (const session of sessions) {
+        const option = document.createElement('option');
+        option.value = session.id;
+        option.textContent = browserName(session) + ' · ' + (session.runtime_ready ? 'ready' : session.status);
+        option.selected = session.id === state.consoleSessionId;
+        consoleSessionSelect.append(option);
+      }
+
+      const session = consoleSelectedSession();
+      const ready = !!session?.runtime_ready;
+      consoleSessionSelect.disabled = !sessions.length;
+      consoleSessionStatus.classList.toggle('is-ready', ready);
+      if (!session) consoleSessionStatus.textContent = 'Create a browser in the Browsers tab first.';
+      else if (ready) consoleSessionStatus.textContent = 'Ready to run · ' + session.id;
+      else if (session.status === 'failed') consoleSessionStatus.textContent = 'This browser failed to start. Choose another browser.';
+      else consoleSessionStatus.textContent = 'This browser is still preparing. Refresh or choose a ready browser.';
+      executeConsoleBtn.disabled = !ready || !consoleTask.value.trim() || consoleRunIsActive();
+    }
+
+    function appendRunSection(parent, label, value, className) {
+      if (value == null || value === '') return;
+      const section = document.createElement('section');
+      section.className = 'run-section';
+      const title = document.createElement('div');
+      title.className = 'run-section-title';
+      title.textContent = label;
+      const content = document.createElement(className === 'run-output' ? 'pre' : 'p');
+      content.className = className;
+      content.textContent = value;
+      section.append(title, content);
+      parent.append(section);
+    }
+
+    function safeHttpUrl(value) {
+      try {
+        const parsed = new URL(value);
+        return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : '';
+      } catch {
+        return '';
+      }
+    }
+
+    function renderConsoleRun() {
+      const run = state.consoleRun;
+      consoleRunOutput.replaceChildren();
+      if (!run) {
+        consoleRunHeaderStatus.textContent = 'Idle';
+        const empty = document.createElement('div');
+        empty.className = 'run-empty';
+        const copy = document.createElement('div');
+        const title = document.createElement('strong');
+        title.textContent = 'No run yet';
+        copy.append(title, document.createTextNode('Choose a browser, enter a task, and execute it.'));
+        empty.append(copy);
+        consoleRunOutput.append(empty);
+        return;
+      }
+
+      const status = run.status || 'starting';
+      const active = !terminalRunStatuses.has(status);
+      const statusTitles = {
+        starting: 'Starting the run',
+        running: 'WebBrain is working',
+        completed: 'Run completed',
+        failed: 'Run failed',
+        aborted: 'Run aborted',
+      };
+      consoleRunHeaderStatus.textContent = status;
+
+      const content = document.createElement('div');
+      content.className = 'run-state';
+      const statusLine = document.createElement('div');
+      statusLine.className = 'run-status-line';
+      const statusTitle = document.createElement('div');
+      statusTitle.className = 'run-status-title';
+      if (active) {
+        const spinner = document.createElement('span');
+        spinner.className = 'run-spinner';
+        spinner.setAttribute('aria-hidden', 'true');
+        statusTitle.append(spinner);
+      }
+      statusTitle.append(document.createTextNode(statusTitles[status] || ('Run ' + status)));
+      const badge = document.createElement('span');
+      badge.className = 'run-status-badge ' + status;
+      badge.textContent = status;
+      statusLine.append(statusTitle, badge);
+      content.append(statusLine);
+
+      const session = state.sessions.find(item => item.id === state.consoleRunSessionId);
+      const meta = document.createElement('div');
+      meta.className = 'run-meta';
+      for (const [label, value] of [
+        ['Browser', session ? browserName(session) : state.consoleRunSessionId],
+        ['Run ID', run.run_id || 'Waiting for run ID…'],
+      ]) {
+        const item = document.createElement('div');
+        item.className = 'run-meta-item';
+        const itemLabel = document.createElement('span');
+        itemLabel.className = 'run-meta-label';
+        itemLabel.textContent = label;
+        const itemValue = document.createElement('span');
+        itemValue.className = 'run-meta-value';
+        itemValue.textContent = value || '—';
+        itemValue.title = value || '';
+        item.append(itemLabel, itemValue);
+        meta.append(item);
+      }
+      content.append(meta);
+
+      appendRunSection(content, 'Task', state.consoleRunTask, 'run-summary');
+      appendRunSection(content, 'Summary', run.summary, 'run-summary');
+      if (run.result != null) {
+        const resultText = typeof run.result === 'string' ? run.result : JSON.stringify(run.result, null, 2);
+        appendRunSection(content, 'Result', resultText, 'run-output');
+      } else if (active) {
+        appendRunSection(content, 'Result', 'Waiting for WebBrain to finish…', 'run-summary');
+      }
+      appendRunSection(content, 'Error', run.error, 'run-error');
+
+      const finalUrl = safeHttpUrl(run.final_url);
+      if (finalUrl) {
+        const section = document.createElement('section');
+        section.className = 'run-section';
+        const title = document.createElement('div');
+        title.className = 'run-section-title';
+        title.textContent = 'Final URL';
+        const link = document.createElement('a');
+        link.className = 'run-final-url';
+        link.href = finalUrl;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.textContent = finalUrl;
+        link.title = finalUrl;
+        section.append(title, link);
+        content.append(section);
+      }
+
+      consoleRunOutput.append(content);
+    }
+
+    function renderConsole() {
+      renderConsoleBrowsers();
+      renderConsoleCode();
+      renderConsoleRun();
+    }
+
+    function scheduleConsolePoll() {
+      if (consolePollTimer) clearTimeout(consolePollTimer);
+      consolePollTimer = null;
+      if (consoleRunIsActive() && state.consoleRun?.run_id) {
+        consolePollTimer = setTimeout(pollConsoleRun, 1000);
+      }
+    }
+
+    async function pollConsoleRun() {
+      const runId = state.consoleRun?.run_id;
+      const sessionId = state.consoleRunSessionId;
+      if (!runId || !sessionId || !consoleRunIsActive()) return;
+      try {
+        const next = await api('/api/browser-sessions/' + encodeURIComponent(sessionId) + '/runs/' + encodeURIComponent(runId));
+        if (state.consoleRun?.run_id !== runId) return;
+        state.consoleRun = next;
+        showMessage(consoleMessage, terminalRunStatuses.has(next.status) ? 'Run ' + next.status + '.' : 'Run is active. You can watch it from Browsers.', next.status === 'failed');
+        renderConsole();
+      } catch (e) {
+        showMessage(consoleMessage, 'Could not refresh the run yet. Retrying… ' + e.message, true);
+      }
+      scheduleConsolePoll();
+    }
+
+    async function executeConsoleRun() {
+      const session = consoleSelectedSession();
+      const task = consoleTask.value.trim();
+      if (!session) return showMessage(consoleMessage, 'Select a browser first.', true);
+      if (!session.runtime_ready) return showMessage(consoleMessage, 'Choose a browser that is ready to run.', true);
+      if (!task) return showMessage(consoleMessage, 'Enter a task to execute.', true);
+      if (consoleRunIsActive()) return;
+
+      state.selectedId = session.id;
+      state.consoleRunSessionId = session.id;
+      state.consoleRunTask = task;
+      state.consoleRun = { status: 'starting', run_id: '', result: null, summary: '', final_url: '', error: '' };
+      showMessage(consoleMessage, 'Starting the asynchronous run…');
+      renderSessions();
+      try {
+        const run = await api('/api/browser-sessions/' + encodeURIComponent(session.id) + '/runs', {
+          method: 'POST',
+          body: { task, wait: false },
+        });
+        state.consoleRun = run;
+        showMessage(consoleMessage, 'Run started. Switch to Browsers at any time to watch it.');
+        renderConsole();
+        scheduleConsolePoll();
+      } catch (e) {
+        state.consoleRun = { status: 'failed', run_id: '', result: null, summary: '', final_url: '', error: e.message };
+        showMessage(consoleMessage, e.message, true);
+        renderConsole();
+      }
     }
 
     function visibleSessions() {
@@ -871,6 +1271,7 @@ function dashboardPage(user) {
         sessionsEl.appendChild(btn);
       }
       renderViewer();
+      renderConsole();
     }
 
     function renderViewer() {
@@ -934,7 +1335,6 @@ function dashboardPage(user) {
           viewerStateDescription.textContent = 'Refresh the dashboard to check this browser again.';
         }
       }
-      renderConnectionExample();
     }
 
     async function loadSessions() {
@@ -1175,7 +1575,8 @@ function dashboardPage(user) {
         await Promise.all([loadSessions(), loadApiKeys()]);
         accountMenu.removeAttribute('open');
       } catch (e) {
-        showMessage(browserView.hidden ? apiKeyMessage : sessionMessage, e.message, true);
+        const targetMessage = !consoleView.hidden ? consoleMessage : (browserView.hidden ? apiKeyMessage : sessionMessage);
+        showMessage(targetMessage, e.message, true);
       } finally {
         refreshBtn.disabled = false;
         label.textContent = 'Refresh dashboard';
@@ -1217,27 +1618,44 @@ function dashboardPage(user) {
         setDashboardView(link.dataset.viewTarget, true);
       });
     }
-    for (const tab of connectionTabs) {
+    consoleSessionSelect.addEventListener('change', () => {
+      state.consoleSessionId = consoleSessionSelect.value || null;
+      renderConsole();
+    });
+    consoleTask.addEventListener('input', () => {
+      renderConsoleBrowsers();
+      renderConsoleCode();
+    });
+    consoleTask.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) executeConsoleRun();
+    });
+    executeConsoleBtn.addEventListener('click', executeConsoleRun);
+    for (const tab of consoleCodeTabs) {
       tab.addEventListener('click', () => {
         state.codeClient = tab.dataset.codeClient;
-        renderConnectionExample();
+        renderConsoleCode();
       });
     }
-    copyConnectionCode.addEventListener('click', async () => {
+    copyConsoleCode.addEventListener('click', async () => {
       try {
-        await navigator.clipboard.writeText(connectionCode.textContent);
-        copyConnectionCode.textContent = 'Copied';
-        connectionNote.textContent = 'Code copied to your clipboard.';
+        await navigator.clipboard.writeText(consoleCode.textContent);
+        copyConsoleCode.textContent = 'Copied';
+        consoleCodeNote.textContent = 'Code copied to your clipboard.';
         setTimeout(() => {
-          copyConnectionCode.textContent = 'Copy';
-          connectionNote.textContent = 'Examples use the selected session ID and WEBBRAIN_API_KEY.';
+          copyConsoleCode.textContent = 'Copy';
+          consoleCodeNote.textContent = 'REST uses jq. Examples use WEBBRAIN_API_KEY and the current Console values.';
         }, 1800);
       } catch {
-        connectionNote.textContent = 'Copy failed. Select the code and copy it manually.';
+        consoleCodeNote.textContent = 'Copy failed. Select the code and copy it manually.';
       }
     });
-    window.addEventListener('hashchange', () => setDashboardView(location.hash === '#api-keys' ? 'api-keys' : 'browsers', false));
-    setDashboardView(location.hash === '#api-keys' ? 'api-keys' : 'browsers', false);
+    function dashboardViewFromHash() {
+      if (location.hash === '#api-keys') return 'api-keys';
+      if (location.hash === '#console') return 'console';
+      return 'browsers';
+    }
+    window.addEventListener('hashchange', () => setDashboardView(dashboardViewFromHash(), false));
+    setDashboardView(dashboardViewFromHash(), false);
     loadSessions().catch(e => showMessage(sessionMessage, e.message, true));
     loadApiKeys().catch(e => showMessage(apiKeyMessage, e.message, true));
     setInterval(() => loadSessions().catch(() => {}), 15000);
