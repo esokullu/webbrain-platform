@@ -346,6 +346,9 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /revoked_at/);
     assert.match(res.text, /min-height: 34px/);
     assert.match(res.text, /id="connectionSessionId"/);
+    assert.match(res.text, /\.tok-keyword/);
+    assert.match(res.text, /\.tok-string/);
+    assert.match(res.text, /highlightConnectionCode/);
     assert.match(res.text, /data-code-client="rest"/);
     assert.match(res.text, /data-code-client="node"/);
     assert.match(res.text, /data-code-client="python"/);
@@ -355,6 +358,9 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /href="\/docs"/);
     assert.match(res.text, /API documentation/);
     assert.doesNotMatch(res.text, /id="regionInput"/);
+    const inlineScripts = [...res.text.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]);
+    assert.ok(inlineScripts.length > 0);
+    for (const script of inlineScripts) assert.doesNotThrow(() => new Function(script));
     assert.doesNotMatch(res.text, /id="sizeInput"/);
     assert.doesNotMatch(res.text, /session\.region/);
     assert.doesNotMatch(res.text, /session\.size/);

@@ -275,6 +275,13 @@ function dashboardPage(user) {
     .code-tab:hover, .code-tab[aria-selected="true"] { background: var(--card); border-color: var(--border); color: var(--text); box-shadow: 0 2px 8px var(--shadow); }
     .code-shell { overflow: hidden; border-radius: 11px; background: #211812; color: #f8ead3; }
     .code-shell pre { min-height: 230px; margin: 0; padding: 18px; overflow: auto; font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; tab-size: 2; }
+    .code-shell .tok-comment { color: #9c8c7f; font-style: italic; }
+    .code-shell .tok-keyword { color: #d6b4ff; font-weight: 650; }
+    .code-shell .tok-string { color: #a6e3b5; }
+    .code-shell .tok-variable { color: #f4cc7d; }
+    .code-shell .tok-number, .code-shell .tok-literal { color: #ff9f7a; }
+    .code-shell .tok-function { color: #8ebdff; }
+    .code-shell .tok-operator { color: #e9a6cf; }
     .code-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 10px; border-top: 1px solid rgba(248,234,211,.12); background: rgba(255,255,255,.03); }
     .code-note { color: #cbbda8; font-size: 11px; }
     .code-actions { display: flex; align-items: center; gap: 7px; }
@@ -607,12 +614,125 @@ function dashboardPage(user) {
       };
     }
 
+    const connectionKeywords = {
+      rest: new Set(['curl']),
+      node: new Set(['import', 'from', 'const', 'let', 'await', 'new', 'export', 'class', 'async', 'throw', 'return']),
+      python: new Set(['import', 'from', 'as', 'class', 'def', 'return', 'raise', 'if', 'else', 'elif', 'while', 'for', 'in', 'with', 'try', 'except']),
+      php: new Set(['<?php', 'require_once', 'new', 'function', 'public', 'private', 'class', 'final', 'return', 'throw']),
+    };
+    const connectionLiterals = new Set(['true', 'false', 'null', 'undefined', 'True', 'False', 'None']);
+
+    function isCodeWordStart(char) {
+      if (!char) return false;
+      const code = char.charCodeAt(0);
+      return char === '_' || (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+    }
+
+    function isCodeWordPart(char) {
+      if (!char) return false;
+      const code = char.charCodeAt(0);
+      return isCodeWordStart(char) || (code >= 48 && code <= 57);
+    }
+
+    function appendCodeToken(fragment, value, kind) {
+      if (!value) return;
+      if (!kind) {
+        fragment.append(document.createTextNode(value));
+        return;
+      }
+      const span = document.createElement('span');
+      span.className = 'tok-' + kind;
+      span.textContent = value;
+      fragment.append(span);
+    }
+
+    function highlightConnectionCode(target, source, language) {
+      const fragment = document.createDocumentFragment();
+      let cursor = 0;
+      let plainStart = 0;
+      const flushPlain = end => {
+        appendCodeToken(fragment, source.slice(plainStart, end));
+      };
+      const addToken = (end, kind) => {
+        flushPlain(cursor);
+        appendCodeToken(fragment, source.slice(cursor, end), kind);
+        cursor = end;
+        plainStart = end;
+      };
+
+      while (cursor < source.length) {
+        const char = source[cursor];
+        const next = source[cursor + 1];
+
+        if (language === 'php' && source.startsWith('<?php', cursor)) {
+          addToken(cursor + 5, 'keyword');
+          continue;
+        }
+        if ((char === '#' && language !== 'node') || (char === '/' && next === '/' && (language === 'node' || language === 'php'))) {
+          let end = cursor + (char === '/' ? 2 : 1);
+          while (end < source.length && source.charCodeAt(end) !== 10) end += 1;
+          addToken(end, 'comment');
+          continue;
+        }
+        if (char === "'" || char === '"' || (language === 'node' && char.charCodeAt(0) === 96)) {
+          let end = cursor + 1;
+          while (end < source.length) {
+            if (source.charCodeAt(end) === 92) end += 2;
+            else if (source[end] === char) { end += 1; break; }
+            else end += 1;
+          }
+          addToken(Math.min(end, source.length), 'string');
+          continue;
+        }
+        if (char === '$' && (language === 'rest' || language === 'php')) {
+          let end = cursor + 1;
+          while (isCodeWordPart(source[end])) end += 1;
+          addToken(end, 'variable');
+          continue;
+        }
+        if (language === 'rest' && char === '-' && (next === '-' || isCodeWordStart(next))) {
+          let end = cursor + 1;
+          while (source[end] === '-' || isCodeWordPart(source[end])) end += 1;
+          addToken(end, 'keyword');
+          continue;
+        }
+        if (char >= '0' && char <= '9') {
+          let end = cursor + 1;
+          while ((source[end] >= '0' && source[end] <= '9') || source[end] === '.') end += 1;
+          addToken(end, 'number');
+          continue;
+        }
+        if (isCodeWordStart(char)) {
+          let end = cursor + 1;
+          while (isCodeWordPart(source[end])) end += 1;
+          const word = source.slice(cursor, end);
+          let lookahead = end;
+          while (source[lookahead] === ' ' || source.charCodeAt(lookahead) === 10) lookahead += 1;
+          let kind = '';
+          if (connectionKeywords[language].has(word)) kind = 'keyword';
+          else if (connectionLiterals.has(word)) kind = 'literal';
+          else if (source[lookahead] === '(') kind = 'function';
+          if (kind) addToken(end, kind);
+          else cursor = end;
+          continue;
+        }
+        const operator = source.slice(cursor, cursor + 2);
+        if (['=>', '->', '::', '?:'].includes(operator)) {
+          addToken(cursor + 2, 'operator');
+          continue;
+        }
+        cursor += 1;
+      }
+      flushPlain(source.length);
+      target.replaceChildren(fragment);
+    }
+
     function renderConnectionExample() {
       const session = selectedSession();
       const sessionId = session?.id || 'bs_your_session';
       connectionSessionId.textContent = session ? session.id : 'Select a browser';
       connectionSessionId.title = session ? session.id : '';
-      connectionCode.textContent = connectionExamples(sessionId)[state.codeClient];
+      highlightConnectionCode(connectionCode, connectionExamples(sessionId)[state.codeClient], state.codeClient);
       for (const tab of connectionTabs) tab.setAttribute('aria-selected', String(tab.dataset.codeClient === state.codeClient));
     }
 
