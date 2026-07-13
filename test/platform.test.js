@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { readFile } from 'node:fs/promises';
 import WebSocket, { WebSocketServer } from 'ws';
 import { MemoryStore } from '../src/db/memory.js';
 import { DigitalOceanProvisioner, NullProvisioner, digitalOceanDropletName } from '../src/platform/digitalocean.js';
@@ -566,6 +567,11 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
 
 test('cloud browser extension id matches Chrome unpacked-extension path hashing', () => {
   assert.equal(chromeExtensionIdForPath('/opt/webbrain3/src/chrome'), 'ojnjlpnhkfaiapnicpdgngopfpmphocc');
+});
+
+test('cloud browser launches at the virtual display size', async () => {
+  const source = await readFile(new URL('../scripts/launch-cloud-browser.mjs', import.meta.url), 'utf8');
+  assert.match(source, /'--window-size=1440,900'/);
 });
 
 test('digitalocean provisioner uses hostname-safe droplet names', async () => {
