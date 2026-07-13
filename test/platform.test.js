@@ -275,6 +275,8 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /setSessionsCollapsed\(true\)/);
     assert.match(res.text, /\/api\/browser-sessions/);
     assert.match(res.text, /Create key/);
+    assert.match(res.text, /github\.com\/esokullu\/webbrain-platform#browser-automation-api/);
+    assert.match(res.text, /API documentation/);
     assert.doesNotMatch(res.text, /id="regionInput"/);
     assert.doesNotMatch(res.text, /id="sizeInput"/);
     assert.doesNotMatch(res.text, /session\.region/);

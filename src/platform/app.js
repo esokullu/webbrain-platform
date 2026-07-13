@@ -232,6 +232,7 @@ function dashboardPage(user) {
     .api-key-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
     .api-panel { grid-column: 1 / -1; }
     .api-description { margin: 3px 0 0; color: var(--text-dim); font-size: 12px; }
+    .docs-link { align-self: center; }
     .secret { display: none; margin-top: 10px; padding: 11px; border: 1px solid var(--border); border-radius: 8px; background: rgba(89,55,25,.04); overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
     @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
     @media (max-width: 900px) {
@@ -262,6 +263,8 @@ function dashboardPage(user) {
       .create-row { align-items: stretch; flex-direction: column; }
       .create-row button { width: 100%; }
       .api-key-row { grid-template-columns: 1fr; }
+      .api-panel .panel-head { align-items: stretch; flex-direction: column; }
+      .docs-link { justify-content: center; }
     }
   </style>
 </head>
@@ -330,6 +333,7 @@ function dashboardPage(user) {
             <h2>API keys</h2>
             <p class="api-description">Control the same visible browsers from your own tools.</p>
           </div>
+          <a class="button-link docs-link" href="https://github.com/esokullu/webbrain-platform#browser-automation-api" target="_blank" rel="noopener">API documentation ↗</a>
         </div>
         <div class="panel-body">
           <div class="api-key-row">
