@@ -270,6 +270,24 @@ function dashboardPage(user) {
     .viewer-title-button:hover { background: var(--card-hover); }
     iframe { width: 100%; height: 640px; border: 0; background: #0b0e17; border-radius: 0 0 16px 16px; }
     .empty { min-height: 640px; display: grid; place-items: center; color: var(--text-dim); text-align: center; padding: 20px; }
+    .viewer-state { min-height: 640px; display: grid; place-items: center; padding: 32px 20px; color: var(--text-dim); text-align: center; }
+    .viewer-state-content { max-width: 380px; display: grid; justify-items: center; }
+    .viewer-state h3 { margin: 0; color: var(--text); font-size: 21px; letter-spacing: -.02em; }
+    .viewer-state p { max-width: 340px; margin: 8px 0 0; font-size: 13px; line-height: 1.6; }
+    .browser-boot { position: relative; width: 92px; height: 68px; margin-bottom: 24px; overflow: hidden; border: 1px solid rgba(91,82,232,.30); border-radius: 13px; background: #211812; box-shadow: 0 18px 40px rgba(91,82,232,.16); }
+    .browser-boot::before { content: ''; position: absolute; inset: 0 0 auto; height: 18px; border-bottom: 1px solid rgba(248,234,211,.12); background: rgba(255,255,255,.035); }
+    .browser-boot-dots, .browser-boot-dots::before, .browser-boot-dots::after { position: absolute; top: 7px; width: 4px; height: 4px; border-radius: 50%; background: #8b7d70; }
+    .browser-boot-dots { left: 10px; }
+    .browser-boot-dots::before, .browser-boot-dots::after { content: ''; top: 0; }
+    .browser-boot-dots::before { left: 8px; }
+    .browser-boot-dots::after { left: 16px; }
+    .browser-boot-track { position: absolute; right: 15px; bottom: 19px; left: 15px; height: 4px; overflow: hidden; border-radius: 999px; background: rgba(248,234,211,.12); }
+    .browser-boot-track::after { content: ''; position: absolute; width: 42%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), #a78bfa); box-shadow: 0 0 12px var(--accent); animation: browser-boot 1.25s ease-in-out infinite; }
+    .viewer-state.is-ready .browser-boot { border-color: rgba(45,136,102,.34); box-shadow: 0 18px 40px rgba(45,136,102,.13); }
+    .viewer-state.is-ready .browser-boot-track { width: 10px; height: 10px; right: 14px; bottom: 13px; left: auto; overflow: visible; background: var(--success); box-shadow: 0 0 0 5px rgba(45,136,102,.12); }
+    .viewer-state.is-ready .browser-boot-track::after { display: none; }
+    .viewer-connect-primary { min-height: 48px; margin-top: 20px; padding: 10px 24px; border-radius: 10px; font-size: 14px; box-shadow: 0 10px 26px var(--accent-glow); }
+    @keyframes browser-boot { from { transform: translateX(-115%); } to { transform: translateX(245%); } }
     .empty-small { min-height: 180px; border: 1px dashed var(--border); border-radius: 10px; }
     .message { margin-top: 10px; min-height: 20px; color: var(--success); font-size: 12px; overflow-wrap: anywhere; }
     .message.error { color: var(--danger); }
@@ -314,7 +332,10 @@ function dashboardPage(user) {
     .dialog-body input { width: 100%; }
     .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
     .confirm-phrase { padding: 2px 6px; border: 1px solid var(--border); border-radius: 5px; background: rgba(89,55,25,.05); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); }
-    @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
+    @media (prefers-reduced-motion: reduce) {
+      * { scroll-behavior: auto !important; transition: none !important; }
+      .browser-boot-track::after { width: 54%; animation: none; transform: translateX(55%); }
+    }
     @media (max-width: 900px) {
       .nav-inner { padding-inline: 14px; }
       main { padding: 24px 14px 36px; }
@@ -437,7 +458,17 @@ function dashboardPage(user) {
                 <button class="danger" id="deleteSessionBtn" type="button" disabled>Delete</button>
               </div>
             </div>
-            <div id="viewerEmpty" class="empty">Create or select a browser, then connect here.</div>
+            <div id="viewerEmpty" class="viewer-state" aria-live="polite">
+              <div class="viewer-state-content">
+                <div class="browser-boot" id="viewerStateVisual" aria-hidden="true" style="display:none">
+                  <span class="browser-boot-dots"></span>
+                  <span class="browser-boot-track"></span>
+                </div>
+                <h3 id="viewerStateTitle">Select a browser</h3>
+                <p id="viewerStateDescription">Choose a browser session to preview it here.</p>
+                <button class="viewer-connect-primary" id="viewerConnectBtn" type="button" style="display:none">Connect</button>
+              </div>
+            </div>
             <iframe id="novncFrame" title="WebBrain cloud browser noVNC" style="display:none" referrerpolicy="no-referrer"></iframe>
           </section>
           <section class="panel connection-panel" aria-labelledby="connectionTitle">
@@ -541,6 +572,10 @@ function dashboardPage(user) {
     const renameSessionBtn = document.getElementById('renameSessionBtn');
     const viewerTitle = document.getElementById('viewerTitle');
     const viewerEmpty = document.getElementById('viewerEmpty');
+    const viewerStateVisual = document.getElementById('viewerStateVisual');
+    const viewerStateTitle = document.getElementById('viewerStateTitle');
+    const viewerStateDescription = document.getElementById('viewerStateDescription');
+    const viewerConnectBtn = document.getElementById('viewerConnectBtn');
     const novncFrame = document.getElementById('novncFrame');
     const externalLink = document.getElementById('externalLink');
     const createApiKeyBtn = document.getElementById('createApiKeyBtn');
@@ -565,7 +600,7 @@ function dashboardPage(user) {
     const deleteConfirmInput = document.getElementById('deleteConfirmInput');
     const cancelDeleteBtn = document.getElementById('cancelDeleteBtn');
     const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
-    const state = { sessions: [], apiKeys: [], selectedId: null, showDestroyed: false, deleteTargetId: null, codeClient: 'rest' };
+    const state = { sessions: [], apiKeys: [], selectedId: null, connectedSessionId: null, connectingSessionId: null, showDestroyed: false, deleteTargetId: null, codeClient: 'rest' };
     const sessionsCollapsedKey = 'webbrain.sessionsCollapsed';
 
     function setDashboardView(view, updateUrl) {
@@ -820,9 +855,13 @@ function dashboardPage(user) {
         status.textContent = session.status;
         btn.append(details, status);
         btn.addEventListener('click', () => {
+          if (state.selectedId !== session.id) {
+            clearViewerConnection();
+            state.connectingSessionId = null;
+            showMessage(sessionMessage, '');
+          }
           state.selectedId = session.id;
           renderSessions();
-          renderViewer();
           refreshOne(session.id).catch(e => showMessage(sessionMessage, e.message, true));
         });
         sessionsEl.appendChild(btn);
@@ -832,10 +871,56 @@ function dashboardPage(user) {
 
     function renderViewer() {
       const session = selectedSession();
-      connectBtn.disabled = !session || !session.public_ip || session.status !== 'ready';
+      if (state.connectedSessionId && (state.connectedSessionId !== session?.id || session.status !== 'ready' || !session.public_ip)) clearViewerConnection();
+      const isConnected = !!session && state.connectedSessionId === session.id;
+      const isConnecting = !!session && state.connectingSessionId === session.id;
+      const canConnect = !!session && !!session.public_ip && session.status === 'ready';
+
+      connectBtn.textContent = isConnected ? 'Disconnect' : (isConnecting ? 'Connecting…' : 'Connect');
+      connectBtn.disabled = isConnecting || (!isConnected && !canConnect);
       deleteSessionBtn.disabled = !session || session.status === 'destroyed';
       renameSessionBtn.disabled = !session || session.status === 'destroyed';
       viewerTitle.textContent = session ? browserName(session) + ' · ' + session.status : 'Browser preview';
+
+      viewerConnectBtn.style.display = 'none';
+      viewerConnectBtn.disabled = isConnecting;
+      viewerConnectBtn.textContent = isConnecting ? 'Connecting…' : 'Connect';
+      viewerStateVisual.style.display = 'none';
+      viewerEmpty.className = 'viewer-state';
+      viewerEmpty.removeAttribute('aria-busy');
+
+      if (isConnected) {
+        viewerEmpty.style.display = 'none';
+        novncFrame.style.display = '';
+      } else {
+        novncFrame.style.display = 'none';
+        viewerEmpty.style.display = '';
+        if (!session) {
+          viewerStateTitle.textContent = 'Select a browser';
+          viewerStateDescription.textContent = 'Choose a browser session to preview it here.';
+        } else if (session.status === 'provisioning' || (session.status === 'ready' && !session.public_ip)) {
+          viewerEmpty.classList.add('is-provisioning');
+          viewerEmpty.setAttribute('aria-busy', 'true');
+          viewerStateVisual.style.display = '';
+          viewerStateTitle.textContent = 'Preparing your browser';
+          viewerStateDescription.textContent = 'Starting the cloud machine and WebBrain. This usually takes a few minutes.';
+        } else if (canConnect) {
+          viewerEmpty.classList.add('is-ready');
+          viewerStateVisual.style.display = '';
+          viewerStateTitle.textContent = 'Browser is ready';
+          viewerStateDescription.textContent = 'Connect to see and control ' + browserName(session) + '.';
+          viewerConnectBtn.style.display = '';
+        } else if (session.status === 'failed') {
+          viewerStateTitle.textContent = 'Browser setup failed';
+          viewerStateDescription.textContent = 'Delete this browser and create a new one to try again.';
+        } else if (session.status === 'destroyed') {
+          viewerStateTitle.textContent = 'Browser unavailable';
+          viewerStateDescription.textContent = 'This browser has been destroyed.';
+        } else {
+          viewerStateTitle.textContent = 'Browser unavailable';
+          viewerStateDescription.textContent = 'Refresh the dashboard to check this browser again.';
+        }
+      }
       renderConnectionExample();
     }
 
@@ -903,27 +988,45 @@ function dashboardPage(user) {
       }
     }
 
+    function clearViewerConnection() {
+      state.connectedSessionId = null;
+      novncFrame.src = 'about:blank';
+      novncFrame.removeAttribute('src');
+      novncFrame.style.display = 'none';
+      externalLink.removeAttribute('href');
+      externalLink.style.display = 'none';
+    }
+
+    function disconnectNoVnc() {
+      if (!state.connectedSessionId) return;
+      clearViewerConnection();
+      renderViewer();
+      showMessage(sessionMessage, 'Browser disconnected.');
+    }
+
     async function openNoVnc() {
       const session = selectedSession();
-      if (!session) return;
-      connectBtn.disabled = true;
+      if (!session || !session.public_ip || session.status !== 'ready') return;
+      const sessionId = session.id;
+      state.connectingSessionId = sessionId;
       setSessionsCollapsed(true);
       showMessage(sessionMessage, 'Creating noVNC link...');
+      renderViewer();
       try {
-        const body = await api('/api/browser-sessions/' + encodeURIComponent(session.id) + '/connect-token', {
+        const body = await api('/api/browser-sessions/' + encodeURIComponent(sessionId) + '/connect-token', {
           method: 'POST',
           body: { scheme: 'http', port: 6081 },
         });
+        if (state.selectedId !== sessionId || state.connectingSessionId !== sessionId) return;
+        state.connectedSessionId = sessionId;
         novncFrame.src = body.url;
         externalLink.href = body.url;
         externalLink.style.display = '';
-        viewerEmpty.style.display = 'none';
-        novncFrame.style.display = '';
         showMessage(sessionMessage, 'noVNC opened. Token expires at ' + body.expires_at + '.');
       } catch (e) {
-        showMessage(sessionMessage, e.message, true);
+        if (state.selectedId === sessionId) showMessage(sessionMessage, e.message, true);
       } finally {
-        connectBtn.disabled = false;
+        if (state.connectingSessionId === sessionId) state.connectingSessionId = null;
         renderViewer();
       }
     }
@@ -951,10 +1054,8 @@ function dashboardPage(user) {
         state.deleteTargetId = null;
         if (state.selectedId === session.id) {
           state.selectedId = null;
-          novncFrame.removeAttribute('src');
-          novncFrame.style.display = 'none';
-          viewerEmpty.style.display = '';
-          externalLink.style.display = 'none';
+          state.connectingSessionId = null;
+          clearViewerConnection();
         }
         await loadSessions();
         showMessage(sessionMessage, 'Session deleted.');
@@ -1071,7 +1172,8 @@ function dashboardPage(user) {
         accountMenu.querySelector('summary').focus();
       }
     });
-    connectBtn.addEventListener('click', openNoVnc);
+    connectBtn.addEventListener('click', () => state.connectedSessionId ? disconnectNoVnc() : openNoVnc());
+    viewerConnectBtn.addEventListener('click', openNoVnc);
     renameSessionBtn.addEventListener('click', openRenameDialog);
     renameForm.addEventListener('submit', saveBrowserName);
     cancelRenameBtn.addEventListener('click', () => renameDialog.close());
