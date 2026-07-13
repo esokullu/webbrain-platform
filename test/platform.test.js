@@ -321,7 +321,7 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /Preparing your browser/);
     assert.match(res.text, /Browser is ready/);
     assert.match(res.text, /browser-boot 1\.25s/);
-    assert.match(res.text, /novncFrame/);
+    assert.match(res.text, /id="viewerFrames"/);
     assert.match(res.text, /id="newSessionName"/);
     assert.match(res.text, /id="renameDialog"/);
     assert.match(res.text, /method: 'PATCH'/);
@@ -339,10 +339,12 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /webbrain\.sessionsCollapsed/);
     assert.match(res.text, /aria-controls="sessionPanelBody"/);
     assert.match(res.text, /setSessionsCollapsed\(true\)/);
-    assert.match(res.text, /connectedSessionId: null/);
+    assert.match(res.text, /const viewerConnections = new Map\(\)/);
+    assert.match(res.text, /const connectingSessionIds = new Set\(\)/);
     assert.match(res.text, /connectBtn\.textContent = isConnected \? 'Disconnect'/);
-    assert.match(res.text, /state\.selectedId !== session\.id[\s\S]*clearViewerConnection\(\)/);
-    assert.match(res.text, /state\.connectedSessionId = sessionId/);
+    assert.match(res.text, /item\.frame\.style\.display = sessionId === session\?\.id \? 'block' : 'none'/);
+    assert.match(res.text, /viewerConnections\.set\(sessionId, \{ frame, url: body\.url \}\)/);
+    assert.match(res.text, /function removeViewerConnection\(sessionId\)/);
     assert.match(res.text, /function disconnectNoVnc\(\)/);
     assert.match(res.text, /\.session-heading > div:first-child[\s\S]*display: none !important/);
     assert.match(res.text, /\/api\/browser-sessions/);

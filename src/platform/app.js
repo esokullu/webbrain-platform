@@ -273,7 +273,8 @@ function dashboardPage(user) {
     .viewer-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; }
     .viewer-title-button { min-width: 0; max-width: 52%; display: inline-flex; align-items: center; gap: 6px; padding-inline: 4px 7px; border-color: transparent; background: transparent; color: var(--text); box-shadow: none; }
     .viewer-title-button:hover { background: var(--card-hover); }
-    iframe { width: 100%; height: 640px; border: 0; background: #0b0e17; border-radius: 0 0 16px 16px; }
+    .viewer-frames { min-height: 640px; display: none; }
+    iframe { width: 100%; height: 640px; display: none; border: 0; background: #0b0e17; border-radius: 0 0 16px 16px; }
     .empty { min-height: 640px; display: grid; place-items: center; color: var(--text-dim); text-align: center; padding: 20px; }
     .viewer-state { min-height: 640px; display: grid; place-items: center; padding: 32px 20px; color: var(--text-dim); text-align: center; }
     .viewer-state-content { max-width: 380px; display: grid; justify-items: center; }
@@ -354,7 +355,7 @@ function dashboardPage(user) {
       .session-panel.is-collapsed .session-panel-actions { order: 0; display: flex; flex-direction: row; }
       .session-panel.is-collapsed .panel-body { display: block; }
       .session-panel.is-collapsed .status { min-width: auto; padding: 0 8px; }
-      iframe, .empty { height: 520px; min-height: 520px; }
+      iframe, .empty, .viewer-state, .viewer-frames { height: 520px; min-height: 520px; }
     }
     @media (max-width: 620px) {
       .brand { font-size: 17px; gap: 7px; }
@@ -474,7 +475,7 @@ function dashboardPage(user) {
                 <button class="viewer-connect-primary" id="viewerConnectBtn" type="button" style="display:none">Connect</button>
               </div>
             </div>
-            <iframe id="novncFrame" title="WebBrain cloud browser noVNC" style="display:none" referrerpolicy="no-referrer"></iframe>
+            <div class="viewer-frames" id="viewerFrames"></div>
           </section>
           <section class="panel connection-panel" aria-labelledby="connectionTitle">
             <div class="panel-head connection-head">
@@ -581,7 +582,7 @@ function dashboardPage(user) {
     const viewerStateTitle = document.getElementById('viewerStateTitle');
     const viewerStateDescription = document.getElementById('viewerStateDescription');
     const viewerConnectBtn = document.getElementById('viewerConnectBtn');
-    const novncFrame = document.getElementById('novncFrame');
+    const viewerFrames = document.getElementById('viewerFrames');
     const externalLink = document.getElementById('externalLink');
     const createApiKeyBtn = document.getElementById('createApiKeyBtn');
     const apiKeyName = document.getElementById('apiKeyName');
@@ -605,7 +606,9 @@ function dashboardPage(user) {
     const deleteConfirmInput = document.getElementById('deleteConfirmInput');
     const cancelDeleteBtn = document.getElementById('cancelDeleteBtn');
     const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
-    const state = { sessions: [], apiKeys: [], selectedId: null, connectedSessionId: null, connectingSessionId: null, showDestroyed: false, deleteTargetId: null, codeClient: 'rest' };
+    const state = { sessions: [], apiKeys: [], selectedId: null, showDestroyed: false, deleteTargetId: null, codeClient: 'rest' };
+    const viewerConnections = new Map();
+    const connectingSessionIds = new Set();
     const sessionsCollapsedKey = 'webbrain.sessionsCollapsed';
 
     function setDashboardView(view, updateUrl) {
@@ -860,11 +863,7 @@ function dashboardPage(user) {
         status.textContent = session.status;
         btn.append(details, status);
         btn.addEventListener('click', () => {
-          if (state.selectedId !== session.id) {
-            clearViewerConnection();
-            state.connectingSessionId = null;
-            showMessage(sessionMessage, '');
-          }
+          if (state.selectedId !== session.id) showMessage(sessionMessage, '');
           state.selectedId = session.id;
           renderSessions();
           refreshOne(session.id).catch(e => showMessage(sessionMessage, e.message, true));
@@ -876,9 +875,13 @@ function dashboardPage(user) {
 
     function renderViewer() {
       const session = selectedSession();
-      if (state.connectedSessionId && (state.connectedSessionId !== session?.id || session.status !== 'ready' || !session.public_ip)) clearViewerConnection();
-      const isConnected = !!session && state.connectedSessionId === session.id;
-      const isConnecting = !!session && state.connectingSessionId === session.id;
+      for (const [sessionId] of viewerConnections) {
+        const connectedSession = state.sessions.find(item => item.id === sessionId);
+        if (!connectedSession || connectedSession.status !== 'ready' || !connectedSession.public_ip) removeViewerConnection(sessionId);
+      }
+      const connection = session ? viewerConnections.get(session.id) : null;
+      const isConnected = !!connection;
+      const isConnecting = !!session && connectingSessionIds.has(session.id);
       const canConnect = !!session && !!session.public_ip && session.status === 'ready';
 
       connectBtn.textContent = isConnected ? 'Disconnect' : (isConnecting ? 'Connecting…' : 'Connect');
@@ -893,12 +896,17 @@ function dashboardPage(user) {
       viewerStateVisual.style.display = 'none';
       viewerEmpty.className = 'viewer-state';
       viewerEmpty.removeAttribute('aria-busy');
+      for (const [sessionId, item] of viewerConnections) item.frame.style.display = sessionId === session?.id ? 'block' : 'none';
 
       if (isConnected) {
         viewerEmpty.style.display = 'none';
-        novncFrame.style.display = '';
+        viewerFrames.style.display = 'block';
+        externalLink.href = connection.url;
+        externalLink.style.display = '';
       } else {
-        novncFrame.style.display = 'none';
+        viewerFrames.style.display = 'none';
+        externalLink.removeAttribute('href');
+        externalLink.style.display = 'none';
         viewerEmpty.style.display = '';
         if (!session) {
           viewerStateTitle.textContent = 'Select a browser';
@@ -993,18 +1001,18 @@ function dashboardPage(user) {
       }
     }
 
-    function clearViewerConnection() {
-      state.connectedSessionId = null;
-      novncFrame.src = 'about:blank';
-      novncFrame.removeAttribute('src');
-      novncFrame.style.display = 'none';
-      externalLink.removeAttribute('href');
-      externalLink.style.display = 'none';
+    function removeViewerConnection(sessionId) {
+      const connection = viewerConnections.get(sessionId);
+      if (!connection) return;
+      connection.frame.src = 'about:blank';
+      connection.frame.remove();
+      viewerConnections.delete(sessionId);
     }
 
     function disconnectNoVnc() {
-      if (!state.connectedSessionId) return;
-      clearViewerConnection();
+      const session = selectedSession();
+      if (!session || !viewerConnections.has(session.id)) return;
+      removeViewerConnection(session.id);
       renderViewer();
       showMessage(sessionMessage, 'Browser disconnected.');
     }
@@ -1013,7 +1021,8 @@ function dashboardPage(user) {
       const session = selectedSession();
       if (!session || !session.public_ip || session.status !== 'ready') return;
       const sessionId = session.id;
-      state.connectingSessionId = sessionId;
+      if (viewerConnections.has(sessionId) || connectingSessionIds.has(sessionId)) return;
+      connectingSessionIds.add(sessionId);
       setSessionsCollapsed(true);
       showMessage(sessionMessage, 'Creating noVNC link...');
       renderViewer();
@@ -1022,16 +1031,20 @@ function dashboardPage(user) {
           method: 'POST',
           body: { scheme: 'http', port: 6081 },
         });
-        if (state.selectedId !== sessionId || state.connectingSessionId !== sessionId) return;
-        state.connectedSessionId = sessionId;
-        novncFrame.src = body.url;
-        externalLink.href = body.url;
-        externalLink.style.display = '';
-        showMessage(sessionMessage, 'noVNC opened. Token expires at ' + body.expires_at + '.');
+        const currentSession = state.sessions.find(item => item.id === sessionId);
+        if (!connectingSessionIds.has(sessionId) || !currentSession || currentSession.status !== 'ready') return;
+        const frame = document.createElement('iframe');
+        frame.title = browserName(currentSession) + ' cloud browser';
+        frame.referrerPolicy = 'no-referrer';
+        frame.dataset.sessionId = sessionId;
+        frame.src = body.url;
+        viewerFrames.appendChild(frame);
+        viewerConnections.set(sessionId, { frame, url: body.url });
+        if (state.selectedId === sessionId) showMessage(sessionMessage, 'noVNC opened. Token expires at ' + body.expires_at + '.');
       } catch (e) {
         if (state.selectedId === sessionId) showMessage(sessionMessage, e.message, true);
       } finally {
-        if (state.connectingSessionId === sessionId) state.connectingSessionId = null;
+        connectingSessionIds.delete(sessionId);
         renderViewer();
       }
     }
@@ -1057,10 +1070,10 @@ function dashboardPage(user) {
         await api('/api/browser-sessions/' + encodeURIComponent(session.id), { method: 'DELETE' });
         deleteDialog.close();
         state.deleteTargetId = null;
+        connectingSessionIds.delete(session.id);
+        removeViewerConnection(session.id);
         if (state.selectedId === session.id) {
           state.selectedId = null;
-          state.connectingSessionId = null;
-          clearViewerConnection();
         }
         await loadSessions();
         showMessage(sessionMessage, 'Session deleted.');
@@ -1177,7 +1190,11 @@ function dashboardPage(user) {
         accountMenu.querySelector('summary').focus();
       }
     });
-    connectBtn.addEventListener('click', () => state.connectedSessionId ? disconnectNoVnc() : openNoVnc());
+    connectBtn.addEventListener('click', () => {
+      const session = selectedSession();
+      if (session && viewerConnections.has(session.id)) disconnectNoVnc();
+      else openNoVnc();
+    });
     viewerConnectBtn.addEventListener('click', openNoVnc);
     renameSessionBtn.addEventListener('click', openRenameDialog);
     renameForm.addEventListener('submit', saveBrowserName);
