@@ -45,6 +45,17 @@ export class MemoryStore {
     return clone(this.users.get(id) || null);
   }
 
+  async updateUser(id, { email, password_hash, updated_at = nowIso() }) {
+    const row = this.users.get(id);
+    if (!row) throw notFound('User not found');
+    const normalizedEmail = String(email).trim().toLowerCase();
+    if ([...this.users.values()].some(user => user.id !== id && user.email === normalizedEmail)) {
+      throw conflict('Email already registered');
+    }
+    Object.assign(row, { email: normalizedEmail, password_hash, updated_at });
+    return clone(row);
+  }
+
   async createWebSession(row) {
     this.webSessions.set(row.token_hash, clone(row));
     return clone(row);
@@ -63,6 +74,16 @@ export class MemoryStore {
 
   async deleteWebSessionByHash(tokenHash) {
     this.webSessions.delete(tokenHash);
+  }
+
+  async deleteOtherWebSessions(userId, keepTokenHash) {
+    let deleted = 0;
+    for (const [tokenHash, session] of this.webSessions) {
+      if (session.user_id !== userId || tokenHash === keepTokenHash) continue;
+      this.webSessions.delete(tokenHash);
+      deleted += 1;
+    }
+    return deleted;
   }
 
   async createApiKey(row) {
@@ -138,6 +159,13 @@ export class MemoryStore {
 
   async listCloudRunsForSession(browserSessionId) {
     return clone([...this.cloudRuns.values()].filter(r => r.browser_session_id === browserSessionId));
+  }
+
+  async listCloudRunsForUser(userId, { limit = 50, offset = 0 } = {}) {
+    return clone([...this.cloudRuns.values()]
+      .filter(run => run.user_id === userId)
+      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)) || String(b.id).localeCompare(String(a.id)))
+      .slice(offset, offset + limit));
   }
 
   async updateCloudRun(id, patch) {

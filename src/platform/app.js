@@ -30,6 +30,14 @@ function normalizeBrowserDisplayName(value) {
   return name || null;
 }
 
+function normalizeAccountEmail(value) {
+  const email = String(value ?? '').trim().toLowerCase();
+  if (email.length > 255 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw Object.assign(new Error('Enter a valid email address'), { status: 400 });
+  }
+  return email;
+}
+
 function apiKeyPrefixCandidates(rawKey) {
   if (!String(rawKey).startsWith('wbp_')) return [];
   const payload = String(rawKey).slice(4);
@@ -216,6 +224,7 @@ function dashboardPage(user) {
     button.account-action { width: 100%; min-height: 38px; display: flex; align-items: center; gap: 10px; padding: 8px 9px; border: 0; border-radius: 7px; background: transparent; color: var(--text); box-shadow: none; font-size: 13px; font-weight: 650; text-align: left; }
     button.account-action:hover { background: var(--card-hover); color: var(--text); transform: none; }
     button.account-action svg { width: 16px; height: 16px; flex: 0 0 16px; color: var(--text-dim); }
+    button.account-action.edit-account-action svg { color: var(--accent); }
     button.account-action.logout-action { color: var(--danger); }
     button.account-action.logout-action svg { color: currentColor; }
     button.account-action.logout-action:hover { background: rgba(164,59,50,.08); color: var(--danger); }
@@ -346,15 +355,26 @@ function dashboardPage(user) {
     .run-section { display: grid; gap: 6px; }
     .run-section-title { color: var(--text-dim); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
     .run-summary { margin: 0; color: var(--text); font-size: 13px; white-space: pre-wrap; }
-    .run-output { max-height: 230px; margin: 0; padding: 13px; overflow: auto; border-radius: 9px; background: #211812; color: #f8ead3; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .run-conclusion { display: grid; gap: 8px; padding: 14px; border: 1px solid rgba(45,136,102,.20); border-radius: 11px; background: rgba(45,136,102,.055); }
+    .run-conclusion.is-error { border-color: rgba(164,59,50,.22); background: rgba(164,59,50,.045); }
+    .run-conclusion-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .run-conclusion-title { color: var(--success); font-size: 11px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+    .run-conclusion.is-error .run-conclusion-title { color: var(--danger); }
+    .run-conclusion-summary { margin: 0; color: var(--text-dim); font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
+    .run-answer { margin: 0; color: var(--text); font-size: 14px; line-height: 1.68; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .run-output { margin: 0; padding: 13px; border-radius: 9px; background: #211812; color: #f8ead3; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
     .run-error { margin: 0; color: var(--danger); font-size: 13px; white-space: pre-wrap; }
     .run-final-url { min-width: 0; overflow: hidden; color: var(--accent); font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
     .run-progress-shell { min-width: 0; display: grid; gap: 7px; }
     .run-progress-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .run-progress-tools { display: flex; align-items: center; gap: 8px; }
     .run-progress-count { color: var(--text-dim); font: 10px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    .run-progress-log { position: relative; max-height: 330px; padding: 12px 12px 12px 10px; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--border); border-radius: 10px; background: rgba(89,55,25,.022); scroll-behavior: smooth; }
+    .run-progress-toggle { min-height: 27px; padding: 3px 8px; border-color: var(--border); background: rgba(255,253,248,.72); color: var(--text-dim); box-shadow: none; font-size: 10px; }
+    .run-progress-toggle:hover { background: var(--card-hover); color: var(--text); }
+    .run-progress-log { position: relative; padding: 12px 12px 12px 10px; border: 1px solid var(--border); border-radius: 10px; background: rgba(89,55,25,.022); }
     .run-progress-log::before { content: ''; position: absolute; top: 17px; bottom: 17px; left: 21px; width: 1px; background: linear-gradient(var(--accent), rgba(91,82,232,.10)); }
     .run-progress-empty { position: relative; padding: 16px 14px 16px 35px; color: var(--text-dim); font-size: 12px; }
+    .run-progress-omission { position: relative; padding: 6px 4px 8px 35px; color: var(--text-dim); font-size: 10px; font-style: italic; }
     .run-event { position: relative; min-width: 0; padding: 7px 4px 10px 35px; }
     .run-event + .run-event { border-top: 1px solid rgba(91,82,232,.075); }
     .run-event-node { position: absolute; top: 13px; left: 6px; z-index: 1; width: 11px; height: 11px; border: 3px solid var(--card); border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 1px rgba(91,82,232,.22); }
@@ -371,8 +391,28 @@ function dashboardPage(user) {
     .run-event-body { margin: 5px 0 0; color: var(--text-dim); font-size: 11px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
     .run-event-details { margin-top: 6px; border: 1px solid rgba(91,82,232,.13); border-radius: 7px; background: rgba(255,255,255,.36); }
     .run-event-details summary { padding: 6px 8px; color: var(--accent); cursor: pointer; font-size: 10px; font-weight: 750; user-select: none; }
-    .run-event-details pre { max-height: 190px; margin: 0; padding: 9px; overflow: auto; border-top: 1px solid rgba(91,82,232,.11); color: var(--text); font: 10px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .run-event-details pre { margin: 0; padding: 9px; border-top: 1px solid rgba(91,82,232,.11); color: var(--text); font: 10px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
     .console-code-panel { margin-top: 18px; }
+    .logs-grid { display: grid; grid-template-columns: minmax(340px, .78fr) minmax(0, 1.22fr); gap: 18px; align-items: start; }
+    .logs-grid > .panel { min-width: 0; }
+    .logs-filters { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 9px; margin-bottom: 12px; }
+    .logs-filter { display: grid; gap: 4px; }
+    .logs-filter span { color: var(--text-dim); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .logs-list-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 9px; color: var(--text-dim); font-size: 11px; }
+    .logs-list { min-height: 320px; max-height: calc(100vh - 320px); display: grid; align-content: start; gap: 8px; padding-right: 3px; overflow-y: auto; overscroll-behavior: contain; }
+    .log-run { width: 100%; min-height: 0; display: grid; gap: 7px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 10px; background: rgba(89,55,25,.025); color: var(--text); box-shadow: none; text-align: left; white-space: normal; }
+    .log-run:hover { border-color: rgba(91,82,232,.28); background: var(--card-hover); transform: none; }
+    .log-run.is-selected { border-color: var(--accent); background: rgba(91,82,232,.065); box-shadow: 0 0 0 1px rgba(91,82,232,.07); }
+    .log-run-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .log-run-time { color: var(--text-dim); font: 10px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .log-run-task { display: -webkit-box; overflow: hidden; color: var(--text); font-size: 13px; font-weight: 720; line-height: 1.42; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+    .log-run-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--text-dim); font-size: 10px; }
+    .log-run-browser { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .logs-empty { min-height: 260px; display: grid; place-items: center; padding: 28px; border: 1px dashed var(--border); border-radius: 11px; color: var(--text-dim); text-align: center; }
+    .logs-empty strong { display: block; margin-bottom: 4px; color: var(--text); font-size: 14px; }
+    .logs-load-more { width: 100%; margin-top: 10px; }
+    .logs-detail-panel { scroll-margin-top: 86px; }
+    .logs-detail-panel .panel-body { min-height: 420px; }
     @keyframes run-spin { to { transform: rotate(360deg); } }
     .connection-panel { min-width: 0; }
     .connection-head { align-items: flex-start; }
@@ -401,12 +441,25 @@ function dashboardPage(user) {
     .dialog-body p { color: var(--text-dim); font-size: 13px; }
     .dialog-body input { width: 100%; }
     .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+    .account-dialog { width: min(520px, calc(100vw - 28px)); }
+    .account-dialog .dialog-body { padding: 0; }
+    .account-dialog-head { padding: 22px 22px 17px; border-bottom: 1px solid var(--border); }
+    .account-dialog-head p { margin: 5px 0 0; }
+    .account-form { display: grid; gap: 14px; padding: 19px 22px 22px; }
+    .account-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .account-form .form-field input { min-height: 41px; }
+    .account-verification { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 11px; padding: 12px; border: 1px solid rgba(91,82,232,.19); border-radius: 10px; background: rgba(91,82,232,.05); }
+    .account-verification-icon { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; background: rgba(91,82,232,.12); color: var(--accent); }
+    .account-verification-icon svg { width: 17px; height: 17px; }
+    .account-verification .form-field { min-width: 0; }
+    .account-verification-copy { margin: 0 0 8px; color: var(--text-dim); font-size: 11px; line-height: 1.5; }
+    .account-form .message { margin: 0; }
+    .account-form .dialog-actions { margin-top: 0; }
     .confirm-phrase { padding: 2px 6px; border: 1px solid var(--border); border-radius: 5px; background: rgba(89,55,25,.05); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); }
     @media (prefers-reduced-motion: reduce) {
       * { scroll-behavior: auto !important; transition: none !important; }
       .browser-boot-track::after { width: 54%; animation: none; transform: translateX(55%); }
       .run-spinner { animation: none; border-color: var(--accent); }
-      .run-progress-log { scroll-behavior: auto; }
     }
     @media (max-width: 900px) {
       .nav-inner { padding-inline: 14px; }
@@ -414,6 +467,9 @@ function dashboardPage(user) {
       .page-intro { align-items: start; flex-direction: column; }
       .grid, .grid.sessions-collapsed { grid-template-columns: 1fr; gap: 18px; }
       .console-grid { grid-template-columns: 1fr; }
+      .logs-grid { grid-template-columns: 1fr; }
+      .logs-detail-panel { order: -1; }
+      .logs-list { min-height: 0; max-height: none; padding-right: 0; overflow: visible; }
       .collapse-sessions { display: none; }
       .session-panel.is-collapsed { min-height: 0; }
       .session-panel.is-collapsed .panel-head { height: auto; padding: 15px 16px 13px; border-bottom: 1px solid var(--border); }
@@ -444,6 +500,8 @@ function dashboardPage(user) {
       .console-action-row { align-items: stretch; flex-direction: column; }
       .execute-button { width: 100%; }
       .run-meta { grid-template-columns: 1fr; }
+      .logs-filters { grid-template-columns: 1fr; }
+      .account-form-grid { grid-template-columns: 1fr; }
       .api-panel .panel-head { align-items: stretch; flex-direction: column; }
       .connection-head { align-items: stretch; flex-direction: column; }
       .connection-session { max-width: 100%; }
@@ -469,18 +527,23 @@ function dashboardPage(user) {
           <a class="header-link" href="#browsers" data-view-target="browsers" aria-current="page">Browsers</a>
           <a class="header-link" href="#console" data-view-target="console">Console</a>
           <a class="header-link" href="#api-keys" data-view-target="api-keys">API keys</a>
+          <a class="header-link" href="#logs" data-view-target="logs">Logs</a>
         </div>
         <details class="account-menu" id="accountMenu">
           <summary class="account-summary" aria-label="Account menu for ${escapeHtml(user.email)}">
-            <span class="account-avatar" aria-hidden="true">${escapeHtml(String(user.email).trim().slice(0, 1) || 'W')}</span>
-            <span class="account-summary-email">${escapeHtml(user.email)}</span>
+            <span class="account-avatar" id="accountAvatar" aria-hidden="true">${escapeHtml(String(user.email).trim().slice(0, 1) || 'W')}</span>
+            <span class="account-summary-email" id="accountSummaryEmail">${escapeHtml(user.email)}</span>
             <span class="account-caret" aria-hidden="true"></span>
           </summary>
           <div class="account-popover">
             <div class="account-context">
               <span class="account-context-label">Signed in as</span>
-              <span class="account-context-email">${escapeHtml(user.email)}</span>
+              <span class="account-context-email" id="accountContextEmail">${escapeHtml(user.email)}</span>
             </div>
+            <button class="account-action edit-account-action" id="editAccountBtn" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg>
+              <span>Edit account</span>
+            </button>
             <button class="account-action" id="refreshBtn" type="button">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5"/><path d="M4 17v-5h5"/><path d="M6.1 8.2a7 7 0 0 1 11.5-2.6L20 8M4 16l2.4 2.4a7 7 0 0 0 11.5-2.6"/></svg>
               <span class="account-action-label">Refresh dashboard</span>
@@ -639,6 +702,61 @@ function dashboardPage(user) {
         </div>
       </section>
     </section>
+    <section class="dashboard-view" id="logsView" hidden>
+      <section class="page-intro">
+        <div>
+          <p class="eyebrow">Run history</p>
+          <h1>Logs</h1>
+        </div>
+        <p class="intro-copy">Review every browser run, reopen its result, and inspect the recorded execution trail.</p>
+      </section>
+      <div class="logs-grid">
+        <section class="panel" aria-labelledby="logsListTitle">
+          <div class="panel-head">
+            <div>
+              <div class="panel-kicker">Run ledger</div>
+              <h2 id="logsListTitle">Historical runs</h2>
+              <p class="api-description">Newest first. Load older entries whenever you need the full history.</p>
+            </div>
+            <button class="secondary" id="refreshLogsBtn" type="button">Refresh</button>
+          </div>
+          <div class="panel-body">
+            <div class="logs-filters">
+              <label class="logs-filter" for="logsBrowserFilter">
+                <span>Browser</span>
+                <select id="logsBrowserFilter"><option value="all">All browsers</option></select>
+              </label>
+              <label class="logs-filter" for="logsStatusFilter">
+                <span>Status</span>
+                <select id="logsStatusFilter">
+                  <option value="all">All statuses</option>
+                  <option value="running">Running</option>
+                  <option value="completed">Completed</option>
+                  <option value="failed">Failed</option>
+                  <option value="aborted">Aborted</option>
+                </select>
+              </label>
+            </div>
+            <div class="logs-list-meta"><span id="logsCount">Loading runs…</span><span id="logsMessage" aria-live="polite"></span></div>
+            <div class="logs-list" id="logsList"></div>
+            <button class="secondary logs-load-more" id="loadOlderLogsBtn" type="button" hidden>Load older runs</button>
+          </div>
+        </section>
+        <section class="panel logs-detail-panel" id="logsDetailPanel" aria-labelledby="logsDetailTitle">
+          <div class="panel-head">
+            <div>
+              <div class="panel-kicker">Selected run</div>
+              <h2 id="logsDetailTitle">Run details</h2>
+              <p class="api-description">Results appear first; execution activity stays available below.</p>
+            </div>
+            <span class="status" id="logsDetailStatus">None</span>
+          </div>
+          <div class="panel-body" id="logsDetailOutput" aria-live="polite">
+            <div class="logs-empty"><div><strong>Select a run</strong>Choose an entry from the ledger to reopen its result and activity.</div></div>
+          </div>
+        </section>
+      </div>
+    </section>
     <section class="dashboard-view" id="apiKeysView" hidden>
       <section class="page-intro">
         <div>
@@ -668,6 +786,45 @@ function dashboardPage(user) {
       </section>
     </section>
   </main>
+  <dialog class="account-dialog" id="accountDialog">
+    <form class="dialog-body" id="accountForm">
+      <div class="account-dialog-head">
+        <h2>Edit account</h2>
+        <p>Change your sign-in email, password, or both.</p>
+      </div>
+      <div class="account-form">
+        <label class="form-field" for="accountEmail">
+          <span class="form-label">Email address</span>
+          <input id="accountEmail" type="email" autocomplete="email" maxlength="255" required value="${escapeHtml(user.email)}">
+        </label>
+        <div class="account-form-grid">
+          <label class="form-field" for="accountNewPassword">
+            <span class="form-label">New password</span>
+            <input id="accountNewPassword" type="password" autocomplete="new-password" minlength="8" placeholder="Leave blank to keep it">
+          </label>
+          <label class="form-field" for="accountConfirmPassword">
+            <span class="form-label">Confirm new password</span>
+            <input id="accountConfirmPassword" type="password" autocomplete="new-password" minlength="8" placeholder="Repeat new password">
+          </label>
+        </div>
+        <div class="account-verification">
+          <span class="account-verification-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+          </span>
+          <label class="form-field" for="accountCurrentPassword">
+            <span class="form-label">Current password</span>
+            <span class="account-verification-copy">Required to protect changes to your sign-in details.</span>
+            <input id="accountCurrentPassword" type="password" autocomplete="current-password" required>
+          </label>
+        </div>
+        <div class="message" id="accountMessage" aria-live="polite"></div>
+        <div class="dialog-actions">
+          <button class="secondary" type="button" id="cancelAccountBtn">Cancel</button>
+          <button type="submit" id="saveAccountBtn">Save changes</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
   <dialog id="renameDialog">
     <form class="dialog-body" method="dialog" id="renameForm">
       <h2>Name this browser</h2>
@@ -702,6 +859,10 @@ function dashboardPage(user) {
     const createSessionBtn = document.getElementById('createSessionBtn');
     const newSessionName = document.getElementById('newSessionName');
     const accountMenu = document.getElementById('accountMenu');
+    const accountSummaryEmail = document.getElementById('accountSummaryEmail');
+    const accountContextEmail = document.getElementById('accountContextEmail');
+    const accountAvatar = document.getElementById('accountAvatar');
+    const editAccountBtn = document.getElementById('editAccountBtn');
     const refreshBtn = document.getElementById('refreshBtn');
     const connectBtn = document.getElementById('connectBtn');
     const deleteSessionBtn = document.getElementById('deleteSessionBtn');
@@ -721,6 +882,7 @@ function dashboardPage(user) {
     const apiKeysList = document.getElementById('apiKeysList');
     const browserView = document.getElementById('browserView');
     const consoleView = document.getElementById('consoleView');
+    const logsView = document.getElementById('logsView');
     const apiKeysView = document.getElementById('apiKeysView');
     const viewLinks = [...document.querySelectorAll('[data-view-target]')];
     const consoleSessionSelect = document.getElementById('consoleSessionSelect');
@@ -735,6 +897,25 @@ function dashboardPage(user) {
     const consoleCodeTabs = [...document.querySelectorAll('[data-code-client]')];
     const copyConsoleCode = document.getElementById('copyConsoleCode');
     const consoleCodeNote = document.getElementById('consoleCodeNote');
+    const refreshLogsBtn = document.getElementById('refreshLogsBtn');
+    const logsBrowserFilter = document.getElementById('logsBrowserFilter');
+    const logsStatusFilter = document.getElementById('logsStatusFilter');
+    const logsCount = document.getElementById('logsCount');
+    const logsMessage = document.getElementById('logsMessage');
+    const logsList = document.getElementById('logsList');
+    const loadOlderLogsBtn = document.getElementById('loadOlderLogsBtn');
+    const logsDetailPanel = document.getElementById('logsDetailPanel');
+    const logsDetailStatus = document.getElementById('logsDetailStatus');
+    const logsDetailOutput = document.getElementById('logsDetailOutput');
+    const accountDialog = document.getElementById('accountDialog');
+    const accountForm = document.getElementById('accountForm');
+    const accountEmail = document.getElementById('accountEmail');
+    const accountNewPassword = document.getElementById('accountNewPassword');
+    const accountConfirmPassword = document.getElementById('accountConfirmPassword');
+    const accountCurrentPassword = document.getElementById('accountCurrentPassword');
+    const accountMessage = document.getElementById('accountMessage');
+    const cancelAccountBtn = document.getElementById('cancelAccountBtn');
+    const saveAccountBtn = document.getElementById('saveAccountBtn');
     const renameDialog = document.getElementById('renameDialog');
     const renameForm = document.getElementById('renameForm');
     const renameInput = document.getElementById('renameInput');
@@ -752,6 +933,16 @@ function dashboardPage(user) {
       consoleRun: null,
       consoleRunSessionId: null,
       consoleRunTask: '',
+      consoleProgressExpanded: false,
+      runLogs: [],
+      logsOffset: 0,
+      logsHasMore: false,
+      logsSelectedId: null,
+      logsSelectedRun: null,
+      logsDetailError: '',
+      logsProgressExpanded: false,
+      logsBrowserFilter: 'all',
+      logsStatusFilter: 'all',
       showDestroyed: false,
       deleteTargetId: null,
       codeClient: 'rest',
@@ -763,9 +954,10 @@ function dashboardPage(user) {
     const sessionsCollapsedKey = 'webbrain.sessionsCollapsed';
 
     function setDashboardView(view, updateUrl) {
-      const nextView = view === 'api-keys' || view === 'console' ? view : 'browsers';
+      const nextView = ['api-keys', 'console', 'logs'].includes(view) ? view : 'browsers';
       browserView.hidden = nextView !== 'browsers';
       consoleView.hidden = nextView !== 'console';
+      logsView.hidden = nextView !== 'logs';
       apiKeysView.hidden = nextView !== 'api-keys';
       for (const link of viewLinks) {
         if (link.dataset.viewTarget === nextView) link.setAttribute('aria-current', 'page');
@@ -774,6 +966,9 @@ function dashboardPage(user) {
       if (updateUrl) history.pushState(null, '', '#' + nextView);
       if (nextView === 'api-keys') loadApiKeys().catch(e => showMessage(apiKeyMessage, e.message, true));
       if (nextView === 'console') renderConsole();
+      if (nextView === 'logs') loadRunLogs({ reset: true }).catch(e => {
+        logsMessage.textContent = e.message;
+      });
     }
 
     function setSessionsCollapsed(collapsed) {
@@ -806,6 +1001,58 @@ function dashboardPage(user) {
       const body = text ? JSON.parse(text) : null;
       if (!res.ok) throw new Error((body && body.error) || 'Request failed');
       return body;
+    }
+
+    function openAccountDialog() {
+      accountMenu.removeAttribute('open');
+      accountEmail.value = accountContextEmail.textContent.trim();
+      accountNewPassword.value = '';
+      accountConfirmPassword.value = '';
+      accountCurrentPassword.value = '';
+      accountConfirmPassword.setCustomValidity('');
+      showMessage(accountMessage, '');
+      accountDialog.showModal();
+      accountEmail.focus();
+    }
+
+    async function saveAccount(event) {
+      event.preventDefault();
+      const newPassword = accountNewPassword.value;
+      accountConfirmPassword.setCustomValidity(
+        newPassword === accountConfirmPassword.value ? '' : 'New passwords do not match'
+      );
+      if (!accountForm.reportValidity()) return;
+      saveAccountBtn.disabled = true;
+      saveAccountBtn.textContent = 'Saving…';
+      showMessage(accountMessage, 'Saving account changes…');
+      try {
+        const body = await api('/api/me', {
+          method: 'PATCH',
+          body: {
+            email: accountEmail.value,
+            current_password: accountCurrentPassword.value,
+            new_password: newPassword || undefined,
+          },
+        });
+        const email = body.user.email;
+        accountSummaryEmail.textContent = email;
+        accountContextEmail.textContent = email;
+        accountAvatar.textContent = email.slice(0, 1) || 'W';
+        accountMenu.querySelector('summary').setAttribute('aria-label', 'Account menu for ' + email);
+        accountEmail.value = email;
+        accountNewPassword.value = '';
+        accountConfirmPassword.value = '';
+        accountCurrentPassword.value = '';
+        const sessionNote = body.other_sessions_revoked
+          ? ' Other signed-in sessions were logged out.'
+          : '';
+        showMessage(accountMessage, 'Account updated.' + sessionNote);
+      } catch (error) {
+        showMessage(accountMessage, error.message, true);
+      } finally {
+        saveAccountBtn.disabled = false;
+        saveAccountBtn.textContent = 'Save changes';
+      }
     }
 
     function selectedSession() {
@@ -1091,6 +1338,55 @@ function dashboardPage(user) {
       }
     }
 
+    function appendRunConclusion(parent, run) {
+      const finalUrl = safeHttpUrl(run.final_url);
+      const hasResult = run.result != null;
+      const hasError = !!run.error;
+      if (!hasResult && !hasError && !run.summary && !finalUrl) return false;
+
+      const conclusion = document.createElement('section');
+      conclusion.className = 'run-conclusion' + (hasError ? ' is-error' : '');
+      const heading = document.createElement('div');
+      heading.className = 'run-conclusion-heading';
+      const title = document.createElement('div');
+      title.className = 'run-conclusion-title';
+      title.textContent = hasError ? 'Run error' : 'Result';
+      heading.append(title);
+      conclusion.append(heading);
+
+      if (run.summary) {
+        const summary = document.createElement('p');
+        summary.className = 'run-conclusion-summary';
+        summary.textContent = run.summary;
+        conclusion.append(summary);
+      }
+      if (hasResult) {
+        const structured = typeof run.result !== 'string';
+        const result = document.createElement(structured ? 'pre' : 'p');
+        result.className = structured ? 'run-output' : 'run-answer';
+        result.textContent = structured ? runUpdatePayload(run.result) : run.result;
+        conclusion.append(result);
+      }
+      if (hasError) {
+        const error = document.createElement('p');
+        error.className = 'run-error';
+        error.textContent = run.error;
+        conclusion.append(error);
+      }
+      if (finalUrl) {
+        const link = document.createElement('a');
+        link.className = 'run-final-url';
+        link.href = finalUrl;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.textContent = finalUrl;
+        link.title = finalUrl;
+        conclusion.append(link);
+      }
+      parent.append(conclusion);
+      return true;
+    }
+
     function runUpdateTime(value) {
       if (!value) return '—';
       try {
@@ -1170,18 +1466,35 @@ function dashboardPage(user) {
       };
     }
 
-    function appendRunProgress(parent, updates, active, scrollState) {
+    function appendRunProgress(parent, updates, active, options = {}) {
+      const expanded = options.expanded === true;
+      const visibleLimit = 10;
+      const hiddenCount = expanded ? 0 : Math.max(0, updates.length - visibleLimit);
+      const visibleUpdates = hiddenCount ? updates.slice(-visibleLimit) : updates;
+      const openSeqs = options.openSeqs || new Set();
       const shell = document.createElement('section');
       shell.className = 'run-progress-shell';
       const heading = document.createElement('div');
       heading.className = 'run-progress-heading';
       const title = document.createElement('div');
       title.className = 'run-section-title';
-      title.textContent = 'Live progress';
+      title.textContent = active ? 'Live activity' : 'Activity';
+      const tools = document.createElement('div');
+      tools.className = 'run-progress-tools';
       const count = document.createElement('span');
       count.className = 'run-progress-count';
       count.textContent = updates.length + (updates.length === 1 ? ' event' : ' events');
-      heading.append(title, count);
+      tools.append(count);
+      if (updates.length > visibleLimit) {
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'run-progress-toggle';
+        toggle.textContent = expanded ? 'Show recent' : 'Show all';
+        toggle.setAttribute('aria-expanded', String(expanded));
+        toggle.addEventListener('click', () => options.onToggle?.(!expanded));
+        tools.append(toggle);
+      }
+      heading.append(title, tools);
 
       const log = document.createElement('div');
       log.className = 'run-progress-log';
@@ -1194,7 +1507,14 @@ function dashboardPage(user) {
         log.append(empty);
       }
 
-      for (const update of updates) {
+      if (hiddenCount) {
+        const omission = document.createElement('div');
+        omission.className = 'run-progress-omission';
+        omission.textContent = hiddenCount + ' earlier ' + (hiddenCount === 1 ? 'event' : 'events') + ' hidden';
+        log.append(omission);
+      }
+
+      for (const update of visibleUpdates) {
         const description = describeRunUpdate(update);
         const event = document.createElement('article');
         event.className = 'run-event' + (description.tone ? ' ' + description.tone : '');
@@ -1225,7 +1545,7 @@ function dashboardPage(user) {
           const details = document.createElement('details');
           details.className = 'run-event-details';
           details.dataset.seq = String(update.seq ?? '');
-          details.open = scrollState.openSeqs.has(details.dataset.seq);
+          details.open = openSeqs.has(details.dataset.seq);
           const summary = document.createElement('summary');
           summary.textContent = description.detailLabel;
           const detail = document.createElement('pre');
@@ -1237,23 +1557,11 @@ function dashboardPage(user) {
       }
       shell.append(heading, log);
       parent.append(shell);
-      const restoreScroll = () => {
-        log.scrollTop = scrollState.pinned
-          ? log.scrollHeight
-          : Math.min(scrollState.top, Math.max(0, log.scrollHeight - log.clientHeight));
-      };
-      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(restoreScroll);
-      else restoreScroll();
     }
 
     function renderConsoleRun() {
       const run = state.consoleRun;
-      const previousLog = consoleRunOutput.querySelector('.run-progress-log');
-      const progressScrollState = {
-        pinned: !previousLog || previousLog.scrollHeight - previousLog.scrollTop - previousLog.clientHeight < 28,
-        top: previousLog?.scrollTop || 0,
-        openSeqs: new Set([...consoleRunOutput.querySelectorAll('.run-event-details[open]')].map(item => item.dataset.seq)),
-      };
+      const openSeqs = new Set([...consoleRunOutput.querySelectorAll('.run-event-details[open]')].map(item => item.dataset.seq));
       consoleRunOutput.replaceChildren();
       if (!run) {
         consoleRunHeaderStatus.textContent = 'Idle';
@@ -1319,33 +1627,18 @@ function dashboardPage(user) {
       }
       content.append(meta);
 
+      const hasConclusion = appendRunConclusion(content, run);
       appendRunSection(content, 'Task', state.consoleRunTask, 'run-summary');
-      appendRunProgress(content, Array.isArray(run.updates) ? run.updates : [], active, progressScrollState);
-      appendRunSection(content, 'Summary', run.summary, 'run-summary');
-      if (run.result != null) {
-        const resultText = typeof run.result === 'string' ? run.result : JSON.stringify(run.result, null, 2);
-        appendRunSection(content, 'Result', resultText, 'run-output');
-      } else if (active) {
+      appendRunProgress(content, Array.isArray(run.updates) ? run.updates : [], active, {
+        expanded: state.consoleProgressExpanded,
+        openSeqs,
+        onToggle: expanded => {
+          state.consoleProgressExpanded = expanded;
+          renderConsoleRun();
+        },
+      });
+      if (active && !hasConclusion) {
         appendRunSection(content, 'Result', 'Waiting for WebBrain to finish…', 'run-summary');
-      }
-      appendRunSection(content, 'Error', run.error, 'run-error');
-
-      const finalUrl = safeHttpUrl(run.final_url);
-      if (finalUrl) {
-        const section = document.createElement('section');
-        section.className = 'run-section';
-        const title = document.createElement('div');
-        title.className = 'run-section-title';
-        title.textContent = 'Final URL';
-        const link = document.createElement('a');
-        link.className = 'run-final-url';
-        link.href = finalUrl;
-        link.target = '_blank';
-        link.rel = 'noopener';
-        link.textContent = finalUrl;
-        link.title = finalUrl;
-        section.append(title, link);
-        content.append(section);
       }
 
       consoleRunOutput.append(content);
@@ -1355,6 +1648,240 @@ function dashboardPage(user) {
       renderConsoleBrowsers();
       renderConsoleCode();
       renderConsoleRun();
+    }
+
+    function runLogBrowserName(run) {
+      const session = state.sessions.find(item => item.id === run.session_id);
+      return session ? browserName(session) : (run.session_id || 'Unknown browser');
+    }
+
+    function renderLogFilters() {
+      const sessionIds = [...new Set(state.runLogs.map(run => run.session_id).filter(Boolean))];
+      logsBrowserFilter.replaceChildren();
+      const all = document.createElement('option');
+      all.value = 'all';
+      all.textContent = 'All browsers';
+      logsBrowserFilter.append(all);
+      for (const sessionId of sessionIds) {
+        const run = state.runLogs.find(item => item.session_id === sessionId);
+        const option = document.createElement('option');
+        option.value = sessionId;
+        option.textContent = runLogBrowserName(run);
+        option.selected = state.logsBrowserFilter === sessionId;
+        logsBrowserFilter.append(option);
+      }
+      logsBrowserFilter.value = sessionIds.includes(state.logsBrowserFilter) ? state.logsBrowserFilter : 'all';
+      state.logsBrowserFilter = logsBrowserFilter.value;
+      logsStatusFilter.value = state.logsStatusFilter;
+    }
+
+    function filteredRunLogs() {
+      return state.runLogs.filter(run => (
+        (state.logsBrowserFilter === 'all' || run.session_id === state.logsBrowserFilter)
+        && (state.logsStatusFilter === 'all' || run.status === state.logsStatusFilter)
+      ));
+    }
+
+    function renderRunLogs() {
+      const runs = filteredRunLogs();
+      logsList.replaceChildren();
+      logsCount.textContent = runs.length + ' shown · ' + state.runLogs.length + ' loaded';
+      loadOlderLogsBtn.hidden = !state.logsHasMore;
+      if (!runs.length) {
+        const empty = document.createElement('div');
+        empty.className = 'logs-empty';
+        const copy = document.createElement('div');
+        const title = document.createElement('strong');
+        title.textContent = state.runLogs.length ? 'No matching runs' : 'No runs yet';
+        copy.append(title, document.createTextNode(state.runLogs.length
+          ? 'Change the filters to see other historical runs.'
+          : 'Runs started from Console or the API will appear here.'));
+        empty.append(copy);
+        logsList.append(empty);
+        return;
+      }
+
+      for (const run of runs) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'log-run' + (run.run_id === state.logsSelectedId ? ' is-selected' : '');
+        button.setAttribute('aria-pressed', String(run.run_id === state.logsSelectedId));
+        const top = document.createElement('div');
+        top.className = 'log-run-top';
+        const time = document.createElement('time');
+        time.className = 'log-run-time';
+        time.dateTime = run.created_at || '';
+        time.textContent = formatDate(run.created_at);
+        const status = document.createElement('span');
+        status.className = 'run-status-badge ' + run.status;
+        status.textContent = run.status;
+        top.append(time, status);
+        const task = document.createElement('div');
+        task.className = 'log-run-task';
+        task.textContent = run.task || 'Untitled browser run';
+        const meta = document.createElement('div');
+        meta.className = 'log-run-meta';
+        const browser = document.createElement('span');
+        browser.className = 'log-run-browser';
+        browser.textContent = runLogBrowserName(run);
+        const events = document.createElement('span');
+        events.textContent = run.update_count + (run.update_count === 1 ? ' event' : ' events');
+        meta.append(browser, events);
+        button.append(top, task, meta);
+        button.addEventListener('click', () => selectRunLog(run));
+        logsList.append(button);
+      }
+    }
+
+    function renderLogsDetail() {
+      const summary = state.runLogs.find(run => run.run_id === state.logsSelectedId);
+      const run = state.logsSelectedRun;
+      const openSeqs = new Set([...logsDetailOutput.querySelectorAll('.run-event-details[open]')].map(item => item.dataset.seq));
+      logsDetailOutput.replaceChildren();
+      if (!summary) {
+        logsDetailStatus.textContent = 'None';
+        const empty = document.createElement('div');
+        empty.className = 'logs-empty';
+        const copy = document.createElement('div');
+        const title = document.createElement('strong');
+        title.textContent = 'Select a run';
+        copy.append(title, document.createTextNode('Choose an entry from the ledger to reopen its result and activity.'));
+        empty.append(copy);
+        logsDetailOutput.append(empty);
+        return;
+      }
+      if (!run) {
+        logsDetailStatus.textContent = state.logsDetailError ? 'Unavailable' : 'Loading';
+        const empty = document.createElement('div');
+        empty.className = 'logs-empty';
+        const copy = document.createElement('div');
+        const title = document.createElement('strong');
+        title.textContent = state.logsDetailError ? 'Could not load this run' : 'Loading run';
+        copy.append(title, document.createTextNode(state.logsDetailError || 'Fetching the recorded result and activity…'));
+        empty.append(copy);
+        logsDetailOutput.append(empty);
+        return;
+      }
+
+      const status = run.status || summary.status;
+      const active = !terminalRunStatuses.has(status);
+      logsDetailStatus.textContent = status;
+      const content = document.createElement('div');
+      content.className = 'run-state';
+      const statusLine = document.createElement('div');
+      statusLine.className = 'run-status-line';
+      const title = document.createElement('div');
+      title.className = 'run-status-title';
+      if (active) {
+        const spinner = document.createElement('span');
+        spinner.className = 'run-spinner';
+        spinner.setAttribute('aria-hidden', 'true');
+        title.append(spinner);
+      }
+      title.append(document.createTextNode(active ? 'Run in progress' : 'Historical run'));
+      const badge = document.createElement('span');
+      badge.className = 'run-status-badge ' + status;
+      badge.textContent = status;
+      statusLine.append(title, badge);
+      content.append(statusLine);
+
+      const meta = document.createElement('div');
+      meta.className = 'run-meta';
+      for (const [label, value] of [
+        ['Browser', runLogBrowserName(summary)],
+        ['Started', formatDate(summary.created_at)],
+        ['Run ID', summary.run_id],
+        ['Updated', formatDate(run.updated_at || summary.updated_at)],
+      ]) {
+        const item = document.createElement('div');
+        item.className = 'run-meta-item';
+        const itemLabel = document.createElement('span');
+        itemLabel.className = 'run-meta-label';
+        itemLabel.textContent = label;
+        const itemValue = document.createElement('span');
+        itemValue.className = 'run-meta-value';
+        itemValue.textContent = value || '—';
+        itemValue.title = value || '';
+        item.append(itemLabel, itemValue);
+        meta.append(item);
+      }
+      content.append(meta);
+      const hasConclusion = appendRunConclusion(content, run);
+      appendRunSection(content, 'Task', summary.task, 'run-summary');
+      appendRunProgress(content, Array.isArray(run.updates) ? run.updates : [], active, {
+        expanded: state.logsProgressExpanded,
+        openSeqs,
+        onToggle: expanded => {
+          state.logsProgressExpanded = expanded;
+          renderLogsDetail();
+        },
+      });
+      if (active && !hasConclusion) appendRunSection(content, 'Result', 'Waiting for WebBrain to finish…', 'run-summary');
+      logsDetailOutput.append(content);
+    }
+
+    async function selectRunLog(summary, { scroll = true } = {}) {
+      state.logsSelectedId = summary.run_id;
+      state.logsSelectedRun = null;
+      state.logsDetailError = '';
+      state.logsProgressExpanded = false;
+      renderRunLogs();
+      renderLogsDetail();
+      const selectedId = summary.run_id;
+      try {
+        const run = await api('/api/browser-sessions/' + encodeURIComponent(summary.session_id) + '/runs/' + encodeURIComponent(summary.run_id));
+        if (state.logsSelectedId !== selectedId) return;
+        state.logsSelectedRun = run;
+        Object.assign(summary, {
+          status: run.status,
+          summary: run.summary,
+          error: run.error,
+          final_url: run.final_url,
+          update_count: Array.isArray(run.updates) ? run.updates.length : summary.update_count,
+          updated_at: run.updated_at,
+          completed_at: run.completed_at,
+        });
+        renderRunLogs();
+        renderLogsDetail();
+        if (scroll && window.matchMedia('(max-width: 900px)').matches) {
+          logsDetailPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      } catch (error) {
+        if (state.logsSelectedId !== selectedId) return;
+        state.logsDetailError = error.message;
+        logsMessage.textContent = error.message;
+        renderLogsDetail();
+      }
+    }
+
+    async function loadRunLogs({ reset = false } = {}) {
+      if (reset) {
+        state.logsOffset = 0;
+        logsMessage.textContent = 'Refreshing…';
+      } else {
+        logsMessage.textContent = 'Loading older runs…';
+      }
+      refreshLogsBtn.disabled = true;
+      loadOlderLogsBtn.disabled = true;
+      try {
+        const body = await api('/api/runs?limit=50&offset=' + state.logsOffset);
+        if (reset) state.runLogs = body.runs || [];
+        else {
+          const known = new Set(state.runLogs.map(run => run.run_id));
+          state.runLogs.push(...(body.runs || []).filter(run => !known.has(run.run_id)));
+        }
+        state.logsHasMore = body.has_more === true;
+        state.logsOffset = body.next_offset == null ? state.runLogs.length : body.next_offset;
+        renderLogFilters();
+        renderRunLogs();
+        logsMessage.textContent = '';
+        const preferred = state.runLogs.find(run => run.run_id === state.logsSelectedId) || state.runLogs[0];
+        if (reset && preferred) await selectRunLog(preferred, { scroll: false });
+        else if (!preferred) renderLogsDetail();
+      } finally {
+        refreshLogsBtn.disabled = false;
+        loadOlderLogsBtn.disabled = false;
+      }
     }
 
     function scheduleConsolePoll() {
@@ -1392,6 +1919,7 @@ function dashboardPage(user) {
       state.selectedId = session.id;
       state.consoleRunSessionId = session.id;
       state.consoleRunTask = task;
+      state.consoleProgressExpanded = false;
       state.consoleRun = { status: 'starting', run_id: '', result: null, summary: '', final_url: '', error: '', updates: [] };
       showMessage(consoleMessage, 'Starting the asynchronous run…');
       renderSessions();
@@ -1527,6 +2055,11 @@ function dashboardPage(user) {
       const body = await api('/api/browser-sessions');
       state.sessions = body.browser_sessions || [];
       renderSessions();
+      if (!logsView.hidden && state.runLogs.length) {
+        renderLogFilters();
+        renderRunLogs();
+        renderLogsDetail();
+      }
     }
 
     async function refreshOne(id) {
@@ -1753,16 +2286,33 @@ function dashboardPage(user) {
       state.showDestroyed = !state.showDestroyed;
       renderSessions();
     });
+    editAccountBtn.addEventListener('click', openAccountDialog);
+    accountForm.addEventListener('submit', saveAccount);
+    accountConfirmPassword.addEventListener('input', () => accountConfirmPassword.setCustomValidity(''));
+    accountNewPassword.addEventListener('input', () => accountConfirmPassword.setCustomValidity(''));
+    cancelAccountBtn.addEventListener('click', () => accountDialog.close());
+    accountDialog.addEventListener('close', () => {
+      accountNewPassword.value = '';
+      accountConfirmPassword.value = '';
+      accountCurrentPassword.value = '';
+      accountConfirmPassword.setCustomValidity('');
+      showMessage(accountMessage, '');
+    });
     refreshBtn.addEventListener('click', async () => {
       const label = refreshBtn.querySelector('.account-action-label');
       refreshBtn.disabled = true;
       label.textContent = 'Refreshing…';
       try {
-        await Promise.all([loadSessions(), loadApiKeys()]);
+        const refreshes = [loadSessions(), loadApiKeys()];
+        if (!logsView.hidden) refreshes.push(loadRunLogs({ reset: true }));
+        await Promise.all(refreshes);
         accountMenu.removeAttribute('open');
       } catch (e) {
-        const targetMessage = !consoleView.hidden ? consoleMessage : (browserView.hidden ? apiKeyMessage : sessionMessage);
-        showMessage(targetMessage, e.message, true);
+        if (!logsView.hidden) logsMessage.textContent = e.message;
+        else {
+          const targetMessage = !consoleView.hidden ? consoleMessage : (browserView.hidden ? apiKeyMessage : sessionMessage);
+          showMessage(targetMessage, e.message, true);
+        }
       } finally {
         refreshBtn.disabled = false;
         label.textContent = 'Refresh dashboard';
@@ -1816,6 +2366,20 @@ function dashboardPage(user) {
       if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) executeConsoleRun();
     });
     executeConsoleBtn.addEventListener('click', executeConsoleRun);
+    refreshLogsBtn.addEventListener('click', () => loadRunLogs({ reset: true }).catch(error => {
+      logsMessage.textContent = error.message;
+    }));
+    loadOlderLogsBtn.addEventListener('click', () => loadRunLogs().catch(error => {
+      logsMessage.textContent = error.message;
+    }));
+    logsBrowserFilter.addEventListener('change', () => {
+      state.logsBrowserFilter = logsBrowserFilter.value;
+      renderRunLogs();
+    });
+    logsStatusFilter.addEventListener('change', () => {
+      state.logsStatusFilter = logsStatusFilter.value;
+      renderRunLogs();
+    });
     for (const tab of consoleCodeTabs) {
       tab.addEventListener('click', () => {
         state.codeClient = tab.dataset.codeClient;
@@ -1838,6 +2402,7 @@ function dashboardPage(user) {
     function dashboardViewFromHash() {
       if (location.hash === '#api-keys') return 'api-keys';
       if (location.hash === '#console') return 'console';
+      if (location.hash === '#logs') return 'logs';
       return 'browsers';
     }
     window.addEventListener('hashchange', () => setDashboardView(dashboardViewFromHash(), false));
@@ -2039,6 +2604,62 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
 
   app.get('/api/me', requireAuth, (req, res) => {
     res.json({ user: { id: req.auth.user.id, email: req.auth.user.email }, auth_type: req.auth.type });
+  });
+
+  app.patch('/api/me', requireAuth, async (req, res, next) => {
+    try {
+      if (req.auth.type !== 'cookie') {
+        return jsonError(res, 403, 'Account changes require a signed-in dashboard session');
+      }
+      const user = await store.getUser(req.auth.user.id);
+      if (!user) return jsonError(res, 404, 'User not found');
+
+      const currentPassword = String(req.body.current_password || '');
+      if (!currentPassword) return jsonError(res, 400, 'Current password is required');
+      if (!(await verifyPassword(currentPassword, user.password_hash))) {
+        return jsonError(res, 401, 'Current password is incorrect');
+      }
+
+      const email = normalizeAccountEmail(req.body.email);
+      const newPassword = String(req.body.new_password || '');
+      if (newPassword && newPassword.length < 8) {
+        return jsonError(res, 400, 'New password must be at least 8 characters');
+      }
+      const emailChanged = email !== user.email;
+      const passwordChanged = newPassword.length > 0;
+      if (!emailChanged && !passwordChanged) {
+        return jsonError(res, 400, 'Change the email address or enter a new password');
+      }
+
+      const emailOwner = await store.findUserByEmail(email);
+      if (emailOwner && emailOwner.id !== user.id) {
+        return jsonError(res, 409, 'Email already registered');
+      }
+
+      const updated = await store.updateUser(user.id, {
+        email,
+        password_hash: passwordChanged ? await hashPassword(newPassword) : user.password_hash,
+        updated_at: nowIso(),
+      });
+      const otherSessionsRevoked = passwordChanged
+        ? await store.deleteOtherWebSessions(user.id, req.auth.webSession.token_hash)
+        : 0;
+      await audit(req, 'user.update', 'user', user.id, {
+        email_changed: emailChanged,
+        password_changed: passwordChanged,
+        other_sessions_revoked: otherSessionsRevoked,
+      });
+      res.json({
+        user: { id: updated.id, email: updated.email },
+        password_changed: passwordChanged,
+        other_sessions_revoked: otherSessionsRevoked,
+      });
+    } catch (error) {
+      if (error.code === 'ER_DUP_ENTRY') {
+        return next(Object.assign(new Error('Email already registered'), { status: 409 }));
+      }
+      next(error);
+    }
   });
 
   app.get('/api/api-keys', requireAuth, async (req, res) => {
@@ -2257,6 +2878,35 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
 
       run = await waitForRun({ run, session, store, controlChannel, config, timeoutMs: req.body.timeout_ms });
       return res.status(TERMINAL_RUN_STATUSES.has(run.status) ? (run.status === 'completed' ? 200 : 500) : 202).json(publicRun(run));
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.get('/api/runs', requireAuth, async (req, res, next) => {
+    try {
+      const limit = Math.max(1, Math.min(100, Math.trunc(Number(req.query.limit) || 50)));
+      const offset = Math.max(0, Math.trunc(Number(req.query.offset) || 0));
+      const rows = await store.listCloudRunsForUser(req.auth.user.id, { limit: limit + 1, offset });
+      const hasMore = rows.length > limit;
+      const runs = rows.slice(0, limit).map(run => ({
+        run_id: run.id,
+        session_id: run.browser_session_id,
+        task: run.task || '',
+        status: run.status,
+        summary: run.summary || '',
+        error: run.error || '',
+        final_url: run.final_url || '',
+        update_count: Number(run.update_count) || (Array.isArray(run.updates) ? run.updates.length : 0),
+        created_at: run.created_at || null,
+        updated_at: run.updated_at || null,
+        completed_at: run.completed_at || null,
+      }));
+      res.json({
+        runs,
+        has_more: hasMore,
+        next_offset: hasMore ? offset + runs.length : null,
+      });
     } catch (e) {
       next(e);
     }

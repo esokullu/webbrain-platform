@@ -12,6 +12,14 @@ test('dashboard columns are present in fresh schema and existing-database migrat
   assert.match(storeSource, /ALTER TABLE browser_sessions ADD COLUMN display_name VARCHAR\(120\) NULL/);
   assert.match(schema, /updates JSON NULL/);
   assert.match(storeSource, /ALTER TABLE cloud_runs ADD COLUMN updates JSON NULL AFTER error/);
+  assert.match(storeSource, /async listCloudRunsForUser\(/);
+  assert.match(storeSource, /WHERE user_id = :userId/);
+  assert.match(storeSource, /ORDER BY created_at DESC, id DESC/);
+  assert.match(storeSource, /JSON_LENGTH\(updates\)/);
+  assert.match(storeSource, /async updateUser\(/);
+  assert.match(storeSource, /SET email = :email, password_hash = :password_hash, updated_at = :updated_at/);
+  assert.match(storeSource, /async deleteOtherWebSessions\(/);
+  assert.match(storeSource, /DELETE FROM web_sessions WHERE user_id = :userId AND token_hash <> :keepTokenHash/);
 });
 
 test('MySQL cloud-run normalization preserves unstructured string results', () => {

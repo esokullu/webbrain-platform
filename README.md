@@ -85,6 +85,7 @@ The account and key-management endpoints are:
 | `POST` | `/auth/login` | Create a login cookie. |
 | `POST` | `/auth/logout` | Delete the current login session. |
 | `GET` | `/api/me` | Return the authenticated user and authentication type. |
+| `PATCH` | `/api/me` | Change the signed-in user's email and/or password after verifying the current password. Password changes revoke other dashboard sessions. |
 | `POST` | `/api/api-keys` | Create an API key. The raw key is returned once. |
 | `GET` | `/api/api-keys` | List API-key metadata, never raw secrets. |
 | `DELETE` | `/api/api-keys/:keyId` | Revoke an API key. |
@@ -201,6 +202,12 @@ in `summary`, the active page in `final_url`, and failure detail in `error`.
 Every run response also includes the newest 200 ordered progress events in
 `updates`. Each event has a monotonic `seq`, a `type`, type-specific `data`, and
 an ISO timestamp in `ts`.
+
+List historical runs for the authenticated account with `GET /api/runs`. The
+response is newest-first and uses `limit` plus `offset` pagination; each item is
+a lightweight summary with its task, browser session, status, timestamps, and
+recorded event count. Fetch the session-specific run endpoint to reopen the full
+result and progress snapshot.
 
 For a single blocking request, set `wait` to `true`:
 

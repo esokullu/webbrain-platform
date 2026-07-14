@@ -117,6 +117,16 @@ export class MySqlStore {
     return row ? { ...row, created_at: fromMysqlDate(row.created_at), updated_at: fromMysqlDate(row.updated_at) } : null;
   }
 
+  async updateUser(id, { email, password_hash, updated_at }) {
+    await this.pool.execute(
+      `UPDATE users
+       SET email = :email, password_hash = :password_hash, updated_at = :updated_at
+       WHERE id = :id`,
+      { id, email: String(email).trim().toLowerCase(), password_hash, updated_at: toMysqlDate(updated_at) }
+    );
+    return await this.getUser(id);
+  }
+
   async createWebSession(row) {
     await this.pool.execute(
       'INSERT INTO web_sessions (id,user_id,token_hash,expires_at,created_at) VALUES (:id,:user_id,:token_hash,:expires_at,:created_at)',
@@ -151,6 +161,14 @@ export class MySqlStore {
 
   async deleteWebSessionByHash(tokenHash) {
     await this.pool.execute('DELETE FROM web_sessions WHERE token_hash = :tokenHash', { tokenHash });
+  }
+
+  async deleteOtherWebSessions(userId, keepTokenHash) {
+    const [result] = await this.pool.execute(
+      'DELETE FROM web_sessions WHERE user_id = :userId AND token_hash <> :keepTokenHash',
+      { userId, keepTokenHash }
+    );
+    return result.affectedRows || 0;
   }
 
   async createApiKey(row) {
@@ -283,6 +301,22 @@ export class MySqlStore {
     const [rows] = await this.pool.execute(
       'SELECT * FROM cloud_runs WHERE browser_session_id = :browserSessionId ORDER BY created_at DESC',
       { browserSessionId }
+    );
+    return rows.map(normalizeCloudRun);
+  }
+
+  async listCloudRunsForUser(userId, { limit = 50, offset = 0 } = {}) {
+    const safeLimit = Math.max(1, Math.min(101, Math.trunc(Number(limit) || 50)));
+    const safeOffset = Math.max(0, Math.trunc(Number(offset) || 0));
+    const [rows] = await this.pool.execute(
+      `SELECT id, browser_session_id, user_id, task, status, summary, final_url, error,
+              COALESCE(JSON_LENGTH(updates), 0) AS update_count,
+              created_at, updated_at, completed_at
+       FROM cloud_runs
+       WHERE user_id = :userId
+       ORDER BY created_at DESC, id DESC
+       LIMIT ${safeLimit} OFFSET ${safeOffset}`,
+      { userId }
     );
     return rows.map(normalizeCloudRun);
   }

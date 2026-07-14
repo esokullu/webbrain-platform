@@ -265,8 +265,144 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   assert.equal(aborted.status, 200);
   assert.equal(aborted.body.status, 'aborted');
 
+  const newestLogs = await request(ctx.base, '/api/runs?limit=1&offset=0', { headers: { cookie } });
+  assert.equal(newestLogs.status, 200);
+  assert.equal(newestLogs.body.runs.length, 1);
+  assert.equal(newestLogs.body.runs[0].run_id, created.body.run_id);
+  assert.equal(newestLogs.body.runs[0].task, 'Long task');
+  assert.equal(newestLogs.body.runs[0].status, 'aborted');
+  assert.equal(newestLogs.body.has_more, true);
+  assert.equal(newestLogs.body.next_offset, 1);
+  assert.equal('updates' in newestLogs.body.runs[0], false);
+  assert.equal('result' in newestLogs.body.runs[0], false);
+
+  const olderLogs = await request(ctx.base, '/api/runs?limit=1&offset=1', { headers: { cookie } });
+  assert.equal(olderLogs.status, 200);
+  assert.equal(olderLogs.body.runs[0].run_id, waited.body.run_id);
+  assert.equal(olderLogs.body.runs[0].task, 'Summarize this page');
+  assert.equal(olderLogs.body.runs[0].update_count, 3);
+  assert.equal(olderLogs.body.has_more, false);
+
+  const otherLogs = await request(ctx.base, '/api/runs', { headers: { cookie: otherCookie } });
+  assert.equal(otherLogs.status, 200);
+  assert.deepEqual(otherLogs.body.runs, []);
+
   } finally {
     ws?.close();
+    await ctx.platform.close();
+  }
+});
+
+test('account settings securely update email and password', async () => {
+  const ctx = await startPlatform();
+  try {
+    const cookie = await register(ctx.base, 'owner@example.com');
+    await register(ctx.base, 'taken@example.com');
+    const secondLogin = await request(ctx.base, '/auth/login', {
+      method: 'POST',
+      headers: { accept: 'application/json' },
+      body: JSON.stringify({ email: 'owner@example.com', password: 'password123' }),
+    });
+    assert.equal(secondLogin.status, 200);
+    const otherCookie = cookieFrom(secondLogin);
+
+    const keyRes = await request(ctx.base, '/api/api-keys', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ name: 'account test' }),
+    });
+    const apiKeyUpdate = await request(ctx.base, '/api/me', {
+      method: 'PATCH',
+      headers: { authorization: `Bearer ${keyRes.body.key}` },
+      body: JSON.stringify({ email: 'new-owner@example.com', current_password: 'password123' }),
+    });
+    assert.equal(apiKeyUpdate.status, 403);
+    assert.equal(apiKeyUpdate.body.error, 'Account changes require a signed-in dashboard session');
+
+    const wrongPassword = await request(ctx.base, '/api/me', {
+      method: 'PATCH',
+      headers: { cookie },
+      body: JSON.stringify({ email: 'new-owner@example.com', current_password: 'wrong-password' }),
+    });
+    assert.equal(wrongPassword.status, 401);
+    assert.equal(wrongPassword.body.error, 'Current password is incorrect');
+
+    const duplicateEmail = await request(ctx.base, '/api/me', {
+      method: 'PATCH',
+      headers: { cookie },
+      body: JSON.stringify({ email: 'taken@example.com', current_password: 'password123' }),
+    });
+    assert.equal(duplicateEmail.status, 409);
+    assert.equal(duplicateEmail.body.error, 'Email already registered');
+
+    const invalidEmail = await request(ctx.base, '/api/me', {
+      method: 'PATCH',
+      headers: { cookie },
+      body: JSON.stringify({ email: 'not-an-email', current_password: 'password123' }),
+    });
+    assert.equal(invalidEmail.status, 400);
+    assert.equal(invalidEmail.body.error, 'Enter a valid email address');
+
+    const shortPassword = await request(ctx.base, '/api/me', {
+      method: 'PATCH',
+      headers: { cookie },
+      body: JSON.stringify({ email: 'owner@example.com', current_password: 'password123', new_password: 'short' }),
+    });
+    assert.equal(shortPassword.status, 400);
+    assert.equal(shortPassword.body.error, 'New password must be at least 8 characters');
+
+    const unchanged = await request(ctx.base, '/api/me', {
+      method: 'PATCH',
+      headers: { cookie },
+      body: JSON.stringify({ email: 'owner@example.com', current_password: 'password123' }),
+    });
+    assert.equal(unchanged.status, 400);
+
+    const updated = await request(ctx.base, '/api/me', {
+      method: 'PATCH',
+      headers: { cookie },
+      body: JSON.stringify({
+        email: 'new-owner@example.com',
+        current_password: 'password123',
+        new_password: 'new-password-456',
+      }),
+    });
+    assert.equal(updated.status, 200);
+    assert.equal(updated.body.user.email, 'new-owner@example.com');
+    assert.equal(updated.body.password_changed, true);
+    assert.equal(updated.body.other_sessions_revoked, 1);
+
+    const currentSession = await request(ctx.base, '/api/me', { headers: { cookie } });
+    assert.equal(currentSession.status, 200);
+    assert.equal(currentSession.body.user.email, 'new-owner@example.com');
+    assert.equal((await request(ctx.base, '/api/me', { headers: { cookie: otherCookie } })).status, 401);
+
+    const oldEmailLogin = await request(ctx.base, '/auth/login', {
+      method: 'POST',
+      headers: { accept: 'application/json' },
+      body: JSON.stringify({ email: 'owner@example.com', password: 'new-password-456' }),
+    });
+    assert.equal(oldEmailLogin.status, 401);
+    const oldPasswordLogin = await request(ctx.base, '/auth/login', {
+      method: 'POST',
+      headers: { accept: 'application/json' },
+      body: JSON.stringify({ email: 'new-owner@example.com', password: 'password123' }),
+    });
+    assert.equal(oldPasswordLogin.status, 401);
+    const newLogin = await request(ctx.base, '/auth/login', {
+      method: 'POST',
+      headers: { accept: 'application/json' },
+      body: JSON.stringify({ email: 'new-owner@example.com', password: 'new-password-456' }),
+    });
+    assert.equal(newLogin.status, 200);
+
+    const updateAudit = ctx.store.auditLogs.find(entry => entry.action === 'user.update');
+    assert.deepEqual(updateAudit.metadata, {
+      email_changed: true,
+      password_changed: true,
+      other_sessions_revoked: 1,
+    });
+  } finally {
     await ctx.platform.close();
   }
 });
@@ -368,13 +504,22 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /id="accountMenu"/);
     assert.match(res.text, /Account menu for dashboard@example\.com/);
     assert.match(res.text, /Signed in as/);
+    assert.match(res.text, /Edit account[^]*Refresh dashboard/);
+    assert.match(res.text, /id="accountDialog"/);
+    assert.match(res.text, /id="accountEmail"[^>]*value="dashboard@example\.com"/);
+    assert.match(res.text, /id="accountCurrentPassword"[^>]*autocomplete="current-password"[^>]*required/);
+    assert.match(res.text, /id="accountNewPassword"[^>]*autocomplete="new-password"[^>]*minlength="8"/);
+    assert.match(res.text, /id="accountConfirmPassword"/);
+    assert.match(res.text, /api\('\/api\/me', \{[\s\S]*method: 'PATCH'/);
+    assert.match(res.text, /function saveAccount\(event\)/);
     assert.match(res.text, /Refresh dashboard/);
     assert.match(res.text, /class="account-action logout-action" type="submit"/);
     assert.match(res.text, /accountMenu\.removeAttribute\('open'\)/);
     assert.match(res.text, /id="browserView"/);
     assert.match(res.text, /id="consoleView" hidden/);
+    assert.match(res.text, /id="logsView" hidden/);
     assert.match(res.text, /id="apiKeysView" hidden/);
-    assert.match(res.text, />Browsers<[^]*>Console<[^]*>API keys</);
+    assert.match(res.text, />Browsers<[^]*>Console<[^]*>API keys<[^]*>Logs</);
     assert.match(res.text, /setDashboardView/);
     assert.doesNotMatch(res.text, /\.header-link\s*\{\s*display:\s*none/);
     assert.match(res.text, /id="apiKeysList"/);
@@ -393,10 +538,20 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /terminalRunStatuses/);
     assert.match(res.text, /function appendRunProgress\(/);
     assert.match(res.text, /className = 'run-progress-log'/);
-    assert.match(res.text, /Live progress/);
+    assert.match(res.text, /Live activity/);
     assert.match(res.text, /description\.detailLabel/);
-    assert.match(res.text, /previousLog\.scrollHeight - previousLog\.scrollTop - previousLog\.clientHeight < 28/);
-    assert.match(res.text, /openSeqs: new Set/);
+    assert.match(res.text, /hiddenCount = expanded/);
+    assert.match(res.text, /toggle\.textContent = expanded \? 'Show recent' : 'Show all'/);
+    assert.match(res.text, /function appendRunConclusion\(/);
+    assert.match(res.text, /className = 'run-conclusion'/);
+    assert.doesNotMatch(res.text, /\.run-progress-log\s*\{[^}]*max-height/);
+    assert.doesNotMatch(res.text, /\.run-progress-log\s*\{[^}]*overflow:\s*auto/);
+    assert.doesNotMatch(res.text, /\.run-output\s*\{[^}]*max-height/);
+    assert.match(res.text, /id="logsBrowserFilter"/);
+    assert.match(res.text, /id="logsStatusFilter"/);
+    assert.match(res.text, /function loadRunLogs\(/);
+    assert.match(res.text, /function selectRunLog\(/);
+    assert.match(res.text, /\/api\/runs\?limit=50&offset=/);
     assert.match(res.text, /state\.selectedId = session\.id/);
     assert.doesNotMatch(res.text, /Use this browser from code/);
     assert.match(res.text, /id="consoleCodeSessionId"/);
