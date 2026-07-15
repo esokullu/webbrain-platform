@@ -6,6 +6,7 @@ import { signNoVncToken } from '../shared/novnc-token.js';
 import { instanceHostname } from './instance-proxy.js';
 import { docsPage } from './docs-page.js';
 import { normalizeProxyUrl, proxyUrlFromParts, publicProxyEndpoint, publicProxyState } from '../shared/proxy.js';
+import { DEFAULT_DOWNLOADS_UPLOAD_LIMIT_BYTES, downloadsAccessCredentials } from '../shared/downloads-access.js';
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'aborted']);
 
@@ -465,6 +466,15 @@ function dashboardPage(user) {
     .account-verification-copy { margin: 0 0 8px; color: var(--text-dim); font-size: 11px; line-height: 1.5; }
     .account-form .message { margin: 0; }
     .account-form .dialog-actions { margin-top: 0; }
+    .downloads-dialog { width: min(560px, calc(100vw - 28px)); }
+    .downloads-ticket { position: relative; display: grid; gap: 9px; margin-top: 16px; padding: 16px; overflow: hidden; border: 1px solid rgba(91,82,232,.22); border-radius: 12px; background: linear-gradient(135deg, rgba(91,82,232,.075), rgba(255,253,248,.9) 58%); }
+    .downloads-ticket::after { content: ''; position: absolute; top: -34px; right: -27px; width: 92px; height: 72px; border: 10px solid rgba(91,82,232,.055); border-radius: 18px; transform: rotate(8deg); pointer-events: none; }
+    .downloads-ticket-kicker { color: var(--accent); font-size: 10px; font-weight: 850; letter-spacing: .09em; text-transform: uppercase; }
+    .downloads-credential { min-width: 0; display: grid; grid-template-columns: 78px minmax(0,1fr) auto; align-items: center; gap: 8px; }
+    .downloads-credential label { color: var(--text-dim); font-size: 11px; font-weight: 750; }
+    .downloads-credential input { min-width: 0; height: 35px; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .downloads-copy { min-height: 35px; box-shadow: none; }
+    .downloads-note { margin: 12px 0 0 !important; padding-left: 12px; border-left: 3px solid rgba(91,82,232,.25); line-height: 1.55; }
     .confirm-phrase { padding: 2px 6px; border: 1px solid var(--border); border-radius: 5px; background: rgba(89,55,25,.05); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); }
     @media (prefers-reduced-motion: reduce) {
       * { scroll-behavior: auto !important; transition: none !important; }
@@ -512,6 +522,8 @@ function dashboardPage(user) {
       .run-meta { grid-template-columns: 1fr; }
       .logs-filters { grid-template-columns: 1fr; }
       .account-form-grid { grid-template-columns: 1fr; }
+      .downloads-credential { grid-template-columns: 1fr auto; }
+      .downloads-credential label { grid-column: 1 / -1; }
       .api-panel .panel-head { align-items: stretch; flex-direction: column; }
       .connection-head { align-items: stretch; flex-direction: column; }
       .connection-session { max-width: 100%; }
@@ -618,6 +630,7 @@ function dashboardPage(user) {
               <div class="toolbar">
                 <button class="secondary" id="connectBtn" type="button" disabled>Connect</button>
                 <button class="secondary" id="proxyBtn" type="button" disabled>Proxy</button>
+                <button class="secondary" id="downloadsBtn" type="button" disabled>Downloads</button>
                 <a class="button-link" id="externalLink" href="#" target="_blank" rel="noopener" style="display:none">Open separately</a>
                 <button class="danger" id="deleteSessionBtn" type="button" disabled>Delete</button>
               </div>
@@ -875,6 +888,36 @@ function dashboardPage(user) {
       </div>
     </form>
   </dialog>
+  <dialog class="downloads-dialog" id="downloadsDialog">
+    <div class="dialog-body">
+      <h2>Downloads access</h2>
+      <p>Files stay on this browser Droplet. Use the credentials below when the browser asks you to sign in.</p>
+      <div class="downloads-ticket" aria-busy="false" id="downloadsTicket">
+        <span class="downloads-ticket-kicker">Private file tray</span>
+        <div class="downloads-credential">
+          <label for="downloadsUrl">URL</label>
+          <input id="downloadsUrl" readonly aria-label="Downloads URL">
+          <button class="secondary downloads-copy" id="copyDownloadsUrlBtn" type="button">Copy</button>
+        </div>
+        <div class="downloads-credential">
+          <label for="downloadsUsername">Username</label>
+          <input id="downloadsUsername" readonly aria-label="Downloads username">
+          <button class="secondary downloads-copy" id="copyDownloadsUsernameBtn" type="button">Copy</button>
+        </div>
+        <div class="downloads-credential">
+          <label for="downloadsPassword">Password</label>
+          <input id="downloadsPassword" readonly aria-label="Downloads password">
+          <button class="secondary downloads-copy" id="copyDownloadsPasswordBtn" type="button">Copy</button>
+        </div>
+      </div>
+      <p class="downloads-note">Uploads are limited to 5 GB per file. Existing names receive an automatic numbered suffix.</p>
+      <div class="message" id="downloadsMessage" aria-live="polite"></div>
+      <div class="dialog-actions">
+        <button class="secondary" type="button" id="closeDownloadsBtn">Close</button>
+        <a class="button-link" id="openDownloadsLink" href="#" target="_blank" rel="noopener noreferrer" aria-disabled="true">Open Downloads</a>
+      </div>
+    </div>
+  </dialog>
   <dialog id="deleteDialog">
     <div class="dialog-body">
       <h2>Delete this browser?</h2>
@@ -909,6 +952,7 @@ function dashboardPage(user) {
     const refreshBtn = document.getElementById('refreshBtn');
     const connectBtn = document.getElementById('connectBtn');
     const proxyBtn = document.getElementById('proxyBtn');
+    const downloadsBtn = document.getElementById('downloadsBtn');
     const deleteSessionBtn = document.getElementById('deleteSessionBtn');
     const renameSessionBtn = document.getElementById('renameSessionBtn');
     const viewerTitle = document.getElementById('viewerTitle');
@@ -974,6 +1018,17 @@ function dashboardPage(user) {
     const proxyMessage = document.getElementById('proxyMessage');
     const cancelProxyBtn = document.getElementById('cancelProxyBtn');
     const saveProxyBtn = document.getElementById('saveProxyBtn');
+    const downloadsDialog = document.getElementById('downloadsDialog');
+    const downloadsTicket = document.getElementById('downloadsTicket');
+    const downloadsUrl = document.getElementById('downloadsUrl');
+    const downloadsUsername = document.getElementById('downloadsUsername');
+    const downloadsPassword = document.getElementById('downloadsPassword');
+    const downloadsMessage = document.getElementById('downloadsMessage');
+    const copyDownloadsUrlBtn = document.getElementById('copyDownloadsUrlBtn');
+    const copyDownloadsUsernameBtn = document.getElementById('copyDownloadsUsernameBtn');
+    const copyDownloadsPasswordBtn = document.getElementById('copyDownloadsPasswordBtn');
+    const closeDownloadsBtn = document.getElementById('closeDownloadsBtn');
+    const openDownloadsLink = document.getElementById('openDownloadsLink');
     const deleteDialog = document.getElementById('deleteDialog');
     const deleteDialogDescription = document.getElementById('deleteDialogDescription');
     const deleteConfirmInput = document.getElementById('deleteConfirmInput');
@@ -1001,6 +1056,7 @@ function dashboardPage(user) {
       showDestroyed: false,
       deleteTargetId: null,
       proxyTargetId: null,
+      downloadsTargetId: null,
       codeClient: 'rest',
     };
     const viewerConnections = new Map();
@@ -2121,6 +2177,7 @@ function dashboardPage(user) {
       connectBtn.textContent = isConnected ? 'Disconnect' : (isConnecting ? 'Connecting…' : 'Connect');
       connectBtn.disabled = isConnecting || (!isConnected && !canConnect);
       proxyBtn.disabled = !session || session.status === 'destroyed' || session.droplet_connected !== true;
+      downloadsBtn.disabled = !canConnect;
       deleteSessionBtn.disabled = !session || session.status === 'destroyed';
       renameSessionBtn.disabled = !session || session.status === 'destroyed';
       viewerTitle.textContent = session ? browserName(session) + ' · ' + session.status : 'Browser preview';
@@ -2302,6 +2359,53 @@ function dashboardPage(user) {
         showMessage(proxyMessage, error.message, true);
       } finally {
         saveProxyBtn.disabled = false;
+      }
+    }
+
+    function setDownloadsAccess(body) {
+      downloadsUrl.value = body?.url || '';
+      downloadsUsername.value = body?.username || '';
+      downloadsPassword.value = body?.password || '';
+      openDownloadsLink.href = body?.url || '#';
+      openDownloadsLink.setAttribute('aria-disabled', body?.url ? 'false' : 'true');
+    }
+
+    async function openDownloadsDialog() {
+      const session = selectedSession();
+      if (!session || session.status !== 'ready' || !session.public_ip) return;
+      state.downloadsTargetId = session.id;
+      setDownloadsAccess(null);
+      showMessage(downloadsMessage, 'Creating private access…');
+      downloadsTicket.setAttribute('aria-busy', 'true');
+      downloadsDialog.showModal();
+      try {
+        const body = await api('/api/browser-sessions/' + encodeURIComponent(session.id) + '/downloads-access', {
+          method: 'POST',
+          body: {},
+        });
+        if (state.downloadsTargetId !== session.id || !downloadsDialog.open) return;
+        setDownloadsAccess(body);
+        showMessage(downloadsMessage, 'Access is ready until ' + body.expires_at + '.');
+      } catch (error) {
+        if (state.downloadsTargetId === session.id && downloadsDialog.open) {
+          showMessage(downloadsMessage, error.message, true);
+        }
+      } finally {
+        if (state.downloadsTargetId === session.id) downloadsTicket.setAttribute('aria-busy', 'false');
+      }
+    }
+
+    async function copyDownloadsValue(input, button) {
+      if (!input.value) return;
+      try {
+        await navigator.clipboard.writeText(input.value);
+        const previous = button.textContent;
+        button.textContent = 'Copied';
+        window.setTimeout(() => { button.textContent = previous; }, 1200);
+      } catch {
+        showMessage(downloadsMessage, 'Clipboard access was denied. Select and copy the value manually.', true);
+        input.focus();
+        input.select();
       }
     }
 
@@ -2533,6 +2637,20 @@ function dashboardPage(user) {
       proxyUsername.value = '';
       proxyPassword.value = '';
       showMessage(proxyMessage, '');
+    });
+    downloadsBtn.addEventListener('click', openDownloadsDialog);
+    closeDownloadsBtn.addEventListener('click', () => downloadsDialog.close());
+    copyDownloadsUrlBtn.addEventListener('click', () => copyDownloadsValue(downloadsUrl, copyDownloadsUrlBtn));
+    copyDownloadsUsernameBtn.addEventListener('click', () => copyDownloadsValue(downloadsUsername, copyDownloadsUsernameBtn));
+    copyDownloadsPasswordBtn.addEventListener('click', () => copyDownloadsValue(downloadsPassword, copyDownloadsPasswordBtn));
+    openDownloadsLink.addEventListener('click', event => {
+      if (openDownloadsLink.getAttribute('aria-disabled') === 'true') event.preventDefault();
+    });
+    downloadsDialog.addEventListener('close', () => {
+      state.downloadsTargetId = null;
+      setDownloadsAccess(null);
+      showMessage(downloadsMessage, '');
+      downloadsTicket.setAttribute('aria-busy', 'false');
     });
     viewerConnectBtn.addEventListener('click', openNoVnc);
     renameSessionBtn.addEventListener('click', openRenameDialog);
@@ -3165,6 +3283,28 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
       url: config.instanceDomain
         ? `https://${instanceHostname(session.id, config.instanceDomain)}/vnc.html?${query.toString()}`
         : `${scheme}://${session.public_ip}:${port}/vnc.html?${query.toString()}`,
+    });
+  });
+
+  app.post('/api/browser-sessions/:sessionId/downloads-access', requireAuth, async (req, res) => {
+    let session = await ownedBrowserSession(req, res);
+    if (!session) return;
+    session = await refreshProvisioningSession(session);
+    if (session.status !== 'ready' || !session.public_ip) {
+      return jsonError(res, 409, 'Browser session is not ready');
+    }
+    if (!config.instanceDomain) {
+      return jsonError(res, 503, 'Downloads access requires WEBBRAIN_INSTANCE_DOMAIN and HTTPS');
+    }
+    const credentials = downloadsAccessCredentials(session.connect_secret);
+    await audit(req, 'browser_session.downloads_access', 'browser_session', session.id);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      url: `https://${instanceHostname(session.id, config.instanceDomain)}/downloads/`,
+      username: credentials.username,
+      password: credentials.password,
+      upload_limit_bytes: DEFAULT_DOWNLOADS_UPLOAD_LIMIT_BYTES,
+      expires_at: session.expires_at,
     });
   });
 

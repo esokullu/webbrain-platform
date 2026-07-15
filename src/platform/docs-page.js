@@ -335,6 +335,7 @@ export function docsPage() {
             <div class="endpoint"><span class="method">DELETE</span><code>/api/browser-sessions/:sessionId/proxy</code><span>Return to a direct connection.</span></div>
             <div class="endpoint"><span class="method">DELETE</span><code>/api/browser-sessions/:sessionId</code><span>Destroy a browser.</span></div>
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/connect-token</code><span>Create a noVNC link.</span></div>
+            <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/downloads-access</code><span>Create private Downloads credentials.</span></div>
           </div>
         </section>
 
@@ -380,7 +381,7 @@ export function docsPage() {
         <section class="docs-section" id="clients">
           <p class="section-kicker">No dependencies</p>
           <h2>Use your language</h2>
-          <p>The repository includes small clients with the same core operations: session lifecycle, readiness, runs, follow-up turns, polling, aborting, structured output, and noVNC links.</p>
+          <p>The repository includes small clients with the same core operations: session lifecycle, readiness, runs, follow-up turns, polling, aborting, structured output, noVNC links, and private Downloads access.</p>
           <div class="client-cards">
             <a class="client-card" href="https://github.com/esokullu/webbrain-platform/tree/main/clients/node"><strong>Node.js</strong><span>Node 18+ · native fetch</span></a>
             <a class="client-card" href="https://github.com/esokullu/webbrain-platform/tree/main/clients/python"><strong>Python</strong><span>Python 3.9+ · standard library</span></a>

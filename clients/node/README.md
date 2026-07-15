@@ -25,6 +25,8 @@ const session = await client.createBrowserSession({
   display_name: 'Research',
 });
 const ready = await client.waitForBrowserSession(session.id);
+const downloads = await client.createDownloadsAccess(ready.id);
+// downloads contains the private URL, username, password, limit, and expiry.
 await client.updateBrowserProxy(ready.id, {
   proxy: {
     domain: 'p.webshare.io',
@@ -88,6 +90,7 @@ const run = await client.createRun(session.id, {
 - `waitForRun(sessionId, runId, options)`
 - `abortRun(sessionId, runId)`
 - `createConnectToken(sessionId, options)`
+- `createDownloadsAccess(sessionId)`
 
 Failed HTTP requests throw `WebBrainApiError` with `status` and `body`
 properties.

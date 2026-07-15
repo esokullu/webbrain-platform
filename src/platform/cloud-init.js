@@ -30,6 +30,11 @@ export function renderCloudInit({ session, config, providerApiKey = '', proxyUrl
     WEBBRAIN_NOVNC_SECRET: session.connect_secret,
     WEBBRAIN_NOVNC_TARGET: 'http://127.0.0.1:6080',
     WEBBRAIN_NOVNC_GATE_PORT: String(config.droplet.noVncGatePort || 6081),
+    WEBBRAIN_DOWNLOADS_TARGET: 'http://127.0.0.1:6082',
+    WEBBRAIN_DOWNLOADS_HOST: '127.0.0.1',
+    WEBBRAIN_DOWNLOADS_PORT: '6083',
+    WEBBRAIN_DOWNLOADS_ROOT: '/root/Downloads',
+    WEBBRAIN_DOWNLOADS_UPLOAD_LIMIT_BYTES: String(5 * 1024 * 1024 * 1024),
     DISPLAY: ':99',
     WEBBRAIN_HEADLESS: 'false',
     WEBBRAIN_START_URL: 'https://webbrain.one',
@@ -50,9 +55,13 @@ package_update: true
 package_upgrade: false
 packages:
   - build-essential
+  - apt-transport-https
   - ca-certificates
   - curl
+  - debian-archive-keyring
+  - debian-keyring
   - git
+  - gnupg
   - unzip
   - ufw
   - xvfb
@@ -163,6 +172,7 @@ runcmd:
   - git clone ${shellQuote(webbrainRepoUrl)} ${webbrainDir}
   - git clone https://github.com/novnc/noVNC.git /opt/noVNC
   - cd ${appDir} && npm ci --omit=dev
+  - cd ${appDir} && bash scripts/install-downloads-share.sh
   - cd ${webbrainDir} && git checkout ${shellQuote(config.droplet.webbrainRef)}
   - systemctl daemon-reload
   - systemctl enable webbrain-sidecar.service webbrain-xvfb.service webbrain-x11vnc.service webbrain-novnc.service webbrain-droplet.service webbrain-browser.service

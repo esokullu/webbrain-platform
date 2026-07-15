@@ -1,6 +1,13 @@
 import http from 'node:http';
 import { URL } from 'node:url';
 import { WebSocket, WebSocketServer } from 'ws';
+import {
+  DOWNLOADS_PROXY_SIGNATURE_HEADER,
+  DOWNLOADS_PROXY_TIMESTAMP_HEADER,
+  isDownloadsRequestPath,
+  signDownloadsProxyRequest,
+  verifyDownloadsBasicAuthorization,
+} from '../shared/downloads-access.js';
 
 const SESSION_PREFIX = 'bs_';
 const HOST_PREFIX = 'bs-';
@@ -44,12 +51,41 @@ export function createInstanceProxy({ store, domain, targetPort = 6081 }) {
       return true;
     }
 
+    const isDownloads = isDownloadsRequestPath(req.url);
+    if (isDownloads && !isHttpsRequest(req)) {
+      res.writeHead(400, {
+        'cache-control': 'private, no-store',
+        'content-type': 'text/plain; charset=utf-8',
+      });
+      res.end('Downloads access requires HTTPS');
+      return true;
+    }
+    if (isDownloads && !verifyDownloadsBasicAuthorization(req.headers.authorization, session.connect_secret)) {
+      res.writeHead(401, {
+        'cache-control': 'private, no-store',
+        'content-type': 'text/plain; charset=utf-8',
+        'www-authenticate': 'Basic realm="WebBrain Downloads", charset="UTF-8"',
+      });
+      res.end('Downloads authentication required');
+      return true;
+    }
+
+    const headers = upstreamHeaders(req, session.public_ip, targetPort);
+    if (isDownloads) {
+      delete headers.authorization;
+      const signed = signDownloadsProxyRequest(session.connect_secret, {
+        method: req.method,
+        path: req.url,
+      });
+      headers[DOWNLOADS_PROXY_TIMESTAMP_HEADER] = signed.timestamp;
+      headers[DOWNLOADS_PROXY_SIGNATURE_HEADER] = signed.signature;
+    }
     const upstreamReq = http.request({
       hostname: session.public_ip,
       port: targetPort,
       method: req.method,
       path: req.url,
-      headers: upstreamHeaders(req, session.public_ip, targetPort),
+      headers,
     }, upstreamRes => {
       res.writeHead(upstreamRes.statusCode || 502, upstreamRes.headers);
       upstreamRes.pipe(res);
@@ -79,6 +115,11 @@ export function createInstanceProxy({ store, domain, targetPort = 6081 }) {
       const session = lookup.session;
       if (!session || !session.public_ip || ['stopping', 'stopped', 'destroyed', 'failed'].includes(session.status)) {
         socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+      if (isDownloadsRequestPath(req.url)) {
+        socket.write('HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n');
         socket.destroy();
         return;
       }
@@ -118,6 +159,14 @@ export function createInstanceProxy({ store, domain, targetPort = 6081 }) {
 
 function normalizeDomain(domain) {
   return String(domain || '').trim().toLowerCase().replace(/^\.+|\.+$/g, '');
+}
+
+function isHttpsRequest(req) {
+  if (req.socket?.encrypted === true) return true;
+  return String(req.headers['x-forwarded-proto'] || '')
+    .split(',')[0]
+    .trim()
+    .toLowerCase() === 'https';
 }
 
 function upstreamHeaders(req, hostname, port) {

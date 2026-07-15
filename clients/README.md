@@ -11,5 +11,6 @@ Small, dependency-free clients for the browser automation API at
 
 Each client supports browser-session creation and deletion, readiness polling,
 startup and live proxy assignment, run creation and polling, structured output,
-finished-run follow-up turns, aborting, and signed noVNC links.
+finished-run follow-up turns, aborting, signed noVNC links, and private
+Downloads access.
 See the public API guide at `https://webbrain.cloud/docs` for complete examples.

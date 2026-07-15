@@ -24,6 +24,8 @@ $session = $client->createBrowserSession([
     'display_name' => 'Research',
 ]);
 $ready = $client->waitForBrowserSession($session['id']);
+$downloads = $client->createDownloadsAccess($ready['id']);
+// $downloads contains the private URL, username, password, limit, and expiry.
 $client->updateBrowserProxy($ready['id'], [
     'domain' => 'p.webshare.io',
     'port' => 80,
@@ -87,6 +89,7 @@ $run = $client->createRun($session['id'], 'Return the title and visible links', 
 - `waitForRun($sessionId, $runId, ...)`
 - `abortRun($sessionId, $runId)`
 - `createConnectToken($sessionId, $options)`
+- `createDownloadsAccess($sessionId)`
 
 Failed HTTP requests throw `WebBrainApiException` with `status` and `body`
 properties.

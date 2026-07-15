@@ -11,6 +11,12 @@ import { chromeExtensionIdForPath, renderCloudInit } from '../src/platform/cloud
 import { verifyNoVncToken } from '../src/shared/novnc-token.js';
 import { instanceHostname, sessionIdFromInstanceHost } from '../src/platform/instance-proxy.js';
 import { hashToken } from '../src/shared/crypto.js';
+import {
+  DOWNLOADS_PROXY_SIGNATURE_HEADER,
+  DOWNLOADS_PROXY_TIMESTAMP_HEADER,
+  downloadsAccessCredentials,
+  verifyDownloadsProxyRequest,
+} from '../src/shared/downloads-access.js';
 
 async function startPlatform(env = {}) {
   const config = loadConfig({
@@ -94,6 +100,23 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
 
   const legacyRawKey = 'wbp_ab_cd12_legacy-secret';
   const legacyUser = await ctx.store.findUserByEmail('a@example.com');
+  await ctx.store.createBrowserSession({
+    id: 'bs_pending',
+    user_id: legacyUser.id,
+    status: 'provisioning',
+    droplet_id: null,
+    public_ip: null,
+    connect_secret: 'pending-secret',
+    expires_at: new Date(Date.now() + 60_000).toISOString(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+  const pendingDownloads = await request(ctx.base, '/api/browser-sessions/bs_pending/downloads-access', {
+    method: 'POST',
+    headers: { cookie },
+    body: '{}',
+  });
+  assert.equal(pendingDownloads.status, 409);
   await ctx.store.createApiKey({
     id: 'key_legacy_underscore',
     user_id: legacyUser.id,
@@ -358,6 +381,30 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
       ws.send(JSON.stringify({ id: msg.id, ok: true, result: next }));
     }
   });
+
+  const downloadsAccess = await request(ctx.base, `/api/browser-sessions/${sessionId}/downloads-access`, {
+    method: 'POST',
+    headers: { cookie },
+    body: '{}',
+  });
+  assert.equal(downloadsAccess.status, 200);
+  assert.equal(downloadsAccess.headers.get('cache-control'), 'no-store');
+  assert.equal(downloadsAccess.body.url, `https://${instanceHostname(sessionId, 'webbrain.cloud')}/downloads/`);
+  assert.deepEqual({
+    username: downloadsAccess.body.username,
+    password: downloadsAccess.body.password,
+  }, downloadsAccessCredentials(storedSession.connect_secret));
+  assert.equal(downloadsAccess.body.upload_limit_bytes, 5 * 1024 * 1024 * 1024);
+  assert.equal(downloadsAccess.body.expires_at, storedSession.expires_at);
+  const downloadsAudit = ctx.store.auditLogs.find(entry => entry.action === 'browser_session.downloads_access');
+  assert.deepEqual(downloadsAudit.metadata, {});
+  assert.doesNotMatch(JSON.stringify(downloadsAudit), new RegExp(downloadsAccess.body.password));
+  const forbiddenDownloads = await request(ctx.base, `/api/browser-sessions/${sessionId}/downloads-access`, {
+    method: 'POST',
+    headers: { cookie: otherCookie },
+    body: '{}',
+  });
+  assert.equal(forbiddenDownloads.status, 404);
 
   const proxyStatus = await request(ctx.base, `/api/browser-sessions/${sessionId}/proxy`, {
     headers: { cookie },
@@ -793,6 +840,11 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /id="newProxyPassword"/);
     assert.match(res.text, /id="proxyBtn"/);
     assert.match(res.text, /id="proxyDialog"/);
+    assert.match(res.text, /id="downloadsBtn"/);
+    assert.match(res.text, /id="downloadsDialog"/);
+    assert.match(res.text, /id="copyDownloadsPasswordBtn"/);
+    assert.match(res.text, /function openDownloadsDialog\(\)/);
+    assert.match(res.text, /\/downloads-access/);
     assert.match(res.text, /function saveBrowserProxy\(event\)/);
     assert.match(res.text, /body: hasNextProxy \? \{ proxy: nextProxy \} : \{ proxy_url: null \}/);
     assert.match(res.text, /id="renameDialog"/);
@@ -957,6 +1009,7 @@ test('public API documentation provides accessible REST and client tabs', async 
     assert.match(res.text, /class="tok-variable"/);
     assert.match(res.text, /class="tok-function"/);
     assert.match(res.text, /\/api\/browser-sessions\/:sessionId\/runs/);
+    assert.match(res.text, /\/api\/browser-sessions\/:sessionId\/downloads-access/);
     assert.match(res.text, /\/api\/browser-sessions\/:sessionId\/runs\/:runId\/responses/);
     assert.match(res.text, /\/api\/browser-sessions\/:sessionId\/runs\/:runId\/messages/);
     assert.match(res.text, /parent_run_id/);
@@ -979,7 +1032,15 @@ test('instance hostnames round-trip browser session ids', () => {
 });
 
 test('instance subdomains proxy HTTP and WebSocket traffic to the session droplet', async () => {
+  const upstreamRequests = [];
   const upstream = http.createServer((req, res) => {
+    upstreamRequests.push({
+      method: req.method,
+      path: req.url,
+      authorization: req.headers.authorization,
+      timestamp: req.headers[DOWNLOADS_PROXY_TIMESTAMP_HEADER],
+      signature: req.headers[DOWNLOADS_PROXY_SIGNATURE_HEADER],
+    });
     res.writeHead(200, { 'content-type': 'text/plain', 'x-upstream-path': req.url });
     res.end('proxied');
   });
@@ -1030,6 +1091,72 @@ test('instance subdomains proxy HTTP and WebSocket traffic to the session drople
     assert.equal(res.text, 'proxied');
     assert.equal(res.headers['x-upstream-path'], '/app/ui.css?token=test');
 
+    const unauthorizedDownloads = await new Promise((resolve, reject) => {
+      const req = http.request({
+        hostname: '127.0.0.1',
+        port: address.port,
+        path: '/downloads/',
+        headers: { host: 'bs-deadbeef.webbrain.cloud', 'x-forwarded-proto': 'https' },
+      }, upstreamRes => {
+        upstreamRes.resume();
+        upstreamRes.once('end', () => resolve({ status: upstreamRes.statusCode, headers: upstreamRes.headers }));
+      });
+      req.once('error', reject);
+      req.end();
+    });
+    assert.equal(unauthorizedDownloads.status, 401);
+    assert.match(unauthorizedDownloads.headers['www-authenticate'], /^Basic /);
+    assert.equal(upstreamRequests.length, 1);
+
+    const credentials = downloadsAccessCredentials('secret');
+    const insecureDownloads = await new Promise((resolve, reject) => {
+      const req = http.request({
+        hostname: '127.0.0.1',
+        port: address.port,
+        path: '/downloads/',
+        headers: {
+          host: 'bs-deadbeef.webbrain.cloud',
+          authorization: `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64')}`,
+        },
+      }, upstreamRes => {
+        upstreamRes.resume();
+        upstreamRes.once('end', () => resolve({ status: upstreamRes.statusCode }));
+      });
+      req.once('error', reject);
+      req.end();
+    });
+    assert.equal(insecureDownloads.status, 400);
+    assert.equal(upstreamRequests.length, 1);
+
+    const authorizedDownloads = await new Promise((resolve, reject) => {
+      const req = http.request({
+        hostname: '127.0.0.1',
+        port: address.port,
+        path: '/downloads/report.txt',
+        headers: {
+          host: 'bs-deadbeef.webbrain.cloud',
+          'x-forwarded-proto': 'https',
+          authorization: `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64')}`,
+        },
+      }, upstreamRes => {
+        const chunks = [];
+        upstreamRes.on('data', chunk => chunks.push(chunk));
+        upstreamRes.once('end', () => resolve({ status: upstreamRes.statusCode, body: Buffer.concat(chunks).toString() }));
+      });
+      req.once('error', reject);
+      req.end();
+    });
+    assert.equal(authorizedDownloads.status, 200);
+    assert.equal(authorizedDownloads.body, 'proxied');
+    const proxiedDownloads = upstreamRequests.at(-1);
+    assert.equal(proxiedDownloads.authorization, undefined);
+    assert.equal(verifyDownloadsProxyRequest('secret', {
+      timestamp: proxiedDownloads.timestamp,
+      signature: proxiedDownloads.signature,
+      method: proxiedDownloads.method,
+      path: proxiedDownloads.path,
+    }), true);
+
     const ws = new WebSocket(`ws://127.0.0.1:${address.port}/websockify?token=test`, {
       headers: { host: 'bs-deadbeef.webbrain.cloud' },
     });
@@ -1067,6 +1194,9 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
   assert.match(cloudInit, /DISPLAY=':99'/);
   assert.match(cloudInit, /WEBBRAIN_HEADLESS='false'/);
   assert.match(cloudInit, /WEBBRAIN_NOVNC_GATE_PORT='6081'/);
+  assert.match(cloudInit, /WEBBRAIN_DOWNLOADS_TARGET='http:\/\/127\.0\.0\.1:6082'/);
+  assert.match(cloudInit, /WEBBRAIN_DOWNLOADS_HOST='127\.0\.0\.1'/);
+  assert.match(cloudInit, /WEBBRAIN_DOWNLOADS_PORT='6083'/);
   assert.match(cloudInit, /WEBBRAIN_BROWSER_BIN='\/opt\/chrome-linux64\/chrome'/);
   assert.match(cloudInit, /WEBBRAIN_BROWSER_PROXY_SERVER='http:\/\/127\.0\.0\.1:17890'/);
   assert.match(cloudInit, /WEBBRAIN_BROWSER_PROXY_BYPASS_LIST='platform\.example'/);
@@ -1084,6 +1214,7 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
   assert.match(cloudInit, /webbrain-novnc\.service/);
   assert.match(cloudInit, /\/opt\/noVNC\/utils\/novnc_proxy --listen 127\.0\.0\.1:6080 --vnc 127\.0\.0\.1:5900/);
   assert.match(cloudInit, /ufw allow 6081\/tcp/);
+  assert.doesNotMatch(cloudInit, /ufw allow 608[23]\/tcp/);
   assert.match(cloudInit, /ufw --force enable/);
   assert.match(cloudInit, /https:\/\/deb\.nodesource\.com\/setup_20\.x/);
   assert.match(cloudInit, /google-chrome-stable_current_amd64\.deb/);
@@ -1092,11 +1223,24 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
   assert.match(cloudInit, /git clone 'https:\/\/github\.com\/webbrain-one\/webbrain\.git' \/opt\/webbrain3/);
   assert.match(cloudInit, /git clone https:\/\/github\.com\/novnc\/noVNC\.git \/opt\/noVNC/);
   assert.match(cloudInit, /After=webbrain-droplet\.service webbrain-sidecar\.service webbrain-xvfb\.service/);
+  assert.match(cloudInit, /bash scripts\/install-downloads-share\.sh/);
   assert.match(cloudInit, /systemctl start webbrain-sidecar\.service webbrain-xvfb\.service webbrain-x11vnc\.service webbrain-novnc\.service webbrain-droplet\.service webbrain-browser\.service/);
 });
 
 test('cloud browser extension id matches Chrome unpacked-extension path hashing', () => {
   assert.equal(chromeExtensionIdForPath('/opt/webbrain3/src/chrome'), 'ojnjlpnhkfaiapnicpdgngopfpmphocc');
+});
+
+test('downloads installer binds Caddy and the file service to localhost', async () => {
+  const source = await readFile(new URL('../scripts/install-downloads-share.sh', import.meta.url), 'utf8');
+  assert.match(source, /dl\.cloudsmith\.io\/public\/caddy\/stable/);
+  assert.match(source, /http:\/\/127\.0\.0\.1:6082/);
+  assert.match(source, /bind 127\.0\.0\.1/);
+  assert.match(source, /reverse_proxy 127\.0\.0\.1:6083/);
+  assert.match(source, /ExecStart=\/usr\/bin\/node src\/droplet\/downloads-index\.js/);
+  assert.match(source, /ReadWritePaths=\$\{DOWNLOADS_ROOT\}/);
+  assert.match(source, /systemctl enable webbrain-downloads\.service caddy\.service/);
+  assert.doesNotMatch(source, /ufw allow/);
 });
 
 test('cloud browser launches at the virtual display size', async () => {

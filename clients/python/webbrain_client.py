@@ -89,6 +89,9 @@ class WebBrainClient:
     def create_connect_token(self, session_id: str, **options):
         return self._request("POST", f"/api/browser-sessions/{self._id(session_id)}/connect-token", options)
 
+    def create_downloads_access(self, session_id: str):
+        return self._request("POST", f"/api/browser-sessions/{self._id(session_id)}/downloads-access", {})
+
     def wait_for_browser_session(self, session_id: str, *, poll_interval: float = 2.0, timeout: float = 300.0):
         deadline = time.monotonic() + timeout
         while True:

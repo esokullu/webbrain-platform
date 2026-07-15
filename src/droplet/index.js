@@ -39,6 +39,8 @@ if (process.env.WEBBRAIN_NOVNC_SECRET) {
   gate = createNoVncGate({
     secret: process.env.WEBBRAIN_NOVNC_SECRET,
     target: process.env.WEBBRAIN_NOVNC_TARGET || 'http://127.0.0.1:6080',
+    downloadsTarget: process.env.WEBBRAIN_DOWNLOADS_TARGET || '',
+    downloadsSecret: sessionToken,
   });
   const port = Number(process.env.WEBBRAIN_NOVNC_GATE_PORT || 6081);
   await gate.listen(port, process.env.WEBBRAIN_NOVNC_GATE_HOST || '0.0.0.0');

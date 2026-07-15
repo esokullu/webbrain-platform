@@ -113,6 +113,11 @@ final class WebBrainClient
         return $this->request('POST', '/api/browser-sessions/' . self::id($sessionId) . '/connect-token', $options);
     }
 
+    public function createDownloadsAccess(string $sessionId): array
+    {
+        return $this->request('POST', '/api/browser-sessions/' . self::id($sessionId) . '/downloads-access', []);
+    }
+
     public function waitForBrowserSession(string $sessionId, float $pollInterval = 2.0, float $timeout = 300.0): array
     {
         $deadline = microtime(true) + $timeout;

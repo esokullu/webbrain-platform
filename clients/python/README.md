@@ -21,6 +21,8 @@ from webbrain_client import WebBrainClient
 client = WebBrainClient(os.environ["WEBBRAIN_API_KEY"])
 session = client.create_browser_session(display_name="Research")
 ready = client.wait_for_browser_session(session["id"])
+downloads = client.create_downloads_access(ready["id"])
+# downloads contains the private URL, username, password, limit, and expiry.
 client.update_browser_proxy(
     ready["id"],
     proxy={
@@ -85,6 +87,7 @@ run = client.create_run(
 - `wait_for_run(session_id, run_id, ...)`
 - `abort_run(session_id, run_id)`
 - `create_connect_token(session_id, **options)`
+- `create_downloads_access(session_id)`
 
 Failed HTTP requests raise `WebBrainApiError` with `status` and `body`
 attributes.

@@ -79,6 +79,10 @@ export class WebBrainClient {
     return await this.request('POST', `/api/browser-sessions/${encodeURIComponent(sessionId)}/connect-token`, options);
   }
 
+  async createDownloadsAccess(sessionId) {
+    return await this.request('POST', `/api/browser-sessions/${encodeURIComponent(sessionId)}/downloads-access`, {});
+  }
+
   async waitForBrowserSession(sessionId, { pollIntervalMs = 2000, timeoutMs = 300000 } = {}) {
     const deadline = Date.now() + timeoutMs;
     while (true) {

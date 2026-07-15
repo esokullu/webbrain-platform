@@ -170,6 +170,25 @@ curl -sS \
 `status: "ready"` means the Droplet is reachable. `runtime_ready: true` also
 confirms that the WebBrain extension bridge is connected and can accept runs.
 
+### Access a browser's Downloads folder
+
+Request the private HTTPS URL and Basic Auth credentials for a ready browser:
+
+```bash
+curl -sS -X POST \
+  "https://webbrain.cloud/api/browser-sessions/$WEBBRAIN_SESSION_ID/downloads-access" \
+  -H "Authorization: Bearer $WEBBRAIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+The response contains `url`, `username`, `password`, `upload_limit_bytes`, and
+`expires_at`, and is marked `Cache-Control: no-store`. Credentials stay fixed
+for the session lifetime and stop working when the session is destroyed. The
+file tray supports listing, downloads (including `HEAD` and byte ranges), and
+uploads up to 5 GB per file. Name collisions receive a numbered suffix; delete,
+rename, and folder creation are intentionally unavailable.
+
 ### Change a running browser's proxy
 
 Read the active proxy and last verified exit IP:
@@ -421,6 +440,7 @@ Abort is cooperative. A run can briefly report `aborting` before becoming
 | `PATCH` | `/api/browser-sessions/:sessionId` | Set or clear the browser's `display_name`. |
 | `DELETE` | `/api/browser-sessions/:sessionId` | Destroy the browser session and its Droplet. |
 | `POST` | `/api/browser-sessions/:sessionId/connect-token` | Create a short-lived signed noVNC URL. |
+| `POST` | `/api/browser-sessions/:sessionId/downloads-access` | Create private Downloads URL and Basic Auth credentials. |
 
 Destroy a session when it is no longer needed:
 
@@ -473,6 +493,15 @@ ws(s)://<platform>/droplet/control?session_token=<session secret>
 ```
 
 The command sidecar remains local-only. noVNC is exposed through the droplet gate on `6081` and requires a short-lived signed token from `POST /api/browser-sessions/:sessionId/connect-token`. When `WEBBRAIN_INSTANCE_DOMAIN` is set, the platform proxies noVNC over the wildcard HTTPS hostname `bs-<session-id>.<domain>` so browser assets and WebSockets remain same-site with the dashboard.
+
+Downloads use the same HTTPS instance hostname under `/downloads/`. The
+platform validates session-specific Basic Auth, removes the credential, and
+forwards a short-lived signed request to the Droplet gateway. Caddy and the file
+service listen only on `127.0.0.1:6082` and `127.0.0.1:6083`; no additional
+public Droplet or firewall port is opened. Provisioning uses Caddy's
+[official Debian/Ubuntu package](https://caddyserver.com/docs/install), while
+Basic Auth is accepted only on the HTTPS instance surface in line with Caddy's
+[transport guidance](https://caddyserver.com/docs/caddyfile/directives/basic_auth/).
 
 Legacy Chrome managed-storage policy example (the VM launcher currently seeds
 the same values directly into the isolated browser profile):
