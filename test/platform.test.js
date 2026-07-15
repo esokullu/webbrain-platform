@@ -360,13 +360,19 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   assert.equal(aborted.status, 200);
   assert.equal(aborted.body.status, 'aborted');
   const directProxy = await request(ctx.base, `/api/browser-sessions/${sessionId}/proxy`, {
-    method: 'PATCH',
+    method: 'DELETE',
     headers: { cookie },
-    body: JSON.stringify({ proxy_url: null }),
   });
   assert.equal(directProxy.status, 200);
   assert.equal(directProxy.body.proxy.enabled, false);
   assert.equal((await ctx.store.getBrowserSession(sessionId)).proxy_endpoint, null);
+  assert.equal(ctx.store.auditLogs.some(entry => entry.action === 'browser_session.proxy_delete'), true);
+  const directProxyAgain = await request(ctx.base, `/api/browser-sessions/${sessionId}/proxy`, {
+    method: 'DELETE',
+    headers: { cookie },
+  });
+  assert.equal(directProxyAgain.status, 200);
+  assert.equal(directProxyAgain.body.proxy.enabled, false);
 
   const newestLogs = await request(ctx.base, '/api/runs?limit=1&offset=0', { headers: { cookie } });
   assert.equal(newestLogs.status, 200);
@@ -783,6 +789,7 @@ test('public API documentation provides accessible REST and client tabs', async 
     assert.match(res.text, /tree\/main\/clients\/node/);
     assert.match(res.text, /tree\/main\/clients\/python/);
     assert.match(res.text, /tree\/main\/clients\/php/);
+    assert.match(res.text, /DELETE<\/span><code>\/api\/browser-sessions\/:sessionId\/proxy/);
     assert.match(res.text, /ArrowRight/);
   } finally {
     await ctx.platform.close();

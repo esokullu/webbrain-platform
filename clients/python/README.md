@@ -57,6 +57,7 @@ run = client.create_run(
 - `update_browser_session(session_id, display_name=...)`
 - `get_browser_proxy(session_id)`
 - `update_browser_proxy(session_id, proxy_url=...)` or `proxy={...}`
+- `delete_browser_proxy(session_id)`
 - `wait_for_browser_session(session_id, ...)`
 - `delete_browser_session(session_id)`
 - `create_run(session_id, task, ...)`

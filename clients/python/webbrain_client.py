@@ -79,6 +79,9 @@ class WebBrainClient:
             body,
         )["proxy"]
 
+    def delete_browser_proxy(self, session_id: str):
+        return self._request("DELETE", f"/api/browser-sessions/{self._id(session_id)}/proxy")["proxy"]
+
     def delete_browser_session(self, session_id: str):
         return self._request("DELETE", f"/api/browser-sessions/{self._id(session_id)}")["browser_session"]
 

@@ -66,6 +66,10 @@ export class WebBrainClient {
     return (await this.request('PATCH', `/api/browser-sessions/${encodeURIComponent(sessionId)}/proxy`, body)).proxy;
   }
 
+  async deleteBrowserProxy(sessionId) {
+    return (await this.request('DELETE', `/api/browser-sessions/${encodeURIComponent(sessionId)}/proxy`)).proxy;
+  }
+
   async deleteBrowserSession(sessionId) {
     return (await this.request('DELETE', `/api/browser-sessions/${encodeURIComponent(sessionId)}`)).browser_session;
   }

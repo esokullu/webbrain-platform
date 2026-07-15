@@ -332,6 +332,7 @@ export function docsPage() {
             <div class="endpoint"><span class="method">PATCH</span><code>/api/browser-sessions/:sessionId</code><span>Set its display name.</span></div>
             <div class="endpoint"><span class="method">GET</span><code>/api/browser-sessions/:sessionId/proxy</code><span>Read proxy and exit IP.</span></div>
             <div class="endpoint"><span class="method">PATCH</span><code>/api/browser-sessions/:sessionId/proxy</code><span>Switch proxy without restart.</span></div>
+            <div class="endpoint"><span class="method">DELETE</span><code>/api/browser-sessions/:sessionId/proxy</code><span>Return to a direct connection.</span></div>
             <div class="endpoint"><span class="method">DELETE</span><code>/api/browser-sessions/:sessionId</code><span>Destroy a browser.</span></div>
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/connect-token</code><span>Create a noVNC link.</span></div>
           </div>

@@ -2953,11 +2953,12 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
     }
   });
 
-  app.patch('/api/browser-sessions/:sessionId/proxy', requireAuth, async (req, res, next) => {
+  async function updateBrowserSessionProxy(req, res, next, { clear = false } = {}) {
     try {
       const session = await ownedBrowserSession(req, res);
       if (!session) return;
-      if (!Object.prototype.hasOwnProperty.call(req.body, 'proxy_url')
+      if (!clear
+          && !Object.prototype.hasOwnProperty.call(req.body, 'proxy_url')
           && !Object.prototype.hasOwnProperty.call(req.body, 'proxy')) {
         return jsonError(res, 400, '`proxy_url` or `proxy` is required; use an empty value for direct mode');
       }
@@ -2976,9 +2977,11 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
         });
       }
 
-      const proxyUrl = Object.prototype.hasOwnProperty.call(req.body, 'proxy')
-        ? proxyUrlFromParts(req.body.proxy)
-        : normalizeProxyUrl(req.body.proxy_url);
+      const proxyUrl = clear
+        ? ''
+        : Object.prototype.hasOwnProperty.call(req.body, 'proxy')
+          ? proxyUrlFromParts(req.body.proxy)
+          : normalizeProxyUrl(req.body.proxy_url);
       const proxy = await controlChannel.send(session.id, 'proxy.update', {
         proxy_url: proxyUrl,
         verify: true,
@@ -2991,7 +2994,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
         proxy_updated_at: updatedAt,
         updated_at: nowIso(),
       });
-      await audit(req, 'browser_session.proxy_update', 'browser_session', session.id, {
+      await audit(req, clear ? 'browser_session.proxy_delete' : 'browser_session.proxy_update', 'browser_session', session.id, {
         enabled: proxy.enabled === true,
         endpoint: proxy.endpoint || null,
         exit_ip: proxy.exit_ip || null,
@@ -3000,7 +3003,12 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
     } catch (e) {
       next(e);
     }
-  });
+  }
+
+  app.patch('/api/browser-sessions/:sessionId/proxy', requireAuth, updateBrowserSessionProxy);
+  app.delete('/api/browser-sessions/:sessionId/proxy', requireAuth, (req, res, next) => (
+    updateBrowserSessionProxy(req, res, next, { clear: true })
+  ));
 
   async function browserRuntimeState(session) {
     const dropletConnected = controlChannel.isConnected(session.id);

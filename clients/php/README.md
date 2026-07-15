@@ -58,6 +58,7 @@ $run = $client->createRun($session['id'], 'Return the title and visible links', 
 - `updateBrowserSession($sessionId, $displayName)`
 - `getBrowserProxy($sessionId)`
 - `updateBrowserProxy($sessionId, $proxyUrlOrParts)`
+- `deleteBrowserProxy($sessionId)`
 - `waitForBrowserSession($sessionId, ...)`
 - `deleteBrowserSession($sessionId)`
 - `createRun($sessionId, $task, $options)`

@@ -38,6 +38,10 @@ test('Node.js client sends authenticated session and run requests', async () => 
       res.end(JSON.stringify({ proxy: { enabled: true, endpoint: 'http://proxy.example:8080' } }));
       return;
     }
+    if (req.method === 'DELETE' && req.url === '/api/browser-sessions/bs_test/proxy') {
+      res.end(JSON.stringify({ proxy: { enabled: false, endpoint: null } }));
+      return;
+    }
     if (req.method === 'POST' && req.url === '/api/browser-sessions/bs_test/runs') {
       res.statusCode = 202;
       res.end(JSON.stringify({ run_id: 'run_test', status: 'running' }));
@@ -70,6 +74,8 @@ test('Node.js client sends authenticated session and run requests', async () => 
     assert.equal(directProxy.enabled, false);
     const proxy = await client.updateBrowserProxy(ready.id, { proxyUrl: 'http://user:pass@proxy.example:8080' });
     assert.equal(proxy.endpoint, 'http://proxy.example:8080');
+    const clearedProxy = await client.deleteBrowserProxy(ready.id);
+    assert.equal(clearedProxy.enabled, false);
     const run = await client.createRun(ready.id, {
       task: 'Open example.com',
       tabId: 42,
@@ -84,6 +90,7 @@ test('Node.js client sends authenticated session and run requests', async () => 
       tab_id: 42,
       output_schema: { title: 'string' },
     });
+    assert.deepEqual(requests.find(entry => entry.method === 'DELETE' && entry.path.endsWith('/proxy')).body, null);
 
     await assert.rejects(
       () => client.getBrowserSession('missing'),
@@ -97,10 +104,10 @@ test('Node.js client sends authenticated session and run requests', async () => 
 test('Python and PHP clients expose the shared browser automation operations', async () => {
   const python = await readFile(new URL('../clients/python/webbrain_client.py', import.meta.url), 'utf8');
   const php = await readFile(new URL('../clients/php/WebBrainClient.php', import.meta.url), 'utf8');
-  for (const method of ['create_browser_session', 'update_browser_session', 'get_browser_proxy', 'update_browser_proxy', 'wait_for_browser_session', 'create_run', 'get_run', 'abort_run', 'wait_for_run']) {
+  for (const method of ['create_browser_session', 'update_browser_session', 'get_browser_proxy', 'update_browser_proxy', 'delete_browser_proxy', 'wait_for_browser_session', 'create_run', 'get_run', 'abort_run', 'wait_for_run']) {
     assert.match(python, new RegExp(`def ${method}\\(`));
   }
-  for (const method of ['createBrowserSession', 'updateBrowserSession', 'getBrowserProxy', 'updateBrowserProxy', 'waitForBrowserSession', 'createRun', 'getRun', 'abortRun', 'waitForRun']) {
+  for (const method of ['createBrowserSession', 'updateBrowserSession', 'getBrowserProxy', 'updateBrowserProxy', 'deleteBrowserProxy', 'waitForBrowserSession', 'createRun', 'getRun', 'abortRun', 'waitForRun']) {
     assert.match(php, new RegExp(`function ${method}\\(`));
   }
   assert.match(python, /Authorization.*Bearer/);

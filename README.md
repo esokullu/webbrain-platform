@@ -200,10 +200,19 @@ curl -sS -X PATCH \
 The structured form defaults to an HTTP upstream and safely URL-encodes the
 Webshare credentials. Generic HTTP, HTTPS, SOCKS4, and SOCKS5 integrations may
 send a complete `proxy_url` instead. The relay closes existing connections,
-verifies the replacement's exit IP, and rolls back if verification fails. Send
-`{"proxy_url":null}` to return to direct
-mode. Proxy changes return `409 Conflict` while a browser run is active; abort or
-finish the run first so one task cannot span two network identities.
+verifies the replacement's exit IP, and rolls back if verification fails.
+
+Delete the proxy configuration to return to a direct connection:
+
+```bash
+curl -sS -X DELETE \
+  "https://webbrain.cloud/api/browser-sessions/$WEBBRAIN_SESSION_ID/proxy" \
+  -H "Authorization: Bearer $WEBBRAIN_API_KEY"
+```
+
+`PATCH` with `{"proxy_url":null}` remains equivalent. Proxy changes return
+`409 Conflict` while a browser run is active; abort or finish the run first so
+one task cannot span two network identities.
 
 ### 2. Start a browser run
 

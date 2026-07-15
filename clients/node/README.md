@@ -61,6 +61,7 @@ const run = await client.createRun(session.id, {
 - `updateBrowserSession(sessionId, { displayName })`
 - `getBrowserProxy(sessionId)`
 - `updateBrowserProxy(sessionId, { proxyUrl })` or `{ proxy: { domain, port, username, password } }`
+- `deleteBrowserProxy(sessionId)`
 - `waitForBrowserSession(sessionId, options)`
 - `deleteBrowserSession(sessionId)`
 - `createRun(sessionId, options)`

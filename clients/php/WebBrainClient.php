@@ -98,6 +98,11 @@ final class WebBrainClient
         )['proxy'];
     }
 
+    public function deleteBrowserProxy(string $sessionId): array
+    {
+        return $this->request('DELETE', '/api/browser-sessions/' . self::id($sessionId) . '/proxy')['proxy'];
+    }
+
     public function deleteBrowserSession(string $sessionId): array
     {
         return $this->request('DELETE', '/api/browser-sessions/' . self::id($sessionId))['browser_session'];
