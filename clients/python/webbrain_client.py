@@ -9,6 +9,7 @@ from urllib import error, parse, request
 
 
 TERMINAL_RUN_STATUSES = {"completed", "failed", "aborted"}
+WAIT_RETURN_STATUSES = TERMINAL_RUN_STATUSES | {"needs_user_input"}
 
 
 class WebBrainApiError(RuntimeError):
@@ -127,11 +128,22 @@ class WebBrainClient:
     def abort_run(self, session_id: str, run_id: str):
         return self._request("POST", f"/api/browser-sessions/{self._id(session_id)}/runs/{self._id(run_id)}/abort", {})
 
+    def respond_to_run(self, session_id: str, run_id: str, clarify_id: str, answer: str):
+        if not clarify_id:
+            raise ValueError("clarify_id is required")
+        if answer is None or not str(answer).strip():
+            raise ValueError("answer is required")
+        return self._request(
+            "POST",
+            f"/api/browser-sessions/{self._id(session_id)}/runs/{self._id(run_id)}/responses",
+            {"clarify_id": clarify_id, "answer": str(answer)},
+        )
+
     def wait_for_run(self, session_id: str, run_id: str, *, poll_interval: float = 1.0, timeout: float = 120.0):
         deadline = time.monotonic() + timeout
         while True:
             run = self.get_run(session_id, run_id)
-            if run.get("status") in TERMINAL_RUN_STATUSES:
+            if run.get("status") in WAIT_RETURN_STATUSES:
                 return run
             if time.monotonic() >= deadline:
                 raise WebBrainApiError(f"Run {run_id} did not finish within {timeout} seconds", body=run)

@@ -3171,6 +3171,45 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
     }
   });
 
+  app.post('/api/browser-sessions/:sessionId/runs/:runId/responses', requireAuth, async (req, res, next) => {
+    try {
+      const session = await ownedBrowserSession(req, res);
+      if (!session) return;
+      let run = await store.getCloudRun(req.params.runId);
+      if (!run || run.user_id !== req.auth.user.id || run.browser_session_id !== session.id) {
+        return jsonError(res, 404, 'Cloud run not found');
+      }
+      const clarifyId = String(req.body.clarify_id || req.body.clarifyId || '').trim();
+      const answer = String(req.body.answer ?? '').trim();
+      if (!clarifyId) return jsonError(res, 400, '`clarify_id` is required');
+      if (!answer) return jsonError(res, 400, '`answer` is required');
+      if (!controlChannel.isConnected(session.id)) {
+        return jsonError(res, 409, 'Browser runtime is not connected; this clarification can no longer be answered.');
+      }
+      const current = await controlChannel.send(session.id, 'status', { run_id: run.id });
+      run = await store.updateCloudRun(run.id, normalizeRunSnapshot(current, run));
+      const pendingInput = publicRun(run).pending_input;
+      if (run.status !== 'needs_user_input' || !pendingInput) {
+        return jsonError(res, 409, 'Cloud run is not waiting for user input.');
+      }
+      if (pendingInput.clarify_id !== clarifyId) {
+        return jsonError(res, 409, 'Clarification is no longer pending for this cloud run.', {
+          pending_clarify_id: pendingInput.clarify_id,
+        });
+      }
+      const snapshot = await controlChannel.send(session.id, 'respond', {
+        run_id: run.id,
+        clarify_id: clarifyId,
+        answer,
+      });
+      const updated = await store.updateCloudRun(run.id, normalizeRunSnapshot(snapshot, run));
+      await audit(req, 'cloud_run.respond', 'cloud_run', run.id, { clarify_id: clarifyId });
+      res.json(publicRun(updated));
+    } catch (e) {
+      next(e);
+    }
+  });
+
   app.post('/api/browser-sessions/:sessionId/runs/:runId/abort', requireAuth, async (req, res, next) => {
     try {
       const session = await ownedBrowserSession(req, res);
@@ -3218,7 +3257,7 @@ async function waitForRun({ run, session, store, controlChannel, config, timeout
   while (Date.now() < deadline) {
     const snapshot = await controlChannel.send(session.id, 'status', { run_id: latest.id });
     latest = await store.updateCloudRun(latest.id, normalizeRunSnapshot(snapshot, latest));
-    if (TERMINAL_RUN_STATUSES.has(latest.status)) return latest;
+    if (TERMINAL_RUN_STATUSES.has(latest.status) || latest.status === 'needs_user_input') return latest;
     await new Promise(resolve => setTimeout(resolve, config.runPollIntervalMs));
   }
   return latest;

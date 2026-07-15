@@ -129,6 +129,19 @@ export class DropletControlClient {
       if (!res.ok) throw new Error(`Sidecar status failed: ${res.status} ${await res.text()}`);
       return await readJson(res);
     }
+    if (action === 'respond') {
+      const runId = payload.run_id || payload.runId;
+      const res = await fetch(`${this.sidecarBase}/runs/${encodeURIComponent(runId)}/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          clarify_id: payload.clarify_id ?? payload.clarifyId,
+          answer: payload.answer,
+        }),
+      });
+      if (!res.ok) throw Object.assign(new Error(`Sidecar response failed: ${res.status} ${await res.text()}`), { status: res.status });
+      return await readJson(res);
+    }
     if (action === 'abort') {
       const runId = payload.run_id || payload.runId;
       const res = await fetch(`${this.sidecarBase}/runs/${encodeURIComponent(runId)}/abort`, { method: 'POST' });

@@ -1,4 +1,5 @@
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'aborted']);
+const WAIT_RETURN_STATUSES = new Set([...TERMINAL_RUN_STATUSES, 'needs_user_input']);
 
 export class WebBrainApiError extends Error {
   constructor(message, { status = 0, body = null } = {}) {
@@ -112,11 +113,20 @@ export class WebBrainClient {
     return await this.request('POST', `/api/browser-sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/abort`, {});
   }
 
+  async respondToRun(sessionId, runId, clarifyId, answer) {
+    if (!clarifyId) throw new TypeError('clarifyId is required');
+    if (answer === undefined || answer === null || String(answer).trim() === '') throw new TypeError('answer is required');
+    return await this.request('POST', `/api/browser-sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/responses`, {
+      clarify_id: clarifyId,
+      answer: String(answer),
+    });
+  }
+
   async waitForRun(sessionId, runId, { pollIntervalMs = 1000, timeoutMs = 120000 } = {}) {
     const deadline = Date.now() + timeoutMs;
     while (true) {
       const run = await this.getRun(sessionId, runId);
-      if (TERMINAL_RUN_STATUSES.has(run.status)) return run;
+      if (WAIT_RETURN_STATUSES.has(run.status)) return run;
       if (Date.now() >= deadline) {
         throw new WebBrainApiError(`Run ${runId} did not finish within ${timeoutMs}ms`, { body: run });
       }

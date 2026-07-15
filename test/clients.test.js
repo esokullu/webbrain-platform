@@ -7,6 +7,7 @@ import { WebBrainApiError, WebBrainClient } from '../clients/node/webbrain-clien
 test('Node.js client sends authenticated session and run requests', async () => {
   const requests = [];
   let runPolls = 0;
+  let runResponded = false;
   const server = http.createServer(async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
@@ -49,9 +50,18 @@ test('Node.js client sends authenticated session and run requests', async () => 
     }
     if (req.method === 'GET' && req.url === '/api/browser-sessions/bs_test/runs/run_test') {
       runPolls += 1;
-      res.end(JSON.stringify(runPolls < 2
-        ? { run_id: 'run_test', status: 'running' }
-        : { run_id: 'run_test', status: 'completed', result: 'Example Domain' }));
+      res.end(JSON.stringify(runResponded
+        ? { run_id: 'run_test', status: 'completed', result: 'Example Domain' }
+        : {
+            run_id: 'run_test',
+            status: 'needs_user_input',
+            pending_input: { clarify_id: 'clr_1', question: 'Continue?', options: ['yes', 'no'] },
+          }));
+      return;
+    }
+    if (req.method === 'POST' && req.url === '/api/browser-sessions/bs_test/runs/run_test/responses') {
+      runResponded = true;
+      res.end(JSON.stringify({ run_id: 'run_test', status: 'running', pending_input: null }));
       return;
     }
     res.statusCode = 404;
@@ -81,6 +91,11 @@ test('Node.js client sends authenticated session and run requests', async () => 
       tabId: 42,
       outputSchema: { title: 'string' },
     });
+    const paused = await client.waitForRun(session.id, run.run_id, { pollIntervalMs: 1, timeoutMs: 1000 });
+    assert.equal(paused.status, 'needs_user_input');
+    assert.equal(paused.pending_input.clarify_id, 'clr_1');
+    const resumed = await client.respondToRun(session.id, run.run_id, paused.pending_input.clarify_id, 'yes');
+    assert.equal(resumed.status, 'running');
     const finished = await client.waitForRun(session.id, run.run_id, { pollIntervalMs: 1, timeoutMs: 1000 });
     assert.equal(finished.result, 'Example Domain');
     assert.equal(requests.every(entry => entry.authorization === 'Bearer wbp_test'), true);
@@ -91,6 +106,11 @@ test('Node.js client sends authenticated session and run requests', async () => 
       output_schema: { title: 'string' },
     });
     assert.deepEqual(requests.find(entry => entry.method === 'DELETE' && entry.path.endsWith('/proxy')).body, null);
+    assert.deepEqual(requests.find(entry => entry.path.endsWith('/responses')).body, {
+      clarify_id: 'clr_1',
+      answer: 'yes',
+    });
+    assert.equal(runPolls, 2);
 
     await assert.rejects(
       () => client.getBrowserSession('missing'),
@@ -104,10 +124,10 @@ test('Node.js client sends authenticated session and run requests', async () => 
 test('Python and PHP clients expose the shared browser automation operations', async () => {
   const python = await readFile(new URL('../clients/python/webbrain_client.py', import.meta.url), 'utf8');
   const php = await readFile(new URL('../clients/php/WebBrainClient.php', import.meta.url), 'utf8');
-  for (const method of ['create_browser_session', 'update_browser_session', 'get_browser_proxy', 'update_browser_proxy', 'delete_browser_proxy', 'wait_for_browser_session', 'create_run', 'get_run', 'abort_run', 'wait_for_run']) {
+  for (const method of ['create_browser_session', 'update_browser_session', 'get_browser_proxy', 'update_browser_proxy', 'delete_browser_proxy', 'wait_for_browser_session', 'create_run', 'get_run', 'respond_to_run', 'abort_run', 'wait_for_run']) {
     assert.match(python, new RegExp(`def ${method}\\(`));
   }
-  for (const method of ['createBrowserSession', 'updateBrowserSession', 'getBrowserProxy', 'updateBrowserProxy', 'deleteBrowserProxy', 'waitForBrowserSession', 'createRun', 'getRun', 'abortRun', 'waitForRun']) {
+  for (const method of ['createBrowserSession', 'updateBrowserSession', 'getBrowserProxy', 'updateBrowserProxy', 'deleteBrowserProxy', 'waitForBrowserSession', 'createRun', 'getRun', 'respondToRun', 'abortRun', 'waitForRun']) {
     assert.match(php, new RegExp(`function ${method}\\(`));
   }
   assert.match(python, /Authorization.*Bearer/);

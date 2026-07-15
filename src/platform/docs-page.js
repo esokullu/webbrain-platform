@@ -341,7 +341,7 @@ export function docsPage() {
         <section class="docs-section" id="runs">
           <p class="section-kicker">Automation</p>
           <h2>Run a task</h2>
-          <p>Runs are asynchronous by default and return <span class="inline-code">202 Accepted</span> with a <span class="inline-code">run_id</span>. Poll the run endpoint, or set <span class="inline-code">wait: true</span> for a blocking request.</p>
+          <p>Runs are asynchronous by default and return <span class="inline-code">202 Accepted</span> with a <span class="inline-code">run_id</span>. Poll the run endpoint, or set <span class="inline-code">wait: true</span> to wait until completion or until WebBrain needs user input.</p>
           <table class="field-table">
             <thead><tr><th>Field</th><th>Required</th><th>Purpose</th></tr></thead>
             <tbody>
@@ -355,6 +355,7 @@ export function docsPage() {
           <div class="endpoint-list">
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/runs</code><span>Start a run.</span></div>
             <div class="endpoint"><span class="method">GET</span><code>/api/browser-sessions/:sessionId/runs/:runId</code><span>Read a run.</span></div>
+            <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/runs/:runId/responses</code><span>Answer its pending <code>clarify_id</code>.</span></div>
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/runs/:runId/abort</code><span>Abort a run.</span></div>
           </div>
         </section>
@@ -368,9 +369,9 @@ export function docsPage() {
         <section class="docs-section" id="statuses">
           <p class="section-kicker">Run state</p>
           <h2>Know when it is done</h2>
-          <p>A terminal response includes <span class="inline-code">result</span>, <span class="inline-code">summary</span>, <span class="inline-code">final_url</span>, and any failure detail in <span class="inline-code">error</span>.</p>
+          <p>A <span class="inline-code">needs_user_input</span> response includes <span class="inline-code">pending_input.clarify_id</span>; post that ID and an answer to the responses endpoint to resume. A terminal response includes <span class="inline-code">result</span>, <span class="inline-code">summary</span>, <span class="inline-code">final_url</span>, and any failure detail in <span class="inline-code">error</span>.</p>
           <div class="status-row">
-            <span class="status">running</span><span class="status completed">completed</span><span class="status failed">failed</span><span class="status">aborting</span><span class="status aborted">aborted</span>
+            <span class="status">running</span><span class="status">needs_user_input</span><span class="status completed">completed</span><span class="status failed">failed</span><span class="status">aborting</span><span class="status aborted">aborted</span>
           </div>
         </section>
 

@@ -272,7 +272,8 @@ curl -sS \
   -H "Authorization: Bearer $WEBBRAIN_API_KEY"
 ```
 
-Run statuses are `running`, `completed`, `failed`, `aborting`, and `aborted`.
+Run statuses are `running`, `needs_user_input`, `completed`, `failed`,
+`aborting`, and `aborted`.
 Terminal responses put the final answer in `result`, any human-readable detail
 in `summary`, the active page in `final_url`, and failure detail in `error`.
 Every run response also includes the newest 200 ordered progress events in
@@ -299,8 +300,44 @@ curl -sS -X POST \
   }'
 ```
 
-A completed blocking run returns `200`. If the wait deadline is reached while
-the run is still active, the response is `202` and can be polled normally.
+A completed blocking run returns `200`. A run that needs an answer returns
+`202` immediately with status `needs_user_input`. If the wait deadline is
+reached while the run is still active, the response is also `202` and can be
+polled normally.
+
+### Respond to requested input
+
+Clarification, permission, and form-submit prompts pause the run with
+`needs_user_input`. The response includes a normalized `pending_input` object
+with its `clarify_id`, question, choices, and any permission or submit details:
+
+```json
+{
+  "status": "needs_user_input",
+  "pending_input": {
+    "clarify_id": "clr_abc123",
+    "question": "Which account should I use?",
+    "options": ["Personal", "Work"]
+  }
+}
+```
+
+Answer the exact pending clarification to resume the same run:
+
+```bash
+curl -sS -X POST \
+  "https://webbrain.cloud/api/browser-sessions/$WEBBRAIN_SESSION_ID/runs/$WEBBRAIN_RUN_ID/responses" \
+  -H "Authorization: Bearer $WEBBRAIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "clarify_id": "clr_abc123",
+    "answer": "Work"
+  }'
+```
+
+A valid response returns the refreshed run, normally back in `running` state.
+Stale, mismatched, or already-answered clarification IDs return `409`. Answers
+are delivered to the active agent but are not copied into run progress logs.
 
 ### Structured output
 

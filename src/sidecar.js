@@ -6,6 +6,7 @@ const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 17373;
 const DEFAULT_WAIT_TIMEOUT_MS = 120000;
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'aborted']);
+const WAIT_RETURN_STATUSES = new Set([...TERMINAL_STATUSES, 'needs_user_input']);
 
 function json(res, status, body) {
   const data = JSON.stringify(body);
@@ -31,6 +32,7 @@ function normalizeRun(snapshot, sessionId = null) {
     status: snapshot.status,
     session_id: sessionId || snapshot.sessionId || snapshot.session_id || null,
     tab_id: snapshot.tabId ?? snapshot.tab_id ?? null,
+    pending_input: snapshot.pendingInput || snapshot.pending_input || null,
     result: snapshot.result,
     summary: snapshot.summary || '',
     content: snapshot.content || '',
@@ -46,12 +48,16 @@ function normalizeRun(snapshot, sessionId = null) {
 function route(method, pathname) {
   let m = /^\/runs\/([^/]+)\/abort$/.exec(pathname);
   if (method === 'POST' && m) return { kind: 'abort', runId: m[1], sessionId: null };
+  m = /^\/runs\/([^/]+)\/responses$/.exec(pathname);
+  if (method === 'POST' && m) return { kind: 'respond', runId: m[1], sessionId: null };
   m = /^\/runs\/([^/]+)$/.exec(pathname);
   if (method === 'GET' && m) return { kind: 'status', runId: m[1], sessionId: null };
   if (method === 'POST' && pathname === '/runs') return { kind: 'create', sessionId: null };
 
   m = /^\/api\/browser-sessions\/([^/]+)\/runs\/([^/]+)\/abort$/.exec(pathname);
   if (method === 'POST' && m) return { kind: 'abort', sessionId: m[1], runId: m[2] };
+  m = /^\/api\/browser-sessions\/([^/]+)\/runs\/([^/]+)\/responses$/.exec(pathname);
+  if (method === 'POST' && m) return { kind: 'respond', sessionId: m[1], runId: m[2] };
   m = /^\/api\/browser-sessions\/([^/]+)\/runs\/([^/]+)$/.exec(pathname);
   if (method === 'GET' && m) return { kind: 'status', sessionId: m[1], runId: m[2] };
   m = /^\/api\/browser-sessions\/([^/]+)\/runs$/.exec(pathname);
@@ -97,7 +103,7 @@ export function createSidecarServer(options = {}) {
       const response = await sendExtension('cloud_status', { runId });
       latest = normalizeRun(response, latest?.session_id || null);
       if (latest?.run_id) runs.set(latest.run_id, latest);
-      if (latest && TERMINAL_STATUSES.has(latest.status)) return latest;
+      if (latest && WAIT_RETURN_STATUSES.has(latest.status)) return latest;
       await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
     }
     return latest;
@@ -154,6 +160,17 @@ export function createSidecarServer(options = {}) {
     return run;
   }
 
+  async function respondRun(runId, sessionId, body) {
+    const clarifyId = String(body.clarify_id || body.clarifyId || '').trim();
+    const answer = String(body.answer ?? '').trim();
+    if (!clarifyId) throw Object.assign(new Error('`clarify_id` is required.'), { status: 400 });
+    if (!answer) throw Object.assign(new Error('`answer` is required.'), { status: 400 });
+    const response = await sendExtension('cloud_respond', { runId, clarifyId, answer });
+    const run = normalizeRun(response, sessionId);
+    runs.set(run.run_id, run);
+    return run;
+  }
+
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, `http://${req.headers.host || `${host}:${port}`}`);
@@ -176,6 +193,10 @@ export function createSidecarServer(options = {}) {
       }
       if (r.kind === 'status') {
         json(res, 200, await statusRun(r.runId, r.sessionId));
+        return;
+      }
+      if (r.kind === 'respond') {
+        json(res, 200, await respondRun(r.runId, r.sessionId, await readJson(req)));
         return;
       }
       if (r.kind === 'abort') {
@@ -202,15 +223,16 @@ export function createSidecarServer(options = {}) {
       const p = pending.get(msg.id);
       pending.delete(msg.id);
       clearTimeout(p.timer);
-      if (msg.ok === false) p.reject(new Error(msg.error || 'Extension command failed'));
-      else p.resolve(msg.result);
+      if (msg.ok === false) {
+        p.reject(Object.assign(new Error(msg.error || 'Extension command failed'), { status: msg.status || 500 }));
+      } else p.resolve(msg.result);
     });
     ws.on('close', () => {
       if (extensionSocket !== ws) return;
       extensionSocket = null;
       const completedAt = new Date().toISOString();
       for (const run of runs.values()) {
-        if (!['running', 'aborting'].includes(run.status)) continue;
+        if (!['running', 'needs_user_input', 'aborting'].includes(run.status)) continue;
         run.status = run.status === 'aborting' ? 'aborted' : 'failed';
         run.error = run.status === 'aborted'
           ? 'Run aborted when the extension bridge disconnected.'

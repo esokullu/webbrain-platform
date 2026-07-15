@@ -29,14 +29,26 @@ test('sidecar run lifecycle proxies cloud_run/status/abort to extension bridge',
     if (msg.action === 'cloud_run') {
       assert.equal(msg.payload.tabId, 42);
       assert.equal(msg.payload.apiMutationsAllowed, true);
-      statuses.set('run_test', {
-        runId: 'run_test',
+      const runId = msg.payload.task === 'Ask for input' ? 'run_input' : 'run_test';
+      statuses.set(runId, {
+        runId,
         status: 'running',
         tabId: 7,
         task: msg.payload.task,
         updates: [],
       });
-      ws.send(JSON.stringify({ id: msg.id, ok: true, result: statuses.get('run_test') }));
+      ws.send(JSON.stringify({ id: msg.id, ok: true, result: statuses.get(runId) }));
+      if (runId === 'run_input') {
+        setTimeout(() => {
+          statuses.set(runId, {
+            ...statuses.get(runId),
+            status: 'needs_user_input',
+            pendingInput: { clarifyId: 'clr_1', question: 'Continue?', options: ['yes', 'no'] },
+            updates: [{ seq: 1, type: 'clarify', data: { clarifyId: 'clr_1', question: 'Continue?', options: ['yes', 'no'] } }],
+          });
+        }, 5);
+        return;
+      }
       setTimeout(() => {
         statuses.set('run_test', {
           ...statuses.get('run_test'),
@@ -53,6 +65,13 @@ test('sidecar run lifecycle proxies cloud_run/status/abort to extension bridge',
       return;
     }
     if (msg.action === 'cloud_status') {
+      ws.send(JSON.stringify({ id: msg.id, ok: true, result: statuses.get(msg.payload.runId) }));
+      return;
+    }
+    if (msg.action === 'cloud_respond') {
+      assert.deepEqual(msg.payload, { runId: 'run_input', clarifyId: 'clr_1', answer: 'yes' });
+      const current = statuses.get(msg.payload.runId);
+      statuses.set(msg.payload.runId, { ...current, status: 'running', pendingInput: null });
       ws.send(JSON.stringify({ id: msg.id, ok: true, result: statuses.get(msg.payload.runId) }));
       return;
     }
@@ -93,6 +112,32 @@ test('sidecar run lifecycle proxies cloud_run/status/abort to extension bridge',
   assert.deepEqual(waited.body.result, { title: 'Done' });
   assert.deepEqual(waited.body.updates.map(update => update.seq), [1, 2]);
   assert.equal(waited.body.updates[1].data.name, 'read_page');
+
+  const paused = await request(base, '/runs', {
+    method: 'POST',
+    body: JSON.stringify({
+      task: 'Ask for input',
+      api_mutations_allowed: true,
+      tab_id: 42,
+      wait: true,
+      timeout_ms: 1000,
+    }),
+  });
+  assert.equal(paused.status, 202);
+  assert.equal(paused.body.status, 'needs_user_input');
+  assert.equal(paused.body.pending_input.clarifyId, 'clr_1');
+  const invalidResponse = await request(base, '/runs/run_input/responses', {
+    method: 'POST',
+    body: JSON.stringify({ clarify_id: 'clr_1' }),
+  });
+  assert.equal(invalidResponse.status, 400);
+  const resumed = await request(base, '/runs/run_input/responses', {
+    method: 'POST',
+    body: JSON.stringify({ clarify_id: 'clr_1', answer: 'yes' }),
+  });
+  assert.equal(resumed.status, 200);
+  assert.equal(resumed.body.status, 'running');
+  assert.equal(resumed.body.pending_input, null);
 
   const aborted = await request(base, '/api/browser-sessions/bs_1/runs/run_test/abort', { method: 'POST' });
   assert.equal(aborted.status, 200);

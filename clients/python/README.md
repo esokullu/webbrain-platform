@@ -35,6 +35,14 @@ run = client.create_run(
     "Open example.com and return the page title",
 )
 finished = client.wait_for_run(ready["id"], run["run_id"])
+if finished["status"] == "needs_user_input":
+    client.respond_to_run(
+        ready["id"],
+        run["run_id"],
+        finished["pending_input"]["clarify_id"],
+        "Work",
+    )
+    finished = client.wait_for_run(ready["id"], run["run_id"])
 
 print(finished["result"])
 ```
@@ -62,6 +70,7 @@ run = client.create_run(
 - `delete_browser_session(session_id)`
 - `create_run(session_id, task, ...)`
 - `get_run(session_id, run_id)`
+- `respond_to_run(session_id, run_id, clarify_id, answer)`
 - `wait_for_run(session_id, run_id, ...)`
 - `abort_run(session_id, run_id)`
 - `create_connect_token(session_id, **options)`

@@ -155,12 +155,27 @@ final class WebBrainClient
         return $this->request('POST', '/api/browser-sessions/' . self::id($sessionId) . '/runs/' . self::id($runId) . '/abort', []);
     }
 
+    public function respondToRun(string $sessionId, string $runId, string $clarifyId, string $answer): array
+    {
+        if ($clarifyId === '') {
+            throw new InvalidArgumentException('clarifyId is required');
+        }
+        if (trim($answer) === '') {
+            throw new InvalidArgumentException('answer is required');
+        }
+        return $this->request(
+            'POST',
+            '/api/browser-sessions/' . self::id($sessionId) . '/runs/' . self::id($runId) . '/responses',
+            ['clarify_id' => $clarifyId, 'answer' => $answer],
+        );
+    }
+
     public function waitForRun(string $sessionId, string $runId, float $pollInterval = 1.0, float $timeout = 120.0): array
     {
         $deadline = microtime(true) + $timeout;
         do {
             $run = $this->getRun($sessionId, $runId);
-            if (in_array($run['status'] ?? '', ['completed', 'failed', 'aborted'], true)) {
+            if (in_array($run['status'] ?? '', ['completed', 'failed', 'aborted', 'needs_user_input'], true)) {
                 return $run;
             }
             if (microtime(true) >= $deadline) {

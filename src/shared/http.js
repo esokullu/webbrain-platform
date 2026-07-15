@@ -24,6 +24,12 @@ export function publicBrowserSession(row) {
 
 export function publicRun(row) {
   if (!row) return null;
+  const updates = Array.isArray(row.updates) ? row.updates : [];
+  let pendingInput = row.pending_input || row.pendingInput || null;
+  if (row.status === 'needs_user_input' && !pendingInput) {
+    pendingInput = [...updates].reverse().find(update => update?.type === 'clarify')?.data || null;
+  }
+  const clarifyId = pendingInput?.clarify_id || pendingInput?.clarifyId || null;
   return {
     run_id: row.id || row.run_id,
     status: row.status,
@@ -32,7 +38,15 @@ export function publicRun(row) {
     summary: row.summary || '',
     final_url: row.final_url || '',
     error: row.error || '',
-    updates: Array.isArray(row.updates) ? row.updates : [],
+    pending_input: row.status === 'needs_user_input' && clarifyId ? {
+      clarify_id: clarifyId,
+      question: pendingInput.question || '',
+      options: Array.isArray(pendingInput.options) ? pendingInput.options : [],
+      reason: pendingInput.reason || '',
+      permission: pendingInput.permission || null,
+      submit_confirmation: pendingInput.submit_confirmation || pendingInput.submitConfirmation || null,
+    } : null,
+    updates,
     created_at: row.created_at || null,
     updated_at: row.updated_at || null,
     completed_at: row.completed_at || null,

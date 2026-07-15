@@ -35,6 +35,15 @@ $run = $client->createRun(
     'Open example.com and return the page title',
 );
 $finished = $client->waitForRun($ready['id'], $run['run_id']);
+if ($finished['status'] === 'needs_user_input') {
+    $client->respondToRun(
+        $ready['id'],
+        $run['run_id'],
+        $finished['pending_input']['clarify_id'],
+        'Work',
+    );
+    $finished = $client->waitForRun($ready['id'], $run['run_id']);
+}
 
 print_r($finished['result']);
 ```
@@ -63,6 +72,7 @@ $run = $client->createRun($session['id'], 'Return the title and visible links', 
 - `deleteBrowserSession($sessionId)`
 - `createRun($sessionId, $task, $options)`
 - `getRun($sessionId, $runId)`
+- `respondToRun($sessionId, $runId, $clarifyId, $answer)`
 - `waitForRun($sessionId, $runId, ...)`
 - `abortRun($sessionId, $runId)`
 - `createConnectToken($sessionId, $options)`

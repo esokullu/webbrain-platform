@@ -87,14 +87,15 @@ test('droplet control exposes proxy status and verified live updates', async () 
   }]);
 });
 
-test('droplet control forwards the hidden API mutation allowance for runs', async () => {
-  let receivedBody;
+test('droplet control forwards run metadata and clarification responses', async () => {
+  const received = [];
   const sidecar = http.createServer((req, res) => {
     const chunks = [];
     req.on('data', chunk => chunks.push(chunk));
     req.on('end', () => {
-      receivedBody = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-      res.writeHead(202, { 'content-type': 'application/json' });
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      received.push({ method: req.method, url: req.url, body });
+      res.writeHead(req.url.endsWith('/responses') ? 200 : 202, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ run_id: 'run_test', status: 'running' }));
     });
   });
@@ -113,8 +114,19 @@ test('droplet control forwards the hidden API mutation allowance for runs', asyn
     });
 
     assert.equal(started.run_id, 'run_test');
-    assert.equal(receivedBody.task, 'Open Google');
-    assert.equal(receivedBody.api_mutations_allowed, true);
+    assert.equal(received[0].body.task, 'Open Google');
+    assert.equal(received[0].body.api_mutations_allowed, true);
+    const resumed = await client.handleCommand('respond', {
+      run_id: 'run_test',
+      clarify_id: 'clr_1',
+      answer: 'Continue',
+    });
+    assert.equal(resumed.status, 'running');
+    assert.deepEqual(received[1], {
+      method: 'POST',
+      url: '/runs/run_test/responses',
+      body: { clarify_id: 'clr_1', answer: 'Continue' },
+    });
   } finally {
     await new Promise((resolve, reject) => sidecar.close(error => error ? reject(error) : resolve()));
   }

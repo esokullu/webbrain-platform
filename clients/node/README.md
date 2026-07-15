@@ -36,7 +36,16 @@ await client.updateBrowserProxy(ready.id, {
 const run = await client.createRun(ready.id, {
   task: 'Open example.com and return the page title',
 });
-const finished = await client.waitForRun(ready.id, run.run_id);
+let finished = await client.waitForRun(ready.id, run.run_id);
+if (finished.status === 'needs_user_input') {
+  finished = await client.respondToRun(
+    ready.id,
+    run.run_id,
+    finished.pending_input.clarify_id,
+    'Work',
+  );
+  finished = await client.waitForRun(ready.id, run.run_id);
+}
 
 console.log(finished.result);
 ```
@@ -66,6 +75,7 @@ const run = await client.createRun(session.id, {
 - `deleteBrowserSession(sessionId)`
 - `createRun(sessionId, options)`
 - `getRun(sessionId, runId)`
+- `respondToRun(sessionId, runId, clarifyId, answer)`
 - `waitForRun(sessionId, runId, options)`
 - `abortRun(sessionId, runId)`
 - `createConnectToken(sessionId, options)`

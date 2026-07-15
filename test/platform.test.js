@@ -256,11 +256,40 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
       assert.equal(msg.payload.api_mutations_allowed, true);
       assert.equal(msg.payload.tab_id ?? null, msg.payload.task === 'Long task' ? 91 : null);
       const runId = `run_cloud_${++runSeq}`;
-      statuses.set(runId, { run_id: runId, status: 'running' });
+      statuses.set(runId, { run_id: runId, status: 'running', task: msg.payload.task });
       ws.send(JSON.stringify({ id: msg.id, ok: true, result: statuses.get(runId) }));
       return;
     }
     if (msg.action === 'status') {
+      const current = statuses.get(msg.payload.run_id);
+      if (current?.task === 'Interactive task') {
+        if (current.status === 'running' && current.responded) {
+          statuses.set(msg.payload.run_id, {
+            ...current,
+            status: 'completed',
+            result: 'Continued',
+            completed_at: '2026-07-14T10:00:04.000Z',
+          });
+        } else if (current.status === 'running') {
+          statuses.set(msg.payload.run_id, {
+            ...current,
+            status: 'needs_user_input',
+            pending_input: {
+              clarifyId: 'clr_account',
+              question: 'Which account?',
+              options: ['Personal', 'Work'],
+            },
+            updates: [{
+              seq: 1,
+              type: 'clarify',
+              data: { clarifyId: 'clr_account', question: 'Which account?', options: ['Personal', 'Work'] },
+              ts: '2026-07-14T10:00:03.000Z',
+            }],
+          });
+        }
+        ws.send(JSON.stringify({ id: msg.id, ok: true, result: statuses.get(msg.payload.run_id) }));
+        return;
+      }
       statusPolls += 1;
       if (statusPolls >= 2) {
         statuses.set(msg.payload.run_id, {
@@ -284,6 +313,24 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
         });
       }
       ws.send(JSON.stringify({ id: msg.id, ok: true, result: statuses.get(msg.payload.run_id) }));
+      return;
+    }
+    if (msg.action === 'respond') {
+      assert.equal(msg.payload.clarify_id, 'clr_account');
+      assert.equal(msg.payload.answer, 'Work');
+      const current = statuses.get(msg.payload.run_id);
+      const next = {
+        ...current,
+        status: 'running',
+        responded: true,
+        pending_input: null,
+        updates: [
+          ...(current.updates || []),
+          { seq: 2, type: 'clarify_response', data: { clarifyId: 'clr_account', source: 'cloud_api' }, ts: '2026-07-14T10:00:03.500Z' },
+        ],
+      };
+      statuses.set(msg.payload.run_id, next);
+      ws.send(JSON.stringify({ id: msg.id, ok: true, result: next }));
       return;
     }
     if (msg.action === 'abort') {
@@ -340,6 +387,67 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   assert.deepEqual(waited.body.updates.map(update => update.seq), [1, 2, 3]);
   assert.equal((await ctx.store.getCloudRun(waited.body.run_id)).updates[1].data.name, 'read_page');
 
+  const needsInput = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs`, {
+    method: 'POST',
+    headers: { cookie },
+    body: JSON.stringify({ task: 'Interactive task', wait: true, timeout_ms: 1000 }),
+  });
+  assert.equal(needsInput.status, 202);
+  assert.equal(needsInput.body.status, 'needs_user_input');
+  assert.deepEqual(needsInput.body.pending_input, {
+    clarify_id: 'clr_account',
+    question: 'Which account?',
+    options: ['Personal', 'Work'],
+    reason: '',
+    permission: null,
+    submit_confirmation: null,
+  });
+
+  const forbiddenResponse = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs/${needsInput.body.run_id}/responses`, {
+    method: 'POST',
+    headers: { cookie: otherCookie },
+    body: JSON.stringify({ clarify_id: 'clr_account', answer: 'Work' }),
+  });
+  assert.equal(forbiddenResponse.status, 404);
+
+  const emptyResponse = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs/${needsInput.body.run_id}/responses`, {
+    method: 'POST',
+    headers: { cookie },
+    body: JSON.stringify({ clarify_id: 'clr_account', answer: '' }),
+  });
+  assert.equal(emptyResponse.status, 400);
+
+  const staleResponse = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs/${needsInput.body.run_id}/responses`, {
+    method: 'POST',
+    headers: { cookie },
+    body: JSON.stringify({ clarify_id: 'clr_stale', answer: 'Work' }),
+  });
+  assert.equal(staleResponse.status, 409);
+  assert.equal(staleResponse.body.pending_clarify_id, 'clr_account');
+
+  const responded = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs/${needsInput.body.run_id}/responses`, {
+    method: 'POST',
+    headers: { cookie },
+    body: JSON.stringify({ clarify_id: 'clr_account', answer: 'Work' }),
+  });
+  assert.equal(responded.status, 200);
+  assert.equal(responded.body.status, 'running');
+  assert.equal(responded.body.pending_input, null);
+  assert.deepEqual(responded.body.updates.at(-1), {
+    seq: 2,
+    type: 'clarify_response',
+    data: { clarifyId: 'clr_account', source: 'cloud_api' },
+    ts: '2026-07-14T10:00:03.500Z',
+  });
+  assert.equal(ctx.store.auditLogs.some(entry => entry.action === 'cloud_run.respond'), true);
+
+  const continued = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs/${needsInput.body.run_id}`, {
+    headers: { cookie },
+  });
+  assert.equal(continued.status, 200);
+  assert.equal(continued.body.status, 'completed');
+  assert.equal(continued.body.result, 'Continued');
+
   statusPolls = 0;
   const created = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs`, {
     method: 'POST',
@@ -388,10 +496,17 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
 
   const olderLogs = await request(ctx.base, '/api/runs?limit=1&offset=1', { headers: { cookie } });
   assert.equal(olderLogs.status, 200);
-  assert.equal(olderLogs.body.runs[0].run_id, waited.body.run_id);
-  assert.equal(olderLogs.body.runs[0].task, 'Summarize this page');
-  assert.equal(olderLogs.body.runs[0].update_count, 3);
-  assert.equal(olderLogs.body.has_more, false);
+  assert.equal(olderLogs.body.runs[0].run_id, needsInput.body.run_id);
+  assert.equal(olderLogs.body.runs[0].task, 'Interactive task');
+  assert.equal(olderLogs.body.runs[0].update_count, 2);
+  assert.equal(olderLogs.body.has_more, true);
+
+  const oldestLogs = await request(ctx.base, '/api/runs?limit=1&offset=2', { headers: { cookie } });
+  assert.equal(oldestLogs.status, 200);
+  assert.equal(oldestLogs.body.runs[0].run_id, waited.body.run_id);
+  assert.equal(oldestLogs.body.runs[0].task, 'Summarize this page');
+  assert.equal(oldestLogs.body.runs[0].update_count, 3);
+  assert.equal(oldestLogs.body.has_more, false);
 
   const otherLogs = await request(ctx.base, '/api/runs', { headers: { cookie: otherCookie } });
   assert.equal(otherLogs.status, 200);
@@ -786,6 +901,8 @@ test('public API documentation provides accessible REST and client tabs', async 
     assert.match(res.text, /class="tok-variable"/);
     assert.match(res.text, /class="tok-function"/);
     assert.match(res.text, /\/api\/browser-sessions\/:sessionId\/runs/);
+    assert.match(res.text, /\/api\/browser-sessions\/:sessionId\/runs\/:runId\/responses/);
+    assert.match(res.text, /needs_user_input/);
     assert.match(res.text, /PATCH[\s\S]*\/api\/browser-sessions\/:sessionId/);
     assert.match(res.text, /tree\/main\/clients\/node/);
     assert.match(res.text, /tree\/main\/clients\/python/);
