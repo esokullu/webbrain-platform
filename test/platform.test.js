@@ -462,6 +462,7 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     const res = await requestText(ctx.base, '/', { headers: { cookie } });
     assert.equal(res.status, 200);
     assert.match(res.text, /<span class="brand-name">WebBrain<\/span><span class="brand-domain">\.cloud/);
+    assert.match(res.text, /<link rel="icon" type="image\/png" href="https:\/\/webbrain\.one\/logo-github\.png">/);
     assert.match(res.text, /--bg: #f7f1e6/);
     assert.match(res.text, /Browser sessions/);
     assert.match(res.text, />Connect</);
@@ -586,7 +587,7 @@ test('login page uses the WebBrain visual identity', async () => {
     const res = await requestText(ctx.base, '/');
     assert.equal(res.status, 200);
     assert.match(res.text, /WebBrain<span class="brand-domain">\.cloud/);
-    assert.match(res.text, /https:\/\/webbrain\.one\/logo-github\.png/);
+    assert.match(res.text, /<link rel="icon" type="image\/png" href="https:\/\/webbrain\.one\/logo-github\.png">/);
     assert.match(res.text, /--accent: #5b52e8/);
     assert.match(res.text, /Your AI browser/);
     assert.match(res.text, /Create account/);
@@ -614,6 +615,7 @@ test('public API documentation provides accessible REST and client tabs', async 
   try {
     const res = await requestText(ctx.base, '/docs');
     assert.equal(res.status, 200);
+    assert.match(res.text, /<link rel="icon" type="image\/png" href="https:\/\/webbrain\.one\/logo-github\.png">/);
     assert.match(res.text, /One browser[\s\S]*Four ways to drive it/);
     assert.match(res.text, /role="tablist"/);
     assert.match(res.text, /data-client="rest"/);

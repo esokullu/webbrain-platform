@@ -70,6 +70,7 @@ function loginPage(error = '', registrationEnabled = false) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/png" href="https://webbrain.one/logo-github.png">
   <title>WebBrain Cloud</title>
   <style>
     :root {
@@ -176,6 +177,7 @@ function dashboardPage(user) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/png" href="https://webbrain.one/logo-github.png">
   <title>WebBrain Cloud</title>
   <style>
     :root {

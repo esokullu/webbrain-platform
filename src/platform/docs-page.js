@@ -136,6 +136,7 @@ export function docsPage() {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="WebBrain Cloud browser automation API documentation and client examples for REST, Node.js, Python, and PHP.">
+  <link rel="icon" type="image/png" href="https://webbrain.one/logo-github.png">
   <title>API documentation · WebBrain Cloud</title>
   <style>
     :root {
