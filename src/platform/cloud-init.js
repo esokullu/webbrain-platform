@@ -54,7 +54,7 @@ write_files:
   - path: /etc/opt/chrome_for_testing/policies/managed/webbrain.json
     permissions: '0644'
     content: |
-      {"ExtensionSettings":{"${extensionId}":{"installation_mode":"allowed","toolbar_pin":"default_pinned"}}}
+      {"ExtensionSettings":{"${extensionId}":{"installation_mode":"allowed","toolbar_pin":"force_pinned"}}}
   - path: /etc/webbrain-droplet.env
     permissions: '0600'
     content: |

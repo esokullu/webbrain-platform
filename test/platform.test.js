@@ -494,6 +494,7 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /const connectingSessionIds = new Set\(\)/);
     assert.match(res.text, /connectBtn\.textContent = isConnected \? 'Disconnect'/);
     assert.match(res.text, /item\.frame\.style\.display = sessionId === session\?\.id \? 'block' : 'none'/);
+    assert.match(res.text, /frame\.allow = 'clipboard-read; clipboard-write'/);
     assert.match(res.text, /viewerConnections\.set\(sessionId, \{ frame, url: body\.url \}\)/);
     assert.match(res.text, /function removeViewerConnection\(sessionId\)/);
     assert.match(res.text, /function disconnectNoVnc\(\)/);
@@ -733,7 +734,7 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
   assert.match(cloudInit, /WEBBRAIN_NOVNC_GATE_PORT='6081'/);
   assert.match(cloudInit, /WEBBRAIN_BROWSER_BIN='\/opt\/chrome-linux64\/chrome'/);
   assert.match(cloudInit, /WEBBRAIN_START_URL='https:\/\/webbrain\.one'/);
-  assert.match(cloudInit, /"toolbar_pin":"default_pinned"/);
+  assert.match(cloudInit, /"toolbar_pin":"force_pinned"/);
   assert.match(cloudInit, new RegExp(chromeExtensionIdForPath('/opt/webbrain3/src/chrome')));
   assert.match(cloudInit, /package_upgrade: false/);
   assert.match(cloudInit, /  - build-essential/);

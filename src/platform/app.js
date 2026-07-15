@@ -2155,6 +2155,7 @@ function dashboardPage(user) {
         const frame = document.createElement('iframe');
         frame.title = browserName(currentSession) + ' cloud browser';
         frame.referrerPolicy = 'no-referrer';
+        frame.allow = 'clipboard-read; clipboard-write';
         frame.dataset.sessionId = sessionId;
         frame.src = body.url;
         viewerFrames.appendChild(frame);
