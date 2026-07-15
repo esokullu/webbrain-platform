@@ -412,13 +412,13 @@ function dashboardPage(user) {
     .logs-list-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 9px; color: var(--text-dim); font-size: 11px; }
     .logs-list { min-height: 320px; max-height: calc(100vh - 320px); display: grid; align-content: start; gap: 8px; padding-right: 3px; overflow-y: auto; overscroll-behavior: contain; }
     .log-run-shell { position: relative; min-width: 0; }
-    .log-run { width: 100%; min-height: 0; display: grid; gap: 7px; padding: 11px 62px 11px 12px; border: 1px solid var(--border); border-radius: 10px; background: rgba(89,55,25,.025); color: var(--text); box-shadow: none; text-align: left; white-space: normal; }
+    .log-run { width: 100%; min-height: 0; display: grid; gap: 7px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 10px; background: rgba(89,55,25,.025); color: var(--text); box-shadow: none; text-align: left; white-space: normal; }
     .log-run:hover { border-color: rgba(91,82,232,.28); background: var(--card-hover); transform: none; }
     .log-run.is-selected { border-color: var(--accent); background: rgba(91,82,232,.065); box-shadow: 0 0 0 1px rgba(91,82,232,.07); }
     .log-run-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
     .log-run-time { color: var(--text-dim); font: 10px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .log-run-task { display: -webkit-box; overflow: hidden; color: var(--text); font-size: 13px; font-weight: 720; line-height: 1.42; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-    .log-run-meta { min-width: 0; display: flex; align-items: center; justify-content: flex-start; gap: 5px; color: var(--text-dim); font-size: 10px; }
+    .log-run-meta { min-width: 0; display: flex; align-items: center; justify-content: flex-start; gap: 5px; padding-right: 50px; color: var(--text-dim); font-size: 10px; }
     .log-run-browser { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .log-run-events { flex: 0 0 auto; white-space: nowrap; }
     .log-run-copy { position: absolute; right: 8px; bottom: 7px; z-index: 1; min-height: 23px; padding: 2px 7px; border-color: rgba(91,82,232,.18); background: rgba(255,253,248,.76); color: var(--text-dim); box-shadow: none; font-size: 9px; }
@@ -1829,19 +1829,7 @@ function dashboardPage(user) {
     }
 
     function runLogCopyText(run) {
-      const eventCount = Number(run.update_count) || 0;
-      const lines = [
-        'Task: ' + (run.task || 'Untitled browser run'),
-        'Browser: ' + runLogBrowserName(run),
-        'Status: ' + (run.status || 'unknown'),
-        'Events: ' + eventCount,
-        'Run ID: ' + (run.run_id || '—'),
-        'Started: ' + (run.created_at || '—'),
-      ];
-      if (run.summary) lines.push('Summary: ' + run.summary);
-      if (run.error) lines.push('Error: ' + run.error);
-      if (run.final_url) lines.push('Final URL: ' + run.final_url);
-      return lines.join('\\n');
+      return run.task || 'Untitled browser run';
     }
 
     async function copyRunLog(run, button) {
@@ -1914,8 +1902,8 @@ function dashboardPage(user) {
         copyButton.type = 'button';
         copyButton.className = 'log-run-copy';
         copyButton.textContent = 'Copy';
-        copyButton.title = 'Copy run summary';
-        copyButton.setAttribute('aria-label', 'Copy run summary for ' + (run.task || 'untitled browser run'));
+        copyButton.title = 'Copy prompt';
+        copyButton.setAttribute('aria-label', 'Copy prompt for ' + (run.task || 'untitled browser run'));
         copyButton.addEventListener('click', () => copyRunLog(run, copyButton));
         shell.append(button, copyButton);
         logsList.append(shell);

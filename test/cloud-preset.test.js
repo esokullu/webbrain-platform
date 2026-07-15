@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   WEBBRAIN_CLOUD_PRESET_VERSION,
+  buildCloudStartupTabNormalizationExpression,
   buildCloudStartupTabPlan,
   buildCloudStoragePatch,
   storagePatchMismatches,
@@ -67,4 +68,63 @@ test('cloud startup keeps one start page and closes extension settings pages', (
     closeTargetIds: ['settings-current', 'start-two'],
     startPageUrl: 'https://www.webbrain.one/',
   });
+});
+
+test('cloud startup recognizes a loading start page by pendingUrl and pins it', async () => {
+  const updates = [];
+  let createCalls = 0;
+  const chrome = {
+    tabs: {
+      query: async () => [{
+        id: 42,
+        url: '',
+        pendingUrl: 'https://www.webbrain.one/',
+        status: 'loading',
+      }],
+      update: async (id, tabPatch) => updates.push({ id, patch: tabPatch }),
+      create: async () => {
+        createCalls += 1;
+        return { id: 99 };
+      },
+    },
+  };
+  const expression = buildCloudStartupTabNormalizationExpression({
+    startUrl: 'https://webbrain.one',
+    waitMs: 0,
+    pollIntervalMs: 0,
+  });
+  const result = await Function('chrome', `return (${expression})`)(chrome);
+
+  assert.deepEqual(result, { ok: true, tab_id: 42, created: false });
+  assert.deepEqual(updates, [{ id: 42, patch: { active: true, pinned: true } }]);
+  assert.equal(createCalls, 0);
+});
+
+test('cloud startup creates a pinned start page when no matching tab appears', async () => {
+  const creates = [];
+  const chrome = {
+    tabs: {
+      query: async () => [],
+      update: async () => {
+        throw new Error('unexpected update');
+      },
+      create: async options => {
+        creates.push(options);
+        return { id: 77 };
+      },
+    },
+  };
+  const expression = buildCloudStartupTabNormalizationExpression({
+    startUrl: 'https://webbrain.one',
+    waitMs: 0,
+    pollIntervalMs: 0,
+  });
+  const result = await Function('chrome', `return (${expression})`)(chrome);
+
+  assert.deepEqual(result, { ok: true, tab_id: 77, created: true });
+  assert.deepEqual(creates, [{
+    url: 'https://webbrain.one',
+    active: true,
+    pinned: true,
+  }]);
 });

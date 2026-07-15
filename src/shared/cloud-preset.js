@@ -50,15 +50,21 @@ function normalizedPageKey(value) {
   }
 }
 
-export function buildCloudStartupTabPlan(targets = [], startUrl = '') {
+export function cloudPageMatchesStartUrl(page = {}, startUrl = '') {
   const startKey = normalizedPageKey(startUrl);
+  return [page.url, page.pendingUrl]
+    .filter(Boolean)
+    .some(value => normalizedPageKey(value) === startKey);
+}
+
+export function buildCloudStartupTabPlan(targets = [], startUrl = '') {
   const closeTargetIds = [];
   let startPageUrl = '';
 
   for (const target of targets) {
     if (target.type !== 'page') continue;
     const isExtensionSettings = /^chrome-extension:\/\/[a-p]{32}\/src\/ui\/settings\.html(?:$|[?#])/.test(target.url || '');
-    const isStartPage = normalizedPageKey(target.url) === startKey;
+    const isStartPage = cloudPageMatchesStartUrl(target, startUrl);
     if (isExtensionSettings || (isStartPage && startPageUrl)) {
       closeTargetIds.push(target.id);
       continue;
@@ -67,4 +73,54 @@ export function buildCloudStartupTabPlan(targets = [], startUrl = '') {
   }
 
   return { closeTargetIds, startPageUrl };
+}
+
+export function buildCloudStartupTabNormalizationExpression({
+  startUrl = '',
+  preferredUrl = '',
+  waitMs = 5000,
+  pollIntervalMs = 100,
+} = {}) {
+  const timeout = Math.max(0, Number(waitMs) || 0);
+  const pollInterval = Math.max(0, Number(pollIntervalMs) || 0);
+  return `
+    (async () => {
+      const normalizedPageKey = value => {
+        try {
+          const url = new URL(value);
+          const hostname = url.hostname.replace(/^www\\./, '');
+          const pathname = url.pathname.replace(/\\/+$/, '') || '/';
+          return url.protocol + '//' + hostname + pathname + url.search;
+        } catch {
+          return String(value || '');
+        }
+      };
+      const startUrl = ${JSON.stringify(startUrl)};
+      const expected = new Set(
+        [startUrl, ${JSON.stringify(preferredUrl)}]
+          .filter(Boolean)
+          .map(normalizedPageKey)
+      );
+      const deadline = Date.now() + ${JSON.stringify(timeout)};
+      let tab = null;
+      while (true) {
+        const tabs = await chrome.tabs.query({});
+        tab = tabs.find(item => [item.url, item.pendingUrl]
+          .filter(Boolean)
+          .some(value => expected.has(normalizedPageKey(value))));
+        if (tab?.id || Date.now() >= deadline) break;
+        await new Promise(resolve => setTimeout(resolve, ${JSON.stringify(pollInterval)}));
+      }
+      if (!tab?.id) {
+        const created = await chrome.tabs.create({
+          url: startUrl,
+          active: true,
+          pinned: true,
+        });
+        return { ok: true, tab_id: created.id, created: true };
+      }
+      await chrome.tabs.update(tab.id, { active: true, pinned: true });
+      return { ok: true, tab_id: tab.id, created: false };
+    })()
+  `;
 }

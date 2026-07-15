@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 import {
+  buildCloudStartupTabNormalizationExpression,
   buildCloudStartupTabPlan,
   buildCloudStoragePatch,
   storagePatchMismatches,
@@ -194,7 +195,6 @@ async function normalizeStartupTabs(extensionId) {
     await closeTarget(targetId).catch(() => {});
   }
 
-  if (!plan.startPageUrl) throw new Error('WebBrain cloud start page was not found after startup.');
   const worker = targets.find(target => target.type === 'service_worker'
     && extensionIdFromUrl(target.url) === extensionId);
   if (!worker?.webSocketDebuggerUrl) throw new Error('WebBrain extension service worker was not available for tab normalization.');
@@ -204,15 +204,10 @@ async function normalizeStartupTabs(extensionId) {
     await cdp.open();
     await cdp.call('Runtime.enable');
     const result = await cdp.call('Runtime.evaluate', {
-      expression: `
-        (async () => {
-          const tabs = await chrome.tabs.query({});
-          const tab = tabs.find(item => item.url === ${JSON.stringify(plan.startPageUrl)});
-          if (!tab?.id) return { ok: false, error: 'start tab not found' };
-          await chrome.tabs.update(tab.id, { active: true, pinned: true });
-          return { ok: true, tab_id: tab.id };
-        })()
-      `,
+      expression: buildCloudStartupTabNormalizationExpression({
+        startUrl,
+        preferredUrl: plan.startPageUrl,
+      }),
       awaitPromise: true,
       returnByValue: true,
     });
@@ -220,6 +215,7 @@ async function normalizeStartupTabs(extensionId) {
     if (result.exceptionDetails || !normalized?.ok) {
       throw new Error(normalized?.error || result.exceptionDetails?.text || 'could not pin the WebBrain start tab');
     }
+    return normalized;
   } finally {
     cdp.close();
   }
@@ -422,7 +418,13 @@ async function main() {
     throw new Error(`WebBrain cloud startup failed: ${seeded?.error || seeded?.bridge?.error || 'invalid extension response'}`);
   }
   const bridgeHealth = await waitForExtensionBridge();
-  await normalizeStartupTabs(extensionId);
+  let tabNormalization;
+  try {
+    tabNormalization = await normalizeStartupTabs(extensionId);
+  } catch (error) {
+    tabNormalization = { ok: false, error: error.message || String(error) };
+    console.warn(`[webbrain-cloud-browser] start tab normalization skipped: ${tabNormalization.error}`);
+  }
   console.log(JSON.stringify({
     ok: true,
     browser,
@@ -432,6 +434,7 @@ async function main() {
     sidecar_ws_url: sidecarWsUrl,
     bridge_health: bridgeHealth,
     preseed: seeded,
+    tab_normalization: tabNormalization,
   }, null, 2));
 
   child.on('exit', code => process.exit(code ?? 0));

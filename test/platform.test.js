@@ -934,9 +934,12 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /function loadRunLogs\(/);
     assert.match(res.text, /function selectRunLog\(/);
     assert.match(res.text, /function copyRunLog\(/);
+    assert.match(res.text, /function runLogCopyText\(run\) \{\s+return run\.task \|\| 'Untitled browser run';/);
     assert.match(res.text, /className = 'log-run-copy'/);
     assert.match(res.text, /className = 'log-run-events'/);
-    assert.match(res.text, /Copy run summary/);
+    assert.match(res.text, /Copy prompt/);
+    assert.match(res.text, /\.log-run-meta \{[^}]*padding-right: 50px/);
+    assert.doesNotMatch(res.text, /\.log-run \{[^}]*padding: 11px 62px/);
     assert.match(res.text, /\/api\/runs\?limit=50&offset=/);
     assert.match(res.text, /state\.selectedId = session\.id/);
     assert.doesNotMatch(res.text, /Use this browser from code/);
@@ -1262,6 +1265,10 @@ test('cloud browser launches at the virtual display size', async () => {
   assert.match(source, /'--window-size=1440,900'/);
   assert.match(source, /`--proxy-server=\$\{browserProxyServer\}`/);
   assert.match(source, /`--proxy-bypass-list=\$\{browserProxyBypassList\}`/);
+  assert.match(source, /buildCloudStartupTabNormalizationExpression\(\{/);
+  assert.match(source, /try \{\s+tabNormalization = await normalizeStartupTabs\(extensionId\);/);
+  assert.match(source, /start tab normalization skipped/);
+  assert.match(source, /tab_normalization: tabNormalization/);
 });
 
 test('digitalocean provisioner uses hostname-safe droplet names', async () => {
