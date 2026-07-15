@@ -1,3 +1,11 @@
+function hostnameFromUrl(value) {
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return '';
+  }
+}
+
 export function loadConfig(env = process.env) {
   const baseUrl = env.WEBBRAIN_PLATFORM_URL || `http://127.0.0.1:${env.PORT || 3000}`;
   return {
@@ -34,6 +42,15 @@ export function loadConfig(env = process.env) {
     modelProxy: {
       baseUrl: env.WEBBRAIN_MODEL_PROXY_BASE_URL || '',
       apiKey: env.WEBBRAIN_MODEL_PROXY_API_KEY || '',
+    },
+    browserProxy: {
+      url: env.WEBBRAIN_BROWSER_PROXY_URL || '',
+      relayHost: env.WEBBRAIN_PROXY_RELAY_HOST || '127.0.0.1',
+      relayPort: Number(env.WEBBRAIN_PROXY_RELAY_PORT || 17890),
+      bypassList: env.WEBBRAIN_PROXY_BYPASS_LIST || hostnameFromUrl(baseUrl),
+      statePath: env.WEBBRAIN_PROXY_STATE_PATH || '/var/lib/webbrain/proxy.json',
+      verifyUrl: env.WEBBRAIN_PROXY_VERIFY_URL || 'http://api.ipify.org?format=json',
+      verifyTimeoutMs: Number(env.WEBBRAIN_PROXY_VERIFY_TIMEOUT_MS || 10000),
     },
     droplet: {
       repoUrl: env.WEBBRAIN_PLATFORM_REPO_URL || 'https://github.com/esokullu/webbrain-platform.git',

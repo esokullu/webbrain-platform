@@ -83,6 +83,21 @@ final class WebBrainClient
         return $this->request('PATCH', '/api/browser-sessions/' . self::id($sessionId), ['display_name' => $name ?: null])['browser_session'];
     }
 
+    public function getBrowserProxy(string $sessionId): array
+    {
+        return $this->request('GET', '/api/browser-sessions/' . self::id($sessionId) . '/proxy')['proxy'];
+    }
+
+    public function updateBrowserProxy(string $sessionId, string|array|null $proxy): array
+    {
+        $body = is_array($proxy) ? ['proxy' => $proxy] : ['proxy_url' => $proxy];
+        return $this->request(
+            'PATCH',
+            '/api/browser-sessions/' . self::id($sessionId) . '/proxy',
+            $body,
+        )['proxy'];
+    }
+
     public function deleteBrowserSession(string $sessionId): array
     {
         return $this->request('DELETE', '/api/browser-sessions/' . self::id($sessionId))['browser_session'];

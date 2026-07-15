@@ -26,6 +26,8 @@ function normalizeBrowserSession(row) {
   if (!row) return null;
   return {
     ...row,
+    proxy_enabled: Boolean(row.proxy_enabled),
+    proxy_updated_at: fromMysqlDate(row.proxy_updated_at),
     expires_at: fromMysqlDate(row.expires_at),
     created_at: fromMysqlDate(row.created_at),
     updated_at: fromMysqlDate(row.updated_at),
@@ -79,6 +81,23 @@ export class MySqlStore {
     );
     if (!displayNameColumns.length) {
       await this.pool.query('ALTER TABLE browser_sessions ADD COLUMN display_name VARCHAR(120) NULL AFTER user_id');
+    }
+    const browserProxyColumns = [
+      ['proxy_enabled', 'ALTER TABLE browser_sessions ADD COLUMN proxy_enabled TINYINT(1) NOT NULL DEFAULT 0 AFTER connect_secret'],
+      ['proxy_endpoint', 'ALTER TABLE browser_sessions ADD COLUMN proxy_endpoint VARCHAR(512) NULL AFTER proxy_enabled'],
+      ['proxy_updated_at', 'ALTER TABLE browser_sessions ADD COLUMN proxy_updated_at DATETIME NULL AFTER proxy_endpoint'],
+    ];
+    for (const [column, alter] of browserProxyColumns) {
+      const [rows] = await this.pool.execute(
+        `SELECT 1
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'browser_sessions'
+           AND COLUMN_NAME = :column
+         LIMIT 1`,
+        { column }
+      );
+      if (!rows.length) await this.pool.query(alter);
     }
     const [runUpdateColumns] = await this.pool.execute(
       `SELECT 1
@@ -231,9 +250,18 @@ export class MySqlStore {
   async createBrowserSession(row) {
     await this.pool.execute(
       `INSERT INTO browser_sessions
-       (id,user_id,display_name,status,droplet_id,public_ip,region,size,connect_secret,expires_at,created_at,updated_at)
-       VALUES (:id,:user_id,:display_name,:status,:droplet_id,:public_ip,:region,:size,:connect_secret,:expires_at,:created_at,:updated_at)`,
-      { ...row, display_name: row.display_name || null, expires_at: toMysqlDate(row.expires_at), created_at: toMysqlDate(row.created_at), updated_at: toMysqlDate(row.updated_at) }
+       (id,user_id,display_name,status,droplet_id,public_ip,region,size,connect_secret,proxy_enabled,proxy_endpoint,proxy_updated_at,expires_at,created_at,updated_at)
+       VALUES (:id,:user_id,:display_name,:status,:droplet_id,:public_ip,:region,:size,:connect_secret,:proxy_enabled,:proxy_endpoint,:proxy_updated_at,:expires_at,:created_at,:updated_at)`,
+      {
+        ...row,
+        display_name: row.display_name || null,
+        proxy_enabled: row.proxy_enabled ? 1 : 0,
+        proxy_endpoint: row.proxy_endpoint || null,
+        proxy_updated_at: toMysqlDate(row.proxy_updated_at),
+        expires_at: toMysqlDate(row.expires_at),
+        created_at: toMysqlDate(row.created_at),
+        updated_at: toMysqlDate(row.updated_at),
+      }
     );
     return await this.getBrowserSession(row.id);
   }
@@ -255,7 +283,8 @@ export class MySqlStore {
     if (!fields.length) return await this.getBrowserSession(id);
     const assignments = fields.map(k => `${k} = :${k}`).join(', ');
     const values = { id, ...patch };
-    for (const key of ['expires_at', 'created_at', 'updated_at']) {
+    if ('proxy_enabled' in values) values.proxy_enabled = values.proxy_enabled ? 1 : 0;
+    for (const key of ['proxy_updated_at', 'expires_at', 'created_at', 'updated_at']) {
       if (values[key]) values[key] = toMysqlDate(values[key]);
     }
     await this.pool.execute(`UPDATE browser_sessions SET ${assignments} WHERE id = :id`, values);

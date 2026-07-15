@@ -9,7 +9,7 @@ export function chromeExtensionIdForPath(extensionPath) {
   return [...hex].map(char => String.fromCharCode(97 + Number.parseInt(char, 16))).join('');
 }
 
-export function renderCloudInit({ session, config, providerApiKey = '' }) {
+export function renderCloudInit({ session, config, providerApiKey = '', proxyUrl = '' }) {
   const repoUrl = config.droplet.repoUrl || 'https://github.com/esokullu/webbrain-platform.git';
   const webbrainRepoUrl = config.droplet.webbrainRepoUrl || 'https://github.com/webbrain-one/webbrain.git';
   const appDir = '/opt/webbrain-platform';
@@ -34,6 +34,14 @@ export function renderCloudInit({ session, config, providerApiKey = '' }) {
     WEBBRAIN_HEADLESS: 'false',
     WEBBRAIN_START_URL: 'https://webbrain.one',
     WEBBRAIN_BROWSER_BIN: '/opt/chrome-linux64/chrome',
+    WEBBRAIN_BROWSER_PROXY_URL: proxyUrl,
+    WEBBRAIN_BROWSER_PROXY_SERVER: `http://${config.browserProxy.relayHost}:${config.browserProxy.relayPort}`,
+    WEBBRAIN_BROWSER_PROXY_BYPASS_LIST: config.browserProxy.bypassList,
+    WEBBRAIN_PROXY_RELAY_HOST: config.browserProxy.relayHost,
+    WEBBRAIN_PROXY_RELAY_PORT: String(config.browserProxy.relayPort),
+    WEBBRAIN_PROXY_STATE_PATH: config.browserProxy.statePath,
+    WEBBRAIN_PROXY_VERIFY_URL: config.browserProxy.verifyUrl,
+    WEBBRAIN_PROXY_VERIFY_TIMEOUT_MS: String(config.browserProxy.verifyTimeoutMs),
   };
   const envText = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join('\n');
 
@@ -115,7 +123,8 @@ ${envText.split('\n').map(line => `      ${line}`).join('\n')}
     content: |
       [Unit]
       Description=WebBrain cloud browser
-      After=webbrain-sidecar.service webbrain-xvfb.service
+      After=webbrain-droplet.service webbrain-sidecar.service webbrain-xvfb.service
+      Wants=webbrain-droplet.service
       Requires=webbrain-xvfb.service
       [Service]
       EnvironmentFile=/etc/webbrain-droplet.env
@@ -129,7 +138,8 @@ ${envText.split('\n').map(line => `      ${line}`).join('\n')}
     content: |
       [Unit]
       Description=WebBrain droplet control client
-      After=webbrain-sidecar.service webbrain-browser.service webbrain-novnc.service
+      After=network-online.target webbrain-sidecar.service webbrain-novnc.service
+      Wants=network-online.target
       [Service]
       EnvironmentFile=/etc/webbrain-droplet.env
       WorkingDirectory=${appDir}
@@ -155,6 +165,7 @@ runcmd:
   - cd ${appDir} && npm ci --omit=dev
   - cd ${webbrainDir} && git checkout ${shellQuote(config.droplet.webbrainRef)}
   - systemctl daemon-reload
-  - systemctl enable --now webbrain-sidecar.service webbrain-xvfb.service webbrain-x11vnc.service webbrain-novnc.service webbrain-browser.service webbrain-droplet.service
+  - systemctl enable webbrain-sidecar.service webbrain-xvfb.service webbrain-x11vnc.service webbrain-novnc.service webbrain-droplet.service webbrain-browser.service
+  - systemctl start webbrain-sidecar.service webbrain-xvfb.service webbrain-x11vnc.service webbrain-novnc.service webbrain-droplet.service webbrain-browser.service
 `;
 }

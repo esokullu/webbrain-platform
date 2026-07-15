@@ -28,6 +28,7 @@ export class DigitalOceanProvisioner {
         session,
         config: this.config,
         providerApiKey: opts.providerApiKey || '',
+        proxyUrl: opts.proxyUrl || '',
       }),
     };
     const res = await this.fetch('https://api.digitalocean.com/v2/droplets', {
@@ -81,11 +82,13 @@ export class DigitalOceanProvisioner {
 export class NullProvisioner {
   constructor() {
     this.created = [];
+    this.createdOptions = [];
     this.destroyed = [];
   }
 
-  async createBrowserDroplet(session) {
+  async createBrowserDroplet(session, opts = {}) {
     this.created.push(session);
+    this.createdOptions.push(opts);
     return {
       droplet_id: `mock-${session.id}`,
       public_ip: '127.0.0.1',

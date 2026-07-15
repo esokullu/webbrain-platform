@@ -10,6 +10,12 @@ test('dashboard columns are present in fresh schema and existing-database migrat
   assert.match(storeSource, /FROM information_schema\.COLUMNS/);
   assert.doesNotMatch(storeSource, /SHOW COLUMNS FROM browser_sessions LIKE/);
   assert.match(storeSource, /ALTER TABLE browser_sessions ADD COLUMN display_name VARCHAR\(120\) NULL/);
+  assert.match(schema, /proxy_enabled TINYINT\(1\) NOT NULL DEFAULT 0/);
+  assert.match(schema, /proxy_endpoint VARCHAR\(512\) NULL/);
+  assert.match(schema, /proxy_updated_at DATETIME NULL/);
+  assert.match(storeSource, /ALTER TABLE browser_sessions ADD COLUMN proxy_enabled TINYINT\(1\) NOT NULL DEFAULT 0/);
+  assert.match(storeSource, /ALTER TABLE browser_sessions ADD COLUMN proxy_endpoint VARCHAR\(512\) NULL/);
+  assert.match(storeSource, /ALTER TABLE browser_sessions ADD COLUMN proxy_updated_at DATETIME NULL/);
   assert.match(schema, /updates JSON NULL/);
   assert.match(storeSource, /ALTER TABLE cloud_runs ADD COLUMN updates JSON NULL AFTER error/);
   assert.match(storeSource, /async listCloudRunsForUser\(/);

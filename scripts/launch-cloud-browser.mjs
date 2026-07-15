@@ -2,6 +2,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
+import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
@@ -19,6 +20,8 @@ const profileDir = path.resolve(process.env.WEBBRAIN_PROFILE_DIR || path.join(ro
 const debuggingPort = Number(process.env.WEBBRAIN_REMOTE_DEBUGGING_PORT || 9222);
 const sidecarWsUrl = process.env.WEBBRAIN_SIDECAR_WS_URL || 'ws://127.0.0.1:17373/extension';
 const startUrl = process.env.WEBBRAIN_START_URL || 'https://webbrain.one';
+const browserProxyServer = process.env.WEBBRAIN_BROWSER_PROXY_SERVER || '';
+const browserProxyBypassList = process.env.WEBBRAIN_BROWSER_PROXY_BYPASS_LIST || '';
 
 function commandExists(cmd) {
   if (path.isAbsolute(cmd)) return existsSync(cmd);
@@ -69,6 +72,33 @@ function webbrainCloudProviderConfig() {
 
 async function sleep(ms) {
   await new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitForProxyServer() {
+  if (!browserProxyServer) return;
+  const parsed = new URL(browserProxyServer);
+  const port = Number(parsed.port || (parsed.protocol === 'https:' ? 443 : 80));
+  const deadline = Date.now() + 30000;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    try {
+      await new Promise((resolve, reject) => {
+        const socket = net.createConnection({ host: parsed.hostname, port });
+        socket.setTimeout(1000);
+        socket.once('connect', () => {
+          socket.destroy();
+          resolve();
+        });
+        socket.once('timeout', () => socket.destroy(new Error('timed out')));
+        socket.once('error', reject);
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+      await sleep(250);
+    }
+  }
+  throw new Error(`Browser proxy relay did not come up: ${lastError?.message || lastError}`);
 }
 
 async function devtoolsJson(route) {
@@ -358,6 +388,7 @@ async function main() {
     throw new Error(`WebBrain extension directory does not exist: ${extensionDir}`);
   }
   await fs.mkdir(profileDir, { recursive: true });
+  await waitForProxyServer();
 
   const browser = findBrowser();
   const args = [
@@ -374,6 +405,8 @@ async function main() {
     '--disable-infobars',
     '--window-size=1440,900',
   ];
+  if (browserProxyServer) args.push(`--proxy-server=${browserProxyServer}`);
+  if (browserProxyBypassList) args.push(`--proxy-bypass-list=${browserProxyBypassList}`);
   if (boolEnv('WEBBRAIN_HEADLESS', false)) args.push('--headless=new');
   if (process.getuid?.() === 0) args.push('--no-sandbox');
   args.push(startUrl);

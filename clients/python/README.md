@@ -21,6 +21,15 @@ from webbrain_client import WebBrainClient
 client = WebBrainClient(os.environ["WEBBRAIN_API_KEY"])
 session = client.create_browser_session(display_name="Research")
 ready = client.wait_for_browser_session(session["id"])
+client.update_browser_proxy(
+    ready["id"],
+    proxy={
+        "domain": "p.webshare.io",
+        "port": 80,
+        "username": "webshare-user",
+        "password": "webshare-password",
+    },
+)
 run = client.create_run(
     ready["id"],
     "Open example.com and return the page title",
@@ -46,6 +55,8 @@ run = client.create_run(
 - `create_browser_session(**options)`
 - `get_browser_session(session_id)`
 - `update_browser_session(session_id, display_name=...)`
+- `get_browser_proxy(session_id)`
+- `update_browser_proxy(session_id, proxy_url=...)` or `proxy={...}`
 - `wait_for_browser_session(session_id, ...)`
 - `delete_browser_session(session_id)`
 - `create_run(session_id, task, ...)`

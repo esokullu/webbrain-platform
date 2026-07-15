@@ -62,6 +62,23 @@ class WebBrainClient:
         name = display_name.strip() if display_name else None
         return self._request("PATCH", f"/api/browser-sessions/{self._id(session_id)}", {"display_name": name})["browser_session"]
 
+    def get_browser_proxy(self, session_id: str):
+        return self._request("GET", f"/api/browser-sessions/{self._id(session_id)}/proxy")["proxy"]
+
+    def update_browser_proxy(
+        self,
+        session_id: str,
+        *,
+        proxy_url: Optional[str] = None,
+        proxy: Optional[Dict[str, Any]] = None,
+    ):
+        body = {"proxy": proxy} if proxy is not None else {"proxy_url": proxy_url}
+        return self._request(
+            "PATCH",
+            f"/api/browser-sessions/{self._id(session_id)}/proxy",
+            body,
+        )["proxy"]
+
     def delete_browser_session(self, session_id: str):
         return self._request("DELETE", f"/api/browser-sessions/{self._id(session_id)}")["browser_session"]
 

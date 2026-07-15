@@ -35,6 +35,10 @@ Platform:
 - `WEBBRAIN_INSTANCE_DOMAIN` (for example, `webbrain.cloud`; serves each browser session at an HTTPS subdomain)
 - `WEBBRAIN_REGISTRATION_ENABLED=true` only when public account creation should be available (disabled by default)
 - `WEBBRAIN_MODEL_PROXY_BASE_URL`, `WEBBRAIN_MODEL_PROXY_API_KEY`
+- `WEBBRAIN_BROWSER_PROXY_URL` (optional default authenticated upstream proxy for new browsers)
+- `WEBBRAIN_PROXY_VERIFY_URL` (HTTP exit-IP endpoint; defaults to `http://api.ipify.org?format=json`)
+- `WEBBRAIN_PROXY_VERIFY_TIMEOUT_MS` (defaults to `10000`)
+- `WEBBRAIN_PROXY_BYPASS_LIST` (optional Chrome bypass list; defaults to the platform hostname)
 
 Production uses `WEBBRAIN_MODEL_PROXY_BASE_URL=https://api.webbrain.one/v1`.
 The platform authenticates browser model traffic with the per-session secret,
@@ -51,6 +55,10 @@ Droplet cloud-init passes:
 - `WEBBRAIN_PROVIDER_BASE_URL`
 - `WEBBRAIN_PROVIDER_API_KEY`
 - `WEBBRAIN_NOVNC_SECRET`
+- `WEBBRAIN_BROWSER_PROXY_URL`
+- `WEBBRAIN_BROWSER_PROXY_SERVER` (the local relay Chrome uses)
+- `WEBBRAIN_BROWSER_PROXY_BYPASS_LIST`
+- `WEBBRAIN_PROXY_RELAY_HOST`, `WEBBRAIN_PROXY_RELAY_PORT`, `WEBBRAIN_PROXY_STATE_PATH`
 
 ## Browser Automation API
 
@@ -127,6 +135,30 @@ Save the returned `id`:
 export WEBBRAIN_SESSION_ID='bs_0123456789abcdef'
 ```
 
+To assign a Webshare upstream while the Droplet is created, include its four
+connection values in `proxy`:
+
+```bash
+curl -sS -X POST https://webbrain.cloud/api/browser-sessions \
+  -H "Authorization: Bearer $WEBBRAIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "display_name": "Research",
+    "proxy": {
+      "domain": "p.webshare.io",
+      "port": 80,
+      "username": "webshare-user",
+      "password": "webshare-password"
+    }
+  }'
+```
+
+Chrome always connects to a loopback-only relay. The relay handles upstream
+authentication, while API and session responses expose only the credential-free
+endpoint and verified exit IP. The initial URL is written to the root-only
+Droplet environment by cloud-init; live replacements are stored in a root-only
+state file and survive service restarts.
+
 Provisioning takes time. Poll the session until `runtime_ready` is `true`:
 
 ```bash
@@ -137,6 +169,41 @@ curl -sS \
 
 `status: "ready"` means the Droplet is reachable. `runtime_ready: true` also
 confirms that the WebBrain extension bridge is connected and can accept runs.
+
+### Change a running browser's proxy
+
+Read the active proxy and last verified exit IP:
+
+```bash
+curl -sS \
+  "https://webbrain.cloud/api/browser-sessions/$WEBBRAIN_SESSION_ID/proxy" \
+  -H "Authorization: Bearer $WEBBRAIN_API_KEY"
+```
+
+Switch upstreams without restarting Chrome or recreating the Droplet:
+
+```bash
+curl -sS -X PATCH \
+  "https://webbrain.cloud/api/browser-sessions/$WEBBRAIN_SESSION_ID/proxy" \
+  -H "Authorization: Bearer $WEBBRAIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "proxy": {
+      "domain": "p.webshare.io",
+      "port": 80,
+      "username": "next-user",
+      "password": "next-password"
+    }
+  }'
+```
+
+The structured form defaults to an HTTP upstream and safely URL-encodes the
+Webshare credentials. Generic HTTP, HTTPS, SOCKS4, and SOCKS5 integrations may
+send a complete `proxy_url` instead. The relay closes existing connections,
+verifies the replacement's exit IP, and rolls back if verification fails. Send
+`{"proxy_url":null}` to return to direct
+mode. Proxy changes return `409 Conflict` while a browser run is active; abort or
+finish the run first so one task cannot span two network identities.
 
 ### 2. Start a browser run
 

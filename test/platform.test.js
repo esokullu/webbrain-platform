@@ -126,11 +126,28 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   const sessionRes = await request(ctx.base, '/api/browser-sessions', {
     method: 'POST',
     headers: { authorization: `Bearer ${keyRes.body.key}` },
-    body: JSON.stringify({ region: 'nyc3', size: 's-1vcpu-1gb', display_name: 'Daily research' }),
+    body: JSON.stringify({
+      region: 'nyc3',
+      size: 's-1vcpu-1gb',
+      display_name: 'Daily research',
+      proxy: {
+        domain: 'proxy-start.example',
+        port: 8080,
+        username: 'startup-user',
+        password: 'startup-p@ss',
+      },
+    }),
   });
   assert.equal(sessionRes.status, 201);
   assert.equal(sessionRes.body.browser_session.status, 'ready');
   assert.equal(sessionRes.body.browser_session.display_name, 'Daily research');
+  assert.deepEqual(sessionRes.body.browser_session.proxy, {
+    enabled: true,
+    endpoint: 'http://proxy-start.example:8080',
+    updated_at: sessionRes.body.browser_session.proxy.updated_at,
+  });
+  assert.equal(sessionRes.body.browser_session.proxy.updated_at !== null, true);
+  assert.equal(ctx.provisioner.createdOptions[0].proxyUrl, 'http://startup-user:startup-p%40ss@proxy-start.example:8080/');
   const sessionId = sessionRes.body.browser_session.id;
   const storedSession = await ctx.store.getBrowserSession(sessionId);
   assert.equal(storedSession.connect_secret.length > 20, true);
@@ -191,6 +208,50 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
       ws.send(JSON.stringify({ id: msg.id, ok: true, result: { ok: true, extension_connected: true } }));
       return;
     }
+    if (msg.action === 'proxy.status') {
+      ws.send(JSON.stringify({
+        id: msg.id,
+        ok: true,
+        result: {
+          enabled: true,
+          endpoint: 'http://proxy-start.example:8080',
+          exit_ip: '198.51.100.10',
+          updated_at: '2026-07-15T06:00:00.000Z',
+          verified_at: '2026-07-15T06:00:01.000Z',
+        },
+      }));
+      return;
+    }
+    if (msg.action === 'proxy.update') {
+      assert.equal(msg.payload.verify, true);
+      if (!msg.payload.proxy_url) {
+        ws.send(JSON.stringify({
+          id: msg.id,
+          ok: true,
+          result: {
+            enabled: false,
+            endpoint: null,
+            exit_ip: '203.0.113.40',
+            updated_at: '2026-07-15T06:20:00.000Z',
+            verified_at: '2026-07-15T06:20:01.000Z',
+          },
+        }));
+        return;
+      }
+      assert.equal(msg.payload.proxy_url, 'http://next-user:next-p%40ss@proxy-next.example:9000/');
+      ws.send(JSON.stringify({
+        id: msg.id,
+        ok: true,
+        result: {
+          enabled: true,
+          endpoint: 'http://proxy-next.example:9000',
+          exit_ip: '198.51.100.20',
+          updated_at: '2026-07-15T06:10:00.000Z',
+          verified_at: '2026-07-15T06:10:01.000Z',
+        },
+      }));
+      return;
+    }
     if (msg.action === 'run') {
       assert.equal(msg.payload.tab_id ?? null, msg.payload.task === 'Long task' ? 91 : null);
       const runId = `run_cloud_${++runSeq}`;
@@ -235,6 +296,33 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
     }
   });
 
+  const proxyStatus = await request(ctx.base, `/api/browser-sessions/${sessionId}/proxy`, {
+    headers: { cookie },
+  });
+  assert.equal(proxyStatus.status, 200);
+  assert.equal(proxyStatus.body.proxy.exit_ip, '198.51.100.10');
+  assert.equal(proxyStatus.body.proxy.endpoint, 'http://proxy-start.example:8080');
+
+  const proxyUpdated = await request(ctx.base, `/api/browser-sessions/${sessionId}/proxy`, {
+    method: 'PATCH',
+    headers: { cookie },
+    body: JSON.stringify({
+      proxy: {
+        domain: 'proxy-next.example',
+        port: 9000,
+        username: 'next-user',
+        password: 'next-p@ss',
+      },
+    }),
+  });
+  assert.equal(proxyUpdated.status, 200);
+  assert.equal(proxyUpdated.body.proxy.endpoint, 'http://proxy-next.example:9000');
+  assert.equal(JSON.stringify(proxyUpdated.body).includes('next-p@ss'), false);
+  assert.equal(JSON.stringify(proxyUpdated.body).includes('next-p%40ss'), false);
+  const proxyStored = await ctx.store.getBrowserSession(sessionId);
+  assert.equal(proxyStored.proxy_endpoint, 'http://proxy-next.example:9000');
+  assert.equal(proxyStored.proxy_enabled, true);
+
   const waited = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs`, {
     method: 'POST',
     headers: { cookie },
@@ -258,12 +346,27 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
     body: JSON.stringify({ task: 'Long task', tab_id: 91, wait: false }),
   });
   assert.equal(created.status, 202);
+  const proxyBlockedDuringRun = await request(ctx.base, `/api/browser-sessions/${sessionId}/proxy`, {
+    method: 'PATCH',
+    headers: { cookie },
+    body: JSON.stringify({ proxy_url: null }),
+  });
+  assert.equal(proxyBlockedDuringRun.status, 409);
+  assert.deepEqual(proxyBlockedDuringRun.body.active_run_ids, [created.body.run_id]);
   const aborted = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs/${created.body.run_id}/abort`, {
     method: 'POST',
     headers: { cookie },
   });
   assert.equal(aborted.status, 200);
   assert.equal(aborted.body.status, 'aborted');
+  const directProxy = await request(ctx.base, `/api/browser-sessions/${sessionId}/proxy`, {
+    method: 'PATCH',
+    headers: { cookie },
+    body: JSON.stringify({ proxy_url: null }),
+  });
+  assert.equal(directProxy.status, 200);
+  assert.equal(directProxy.body.proxy.enabled, false);
+  assert.equal((await ctx.store.getBrowserSession(sessionId)).proxy_endpoint, null);
 
   const newestLogs = await request(ctx.base, '/api/runs?limit=1&offset=0', { headers: { cookie } });
   assert.equal(newestLogs.status, 200);
@@ -407,6 +510,42 @@ test('account settings securely update email and password', async () => {
   }
 });
 
+test('browser sessions inherit the platform proxy default unless explicitly disabled', async () => {
+  const ctx = await startPlatform({
+    WEBBRAIN_BROWSER_PROXY_URL: 'http://default-user:default-pass@proxy-default.example:8080',
+  });
+  try {
+    const cookie = await register(ctx.base, 'default-proxy@example.com');
+    const inherited = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ display_name: 'Inherited proxy' }),
+    });
+    assert.equal(inherited.status, 201);
+    assert.equal(inherited.body.browser_session.proxy.endpoint, 'http://proxy-default.example:8080');
+    assert.equal(ctx.provisioner.createdOptions[0].proxyUrl, 'http://default-user:default-pass@proxy-default.example:8080/');
+
+    const direct = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ display_name: 'Direct', proxy_url: null }),
+    });
+    assert.equal(direct.status, 201);
+    assert.equal(direct.body.browser_session.proxy.enabled, false);
+    assert.equal(ctx.provisioner.createdOptions[1].proxyUrl, '');
+
+    const invalid = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ proxy_url: 'ftp://proxy.example:21' }),
+    });
+    assert.equal(invalid.status, 400);
+    assert.equal(ctx.provisioner.created.length, 2);
+  } finally {
+    await ctx.platform.close();
+  }
+});
+
 test('model proxy replaces browser credentials and uses a stable platform-user identity', async () => {
   let captured = null;
   const upstream = http.createServer(async (req, res) => {
@@ -475,6 +614,14 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /browser-boot 1\.25s/);
     assert.match(res.text, /id="viewerFrames"/);
     assert.match(res.text, /id="newSessionName"/);
+    assert.match(res.text, /id="newProxyDomain"/);
+    assert.match(res.text, /id="newProxyPort"/);
+    assert.match(res.text, /id="newProxyUsername"/);
+    assert.match(res.text, /id="newProxyPassword"/);
+    assert.match(res.text, /id="proxyBtn"/);
+    assert.match(res.text, /id="proxyDialog"/);
+    assert.match(res.text, /function saveBrowserProxy\(event\)/);
+    assert.match(res.text, /body: hasNextProxy \? \{ proxy: nextProxy \} : \{ proxy_url: null \}/);
     assert.match(res.text, /id="renameDialog"/);
     assert.match(res.text, /method: 'PATCH'/);
     assert.match(res.text, /display_name/);
@@ -520,6 +667,8 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /id="browserView"/);
     assert.match(res.text, /id="consoleView" hidden/);
     assert.match(res.text, /id="logsView" hidden/);
+    const dashboardScript = [...res.text.matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)?.[1] || '';
+    assert.doesNotThrow(() => new Function(dashboardScript));
     assert.match(res.text, /id="apiKeysView" hidden/);
     assert.match(res.text, />Browsers<[^]*>Console<[^]*>API keys<[^]*>Logs</);
     assert.match(res.text, /setDashboardView/);
@@ -735,6 +884,9 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
   assert.match(cloudInit, /WEBBRAIN_HEADLESS='false'/);
   assert.match(cloudInit, /WEBBRAIN_NOVNC_GATE_PORT='6081'/);
   assert.match(cloudInit, /WEBBRAIN_BROWSER_BIN='\/opt\/chrome-linux64\/chrome'/);
+  assert.match(cloudInit, /WEBBRAIN_BROWSER_PROXY_SERVER='http:\/\/127\.0\.0\.1:17890'/);
+  assert.match(cloudInit, /WEBBRAIN_BROWSER_PROXY_BYPASS_LIST='platform\.example'/);
+  assert.match(cloudInit, /WEBBRAIN_PROXY_STATE_PATH='\/var\/lib\/webbrain\/proxy\.json'/);
   assert.match(cloudInit, /WEBBRAIN_START_URL='https:\/\/webbrain\.one'/);
   assert.match(cloudInit, /"toolbar_pin":"force_pinned"/);
   assert.match(cloudInit, new RegExp(chromeExtensionIdForPath('/opt/webbrain3/src/chrome')));
@@ -754,7 +906,8 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
   assert.match(cloudInit, /\/tmp\/chrome-linux64\.zip/);
   assert.match(cloudInit, /git clone 'https:\/\/github\.com\/webbrain-one\/webbrain\.git' \/opt\/webbrain3/);
   assert.match(cloudInit, /git clone https:\/\/github\.com\/novnc\/noVNC\.git \/opt\/noVNC/);
-  assert.match(cloudInit, /systemctl enable --now webbrain-sidecar\.service webbrain-xvfb\.service webbrain-x11vnc\.service webbrain-novnc\.service webbrain-browser\.service webbrain-droplet\.service/);
+  assert.match(cloudInit, /After=webbrain-droplet\.service webbrain-sidecar\.service webbrain-xvfb\.service/);
+  assert.match(cloudInit, /systemctl start webbrain-sidecar\.service webbrain-xvfb\.service webbrain-x11vnc\.service webbrain-novnc\.service webbrain-droplet\.service webbrain-browser\.service/);
 });
 
 test('cloud browser extension id matches Chrome unpacked-extension path hashing', () => {
@@ -764,6 +917,8 @@ test('cloud browser extension id matches Chrome unpacked-extension path hashing'
 test('cloud browser launches at the virtual display size', async () => {
   const source = await readFile(new URL('../scripts/launch-cloud-browser.mjs', import.meta.url), 'utf8');
   assert.match(source, /'--window-size=1440,900'/);
+  assert.match(source, /`--proxy-server=\$\{browserProxyServer\}`/);
+  assert.match(source, /`--proxy-bypass-list=\$\{browserProxyBypassList\}`/);
 });
 
 test('digitalocean provisioner uses hostname-safe droplet names', async () => {
@@ -804,11 +959,14 @@ test('digitalocean provisioner uses hostname-safe droplet names', async () => {
   const created = await provisioner.createBrowserDroplet({
     id: 'bs_abc123',
     connect_secret: 'connect-secret',
+  }, {
+    proxyUrl: 'http://proxy-user:proxy-pass@proxy.example:8080',
   });
 
   assert.equal(created.status, 'provisioning');
   assert.equal(requestBody.name, 'webbrain-bs-abc123');
   assert.match(requestBody.name, /^[a-z0-9.-]+$/);
+  assert.match(requestBody.user_data, /WEBBRAIN_BROWSER_PROXY_URL='http:\/\/proxy-user:proxy-pass@proxy\.example:8080'/);
 
   const refreshed = await provisioner.getDroplet(123);
   assert.equal(refreshed.status, 'ready');

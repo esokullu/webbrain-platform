@@ -24,6 +24,12 @@ $session = $client->createBrowserSession([
     'display_name' => 'Research',
 ]);
 $ready = $client->waitForBrowserSession($session['id']);
+$client->updateBrowserProxy($ready['id'], [
+    'domain' => 'p.webshare.io',
+    'port' => 80,
+    'username' => 'webshare-user',
+    'password' => 'webshare-password',
+]);
 $run = $client->createRun(
     $ready['id'],
     'Open example.com and return the page title',
@@ -50,6 +56,8 @@ $run = $client->createRun($session['id'], 'Return the title and visible links', 
 - `createBrowserSession($options)`
 - `getBrowserSession($sessionId)`
 - `updateBrowserSession($sessionId, $displayName)`
+- `getBrowserProxy($sessionId)`
+- `updateBrowserProxy($sessionId, $proxyUrlOrParts)`
 - `waitForBrowserSession($sessionId, ...)`
 - `deleteBrowserSession($sessionId)`
 - `createRun($sessionId, $task, $options)`

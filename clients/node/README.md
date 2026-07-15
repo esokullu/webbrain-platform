@@ -25,6 +25,14 @@ const session = await client.createBrowserSession({
   display_name: 'Research',
 });
 const ready = await client.waitForBrowserSession(session.id);
+await client.updateBrowserProxy(ready.id, {
+  proxy: {
+    domain: 'p.webshare.io',
+    port: 80,
+    username: 'webshare-user',
+    password: 'webshare-password',
+  },
+});
 const run = await client.createRun(ready.id, {
   task: 'Open example.com and return the page title',
 });
@@ -51,6 +59,8 @@ const run = await client.createRun(session.id, {
 - `createBrowserSession(options)`
 - `getBrowserSession(sessionId)`
 - `updateBrowserSession(sessionId, { displayName })`
+- `getBrowserProxy(sessionId)`
+- `updateBrowserProxy(sessionId, { proxyUrl })` or `{ proxy: { domain, port, username, password } }`
 - `waitForBrowserSession(sessionId, options)`
 - `deleteBrowserSession(sessionId)`
 - `createRun(sessionId, options)`

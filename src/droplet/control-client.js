@@ -16,12 +16,16 @@ export class DropletControlClient {
     controlUrl,
     sessionToken,
     sidecarBase = DEFAULT_SIDECAR_BASE,
+    proxyRelay = null,
+    proxyVerifyUrl = '',
     reconnectMinMs = 500,
     reconnectMaxMs = 10000,
   }) {
     this.controlUrl = controlUrl;
     this.sessionToken = sessionToken;
     this.sidecarBase = sidecarBase.replace(/\/$/, '');
+    this.proxyRelay = proxyRelay;
+    this.proxyVerifyUrl = proxyVerifyUrl;
     this.reconnectMinMs = reconnectMinMs;
     this.reconnectMaxMs = reconnectMaxMs;
     this.stopped = false;
@@ -87,6 +91,17 @@ export class DropletControlClient {
   }
 
   async handleCommand(action, payload) {
+    if (action === 'proxy.status') {
+      if (!this.proxyRelay) throw Object.assign(new Error('Browser proxy relay is unavailable'), { status: 503 });
+      return this.proxyRelay.status();
+    }
+    if (action === 'proxy.update') {
+      if (!this.proxyRelay) throw Object.assign(new Error('Browser proxy relay is unavailable'), { status: 503 });
+      return await this.proxyRelay.update(payload.proxy_url || '', {
+        verify: payload.verify !== false,
+        verifyUrl: payload.verify_url || this.proxyVerifyUrl,
+      });
+    }
     if (action === 'run') {
       const res = await fetch(`${this.sidecarBase}/runs`, {
         method: 'POST',

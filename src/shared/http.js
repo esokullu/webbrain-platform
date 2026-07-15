@@ -14,6 +14,11 @@ export function publicBrowserSession(row) {
     droplet_connected: row.droplet_connected === true,
     extension_connected: row.extension_connected === true,
     runtime_ready: row.runtime_ready === true,
+    proxy: {
+      enabled: row.proxy_enabled === true || row.proxy_enabled === 1,
+      endpoint: row.proxy_endpoint || null,
+      updated_at: row.proxy_updated_at || null,
+    },
   };
 }
 

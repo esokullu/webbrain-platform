@@ -5,6 +5,7 @@ import { publicBrowserSession, publicRun, jsonError } from '../shared/http.js';
 import { signNoVncToken } from '../shared/novnc-token.js';
 import { instanceHostname } from './instance-proxy.js';
 import { docsPage } from './docs-page.js';
+import { normalizeProxyUrl, proxyUrlFromParts, publicProxyEndpoint, publicProxyState } from '../shared/proxy.js';
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'aborted']);
 
@@ -271,7 +272,12 @@ function dashboardPage(user) {
     .session-panel.is-collapsed .panel-body { display: none !important; }
     .session-panel.is-collapsed .collapse-sessions span { transform: rotate(180deg); }
     .panel-body { padding: 16px; }
-    .create-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; margin-bottom: 14px; }
+    .create-row { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: start; gap: 8px; margin-bottom: 14px; }
+    .proxy-setup { grid-column: 1 / -1; border: 1px solid var(--border); border-radius: 8px; background: rgba(89,55,25,.025); }
+    .proxy-setup summary { padding: 7px 10px; color: var(--text-dim); cursor: pointer; font-size: 11px; font-weight: 700; }
+    .proxy-fields { display: grid; grid-template-columns: minmax(0,1.35fr) minmax(80px,.65fr); gap: 8px; padding: 2px 9px 9px; }
+    .proxy-fields input { min-width: 0; }
+    .proxy-current { margin-top: 12px; padding: 10px 11px; border: 1px solid var(--border); border-radius: 9px; background: rgba(89,55,25,.035); color: var(--text-dim); font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
     .sessions { display: grid; gap: 8px; }
     .session { text-align: left; width: 100%; color: var(--text); background: rgba(89,55,25,.025); border: 1px solid var(--border); display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 11px 12px; box-shadow: none; }
     .session:hover { background: var(--card-hover); border-color: rgba(91,82,232,.25); }
@@ -589,6 +595,15 @@ function dashboardPage(user) {
             <div class="create-row">
               <input id="newSessionName" aria-label="Browser name" maxlength="120" placeholder="Name this browser (optional)">
               <button id="createSessionBtn" type="button">+ New browser</button>
+              <details class="proxy-setup">
+                <summary>Webshare proxy (optional)</summary>
+                <div class="proxy-fields">
+                  <input id="newProxyDomain" aria-label="Webshare proxy domain" autocomplete="off" spellcheck="false" placeholder="Domain name">
+                  <input id="newProxyPort" aria-label="Webshare proxy port" inputmode="numeric" autocomplete="off" placeholder="Port">
+                  <input id="newProxyUsername" aria-label="Webshare proxy username" autocomplete="off" spellcheck="false" placeholder="Username">
+                  <input id="newProxyPassword" aria-label="Webshare proxy password" type="password" autocomplete="new-password" placeholder="Password">
+                </div>
+              </details>
             </div>
             <div class="sessions" id="sessions"></div>
             <div class="message" id="sessionMessage"></div>
@@ -600,6 +615,7 @@ function dashboardPage(user) {
               <button class="viewer-title-button" id="renameSessionBtn" type="button" disabled title="Rename browser"><span class="viewer-title" id="viewerTitle">Browser preview</span><span aria-hidden="true">✎</span></button>
               <div class="toolbar">
                 <button class="secondary" id="connectBtn" type="button" disabled>Connect</button>
+                <button class="secondary" id="proxyBtn" type="button" disabled>Proxy</button>
                 <a class="button-link" id="externalLink" href="#" target="_blank" rel="noopener" style="display:none">Open separately</a>
                 <button class="danger" id="deleteSessionBtn" type="button" disabled>Delete</button>
               </div>
@@ -838,6 +854,25 @@ function dashboardPage(user) {
       </div>
     </form>
   </dialog>
+  <dialog id="proxyDialog">
+    <form class="dialog-body" id="proxyForm">
+      <h2>Browser proxy</h2>
+      <p>Replace the upstream without restarting Chrome. Existing connections will be closed and the new exit IP verified.</p>
+      <div class="proxy-current" id="proxyCurrent">Loading current proxy…</div>
+      <div class="proxy-fields" style="margin-top:14px;padding:0">
+        <input id="proxyDomain" aria-label="Webshare proxy domain" autocomplete="off" spellcheck="false" placeholder="Domain name">
+        <input id="proxyPort" aria-label="Webshare proxy port" inputmode="numeric" autocomplete="off" placeholder="Port">
+        <input id="proxyUsername" aria-label="Webshare proxy username" autocomplete="off" spellcheck="false" placeholder="Username">
+        <input id="proxyPassword" aria-label="Webshare proxy password" type="password" autocomplete="new-password" placeholder="Password">
+      </div>
+      <span class="field-hint">Enter all four Webshare values. Leave all fields blank to switch to direct mode.</span>
+      <div class="message" id="proxyMessage" aria-live="polite"></div>
+      <div class="dialog-actions">
+        <button class="secondary" type="button" id="cancelProxyBtn">Cancel</button>
+        <button type="submit" id="saveProxyBtn">Verify and switch</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="deleteDialog">
     <div class="dialog-body">
       <h2>Delete this browser?</h2>
@@ -860,6 +895,10 @@ function dashboardPage(user) {
     const sessionCount = document.getElementById('sessionCount');
     const createSessionBtn = document.getElementById('createSessionBtn');
     const newSessionName = document.getElementById('newSessionName');
+    const newProxyDomain = document.getElementById('newProxyDomain');
+    const newProxyPort = document.getElementById('newProxyPort');
+    const newProxyUsername = document.getElementById('newProxyUsername');
+    const newProxyPassword = document.getElementById('newProxyPassword');
     const accountMenu = document.getElementById('accountMenu');
     const accountSummaryEmail = document.getElementById('accountSummaryEmail');
     const accountContextEmail = document.getElementById('accountContextEmail');
@@ -867,6 +906,7 @@ function dashboardPage(user) {
     const editAccountBtn = document.getElementById('editAccountBtn');
     const refreshBtn = document.getElementById('refreshBtn');
     const connectBtn = document.getElementById('connectBtn');
+    const proxyBtn = document.getElementById('proxyBtn');
     const deleteSessionBtn = document.getElementById('deleteSessionBtn');
     const renameSessionBtn = document.getElementById('renameSessionBtn');
     const viewerTitle = document.getElementById('viewerTitle');
@@ -922,6 +962,16 @@ function dashboardPage(user) {
     const renameForm = document.getElementById('renameForm');
     const renameInput = document.getElementById('renameInput');
     const cancelRenameBtn = document.getElementById('cancelRenameBtn');
+    const proxyDialog = document.getElementById('proxyDialog');
+    const proxyForm = document.getElementById('proxyForm');
+    const proxyCurrent = document.getElementById('proxyCurrent');
+    const proxyDomain = document.getElementById('proxyDomain');
+    const proxyPort = document.getElementById('proxyPort');
+    const proxyUsername = document.getElementById('proxyUsername');
+    const proxyPassword = document.getElementById('proxyPassword');
+    const proxyMessage = document.getElementById('proxyMessage');
+    const cancelProxyBtn = document.getElementById('cancelProxyBtn');
+    const saveProxyBtn = document.getElementById('saveProxyBtn');
     const deleteDialog = document.getElementById('deleteDialog');
     const deleteDialogDescription = document.getElementById('deleteDialogDescription');
     const deleteConfirmInput = document.getElementById('deleteConfirmInput');
@@ -947,6 +997,7 @@ function dashboardPage(user) {
       logsStatusFilter: 'all',
       showDestroyed: false,
       deleteTargetId: null,
+      proxyTargetId: null,
       codeClient: 'rest',
     };
     const viewerConnections = new Map();
@@ -1063,6 +1114,20 @@ function dashboardPage(user) {
 
     function browserName(session) {
       return session?.display_name || ('Browser ' + String(session?.id || '').slice(-4).toUpperCase());
+    }
+
+    function proxyParts(domainInput, portInput, usernameInput, passwordInput) {
+      return {
+        protocol: 'http',
+        domain: domainInput.value.trim(),
+        port: portInput.value.trim(),
+        username: usernameInput.value.trim(),
+        password: passwordInput.value,
+      };
+    }
+
+    function hasProxyParts(proxy) {
+      return Boolean(proxy.domain || proxy.port || proxy.username || proxy.password);
     }
 
     function shellDoubleQuoted(value) {
@@ -1972,7 +2037,7 @@ function dashboardPage(user) {
         title.textContent = browserName(session);
         const meta = document.createElement('div');
         meta.className = 'session-meta';
-        meta.textContent = session.id;
+        meta.textContent = session.id + (session.proxy?.enabled && session.proxy.endpoint ? ' · ' + session.proxy.endpoint : '');
         details.append(title, meta);
         const status = document.createElement('span');
         status.className = 'status';
@@ -2003,6 +2068,7 @@ function dashboardPage(user) {
 
       connectBtn.textContent = isConnected ? 'Disconnect' : (isConnecting ? 'Connecting…' : 'Connect');
       connectBtn.disabled = isConnecting || (!isConnected && !canConnect);
+      proxyBtn.disabled = !session || session.status === 'destroyed' || session.droplet_connected !== true;
       deleteSessionBtn.disabled = !session || session.status === 'destroyed';
       renameSessionBtn.disabled = !session || session.status === 'destroyed';
       viewerTitle.textContent = session ? browserName(session) + ' · ' + session.status : 'Browser preview';
@@ -2107,18 +2173,83 @@ function dashboardPage(user) {
       createSessionBtn.disabled = true;
       showMessage(sessionMessage, 'Creating droplet...');
       try {
+        const startupProxy = proxyParts(newProxyDomain, newProxyPort, newProxyUsername, newProxyPassword);
+        const hasStartupProxy = hasProxyParts(startupProxy);
         const body = await api('/api/browser-sessions', {
           method: 'POST',
-          body: { display_name: newSessionName.value.trim() || null },
+          body: {
+            display_name: newSessionName.value.trim() || null,
+            ...(hasStartupProxy ? { proxy: startupProxy } : {}),
+          },
         });
         state.selectedId = body.browser_session.id;
         newSessionName.value = '';
+        newProxyDomain.value = '';
+        newProxyPort.value = '';
+        newProxyUsername.value = '';
+        newProxyPassword.value = '';
         await loadSessions();
         showMessage(sessionMessage, 'Session created. It may take a few minutes before noVNC is ready.');
       } catch (e) {
         showMessage(sessionMessage, e.message, true);
       } finally {
         createSessionBtn.disabled = false;
+      }
+    }
+
+    function proxyStatusText(proxy) {
+      const route = proxy?.enabled ? (proxy.endpoint || 'Configured proxy') : 'Direct connection';
+      return route + (proxy?.exit_ip ? ' · exit ' + proxy.exit_ip : '');
+    }
+
+    async function openProxyDialog() {
+      const session = selectedSession();
+      if (!session || session.status === 'destroyed' || !session.droplet_connected) return;
+      state.proxyTargetId = session.id;
+      proxyDomain.value = '';
+      proxyPort.value = '';
+      proxyUsername.value = '';
+      proxyPassword.value = '';
+      proxyCurrent.textContent = proxyStatusText(session.proxy);
+      showMessage(proxyMessage, '');
+      proxyDialog.showModal();
+      proxyDomain.focus();
+      try {
+        const body = await api('/api/browser-sessions/' + encodeURIComponent(session.id) + '/proxy');
+        if (state.proxyTargetId === session.id && proxyDialog.open) proxyCurrent.textContent = proxyStatusText(body.proxy);
+      } catch (error) {
+        if (state.proxyTargetId === session.id && proxyDialog.open) showMessage(proxyMessage, error.message, true);
+      }
+    }
+
+    async function saveBrowserProxy(event) {
+      event.preventDefault();
+      const sessionId = state.proxyTargetId;
+      if (!sessionId) return;
+      saveProxyBtn.disabled = true;
+      showMessage(proxyMessage, 'Closing old connections and verifying the new exit…');
+      try {
+        const nextProxy = proxyParts(proxyDomain, proxyPort, proxyUsername, proxyPassword);
+        const hasNextProxy = hasProxyParts(nextProxy);
+        const body = await api('/api/browser-sessions/' + encodeURIComponent(sessionId) + '/proxy', {
+          method: 'PATCH',
+          body: hasNextProxy ? { proxy: nextProxy } : { proxy_url: null },
+        });
+        state.sessions = state.sessions.map(session => session.id === sessionId ? {
+          ...session,
+          proxy: {
+            enabled: body.proxy.enabled === true,
+            endpoint: body.proxy.endpoint || null,
+            updated_at: body.proxy.updated_at || null,
+          },
+        } : session);
+        proxyDialog.close();
+        renderSessions();
+        showMessage(sessionMessage, 'Network route updated: ' + proxyStatusText(body.proxy) + '.');
+      } catch (error) {
+        showMessage(proxyMessage, error.message, true);
+      } finally {
+        saveProxyBtn.disabled = false;
       }
     }
 
@@ -2284,6 +2415,11 @@ function dashboardPage(user) {
     newSessionName.addEventListener('keydown', event => {
       if (event.key === 'Enter') createSession();
     });
+    for (const input of [newProxyDomain, newProxyPort, newProxyUsername, newProxyPassword]) {
+      input.addEventListener('keydown', event => {
+        if (event.key === 'Enter') createSession();
+      });
+    }
     collapseSessionsBtn.addEventListener('click', () => setSessionsCollapsed(!sessionPanel.classList.contains('is-collapsed')));
     toggleDestroyedBtn.addEventListener('click', () => {
       state.showDestroyed = !state.showDestroyed;
@@ -2334,6 +2470,17 @@ function dashboardPage(user) {
       const session = selectedSession();
       if (session && viewerConnections.has(session.id)) disconnectNoVnc();
       else openNoVnc();
+    });
+    proxyBtn.addEventListener('click', openProxyDialog);
+    proxyForm.addEventListener('submit', saveBrowserProxy);
+    cancelProxyBtn.addEventListener('click', () => proxyDialog.close());
+    proxyDialog.addEventListener('close', () => {
+      state.proxyTargetId = null;
+      proxyDomain.value = '';
+      proxyPort.value = '';
+      proxyUsername.value = '';
+      proxyPassword.value = '';
+      showMessage(proxyMessage, '');
     });
     viewerConnectBtn.addEventListener('click', openNoVnc);
     renameSessionBtn.addEventListener('click', openRenameDialog);
@@ -2714,6 +2861,13 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
   app.post('/api/browser-sessions', requireAuth, async (req, res, next) => {
     try {
       const now = nowIso();
+      const requestedProxyUrl = Object.prototype.hasOwnProperty.call(req.body, 'proxy_url')
+        ? req.body.proxy_url
+        : config.browserProxy.url;
+      const proxyUrl = Object.prototype.hasOwnProperty.call(req.body, 'proxy')
+        ? proxyUrlFromParts(req.body.proxy)
+        : normalizeProxyUrl(requestedProxyUrl);
+      const proxyEndpoint = publicProxyEndpoint(proxyUrl);
       const session = await store.createBrowserSession({
         id: randomId('bs'),
         user_id: req.auth.user.id,
@@ -2724,13 +2878,19 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
         region: req.body.region || config.digitalOcean.region,
         size: req.body.size || config.digitalOcean.size,
         connect_secret: randomSecret(32),
+        proxy_enabled: Boolean(proxyEndpoint),
+        proxy_endpoint: proxyEndpoint,
+        proxy_updated_at: proxyEndpoint ? now : null,
         expires_at: isoAfterMs(Number(req.body.ttl_ms || config.browserSessionTtlMs)),
         created_at: now,
         updated_at: now,
       });
       let provisioned;
       try {
-        provisioned = await provisioner.createBrowserDroplet(session, { providerApiKey: req.body.provider_api_key || session.connect_secret });
+        provisioned = await provisioner.createBrowserDroplet(session, {
+          providerApiKey: req.body.provider_api_key || session.connect_secret,
+          proxyUrl,
+        });
       } catch (e) {
         await store.updateBrowserSession(session.id, { status: 'failed', updated_at: nowIso() });
         throw e;
@@ -2768,6 +2928,75 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
       });
       await audit(req, 'browser_session.rename', 'browser_session', session.id, { display_name: displayName });
       res.json({ browser_session: publicBrowserSession(updated) });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.get('/api/browser-sessions/:sessionId/proxy', requireAuth, async (req, res, next) => {
+    try {
+      const session = await ownedBrowserSession(req, res);
+      if (!session) return;
+      if (!controlChannel.isConnected(session.id)) {
+        return res.json({
+          proxy: publicProxyState({
+            endpoint: session.proxy_endpoint || null,
+            updatedAt: session.proxy_updated_at || null,
+          }),
+          droplet_connected: false,
+        });
+      }
+      const proxy = await controlChannel.send(session.id, 'proxy.status', {}, 3000);
+      res.json({ proxy, droplet_connected: true });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.patch('/api/browser-sessions/:sessionId/proxy', requireAuth, async (req, res, next) => {
+    try {
+      const session = await ownedBrowserSession(req, res);
+      if (!session) return;
+      if (!Object.prototype.hasOwnProperty.call(req.body, 'proxy_url')
+          && !Object.prototype.hasOwnProperty.call(req.body, 'proxy')) {
+        return jsonError(res, 400, '`proxy_url` or `proxy` is required; use an empty value for direct mode');
+      }
+      const activeRuns = [];
+      for (let run of await store.listCloudRunsForSession(session.id)) {
+        if (TERMINAL_RUN_STATUSES.has(run.status)) continue;
+        if (controlChannel.isConnected(session.id)) {
+          const snapshot = await controlChannel.send(session.id, 'status', { run_id: run.id }, 3000).catch(() => null);
+          if (snapshot) run = await store.updateCloudRun(run.id, normalizeRunSnapshot(snapshot, run));
+        }
+        if (!TERMINAL_RUN_STATUSES.has(run.status)) activeRuns.push(run);
+      }
+      if (activeRuns.length) {
+        return jsonError(res, 409, 'Abort the active browser run before changing its proxy.', {
+          active_run_ids: activeRuns.map(run => run.id),
+        });
+      }
+
+      const proxyUrl = Object.prototype.hasOwnProperty.call(req.body, 'proxy')
+        ? proxyUrlFromParts(req.body.proxy)
+        : normalizeProxyUrl(req.body.proxy_url);
+      const proxy = await controlChannel.send(session.id, 'proxy.update', {
+        proxy_url: proxyUrl,
+        verify: true,
+        verify_url: config.browserProxy.verifyUrl,
+      }, config.browserProxy.verifyTimeoutMs + 5000);
+      const updatedAt = proxy.updated_at || nowIso();
+      await store.updateBrowserSession(session.id, {
+        proxy_enabled: proxy.enabled === true,
+        proxy_endpoint: proxy.endpoint || null,
+        proxy_updated_at: updatedAt,
+        updated_at: nowIso(),
+      });
+      await audit(req, 'browser_session.proxy_update', 'browser_session', session.id, {
+        enabled: proxy.enabled === true,
+        endpoint: proxy.endpoint || null,
+        exit_ip: proxy.exit_ip || null,
+      });
+      res.json({ proxy });
     } catch (e) {
       next(e);
     }

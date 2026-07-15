@@ -57,6 +57,15 @@ export class WebBrainClient {
     })).browser_session;
   }
 
+  async getBrowserProxy(sessionId) {
+    return (await this.request('GET', `/api/browser-sessions/${encodeURIComponent(sessionId)}/proxy`)).proxy;
+  }
+
+  async updateBrowserProxy(sessionId, { proxyUrl, proxy } = {}) {
+    const body = proxy === undefined ? { proxy_url: proxyUrl ?? null } : { proxy };
+    return (await this.request('PATCH', `/api/browser-sessions/${encodeURIComponent(sessionId)}/proxy`, body)).proxy;
+  }
+
   async deleteBrowserSession(sessionId) {
     return (await this.request('DELETE', `/api/browser-sessions/${encodeURIComponent(sessionId)}`)).browser_session;
   }
