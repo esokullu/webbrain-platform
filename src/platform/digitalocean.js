@@ -14,6 +14,7 @@ export class DigitalOceanProvisioner {
       e.status = 503;
       throw e;
     }
+    if (session.volume_id) await this.waitForVolumeDetached(session.volume_id);
     const body = {
       name: digitalOceanDropletName(session.id),
       region: opts.region || session.region || this.config.digitalOcean.region,
@@ -24,6 +25,7 @@ export class DigitalOceanProvisioner {
       ipv6: false,
       monitoring: true,
       tags: ['webbrain', `session:${session.id}`],
+      volumes: session.volume_id ? [session.volume_id] : undefined,
       user_data: renderCloudInit({
         session,
         config: this.config,
@@ -41,10 +43,45 @@ export class DigitalOceanProvisioner {
     });
     if (!res.ok) throw new Error(`DigitalOcean create failed: ${res.status} ${await res.text()}`);
     const parsed = await res.json();
+    if (!parsed.droplet?.id) throw new Error('DigitalOcean create response did not include a Droplet id.');
     return {
       droplet_id: String(parsed.droplet?.id || ''),
       public_ip: findPublicIp(parsed.droplet),
       status: 'provisioning',
+      request: body,
+    };
+  }
+
+  async createBrowserVolume(session, opts = {}) {
+    if (!this.config.digitalOcean.token) {
+      const e = new Error('DO_API_TOKEN is required to create browser storage.');
+      e.status = 503;
+      throw e;
+    }
+    const body = {
+      size_gigabytes: Number(opts.sizeGiB || this.config.digitalOcean.volumeSizeGiB || 2),
+      name: digitalOceanVolumeName(session.id),
+      description: `Persistent Chrome profile for ${session.id}`,
+      region: opts.region || session.region || this.config.digitalOcean.region,
+      filesystem_type: 'ext4',
+      filesystem_label: 'webbrain-profile',
+      tags: ['webbrain', `session:${session.id}`],
+    };
+    const res = await this.fetch('https://api.digitalocean.com/v2/volumes', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${this.config.digitalOcean.token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`DigitalOcean volume create failed: ${res.status} ${await res.text()}`);
+    const parsed = await res.json();
+    if (!parsed.volume?.id) throw new Error('DigitalOcean volume create response did not include a volume id.');
+    return {
+      volume_id: String(parsed.volume?.id || ''),
+      volume_name: parsed.volume?.name || body.name,
+      volume_size_gib: Number(parsed.volume?.size_gigabytes || body.size_gigabytes),
       request: body,
     };
   }
@@ -77,6 +114,38 @@ export class DigitalOceanProvisioner {
     if (!res.ok && res.status !== 404) throw new Error(`DigitalOcean delete failed: ${res.status} ${await res.text()}`);
     return { ok: true };
   }
+
+  async getVolume(volumeId) {
+    if (!volumeId || !this.config.digitalOcean.token) return null;
+    const res = await this.fetch(`https://api.digitalocean.com/v2/volumes/${volumeId}`, {
+      headers: { authorization: `Bearer ${this.config.digitalOcean.token}` },
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`DigitalOcean volume lookup failed: ${res.status} ${await res.text()}`);
+    return (await res.json()).volume || null;
+  }
+
+  async waitForVolumeDetached(volumeId, timeoutMs = 45_000) {
+    if (!volumeId) return { ok: true, skipped: true };
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const volume = await this.getVolume(volumeId);
+      if (!volume) throw Object.assign(new Error('Browser profile volume no longer exists.'), { status: 409 });
+      if (!Array.isArray(volume.droplet_ids) || volume.droplet_ids.length === 0) return { ok: true };
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    throw Object.assign(new Error('Browser profile volume is still detaching; retry shortly.'), { status: 409 });
+  }
+
+  async destroyVolume(volumeId) {
+    if (!volumeId || !this.config.digitalOcean.token) return { ok: true, skipped: true };
+    const res = await this.fetch(`https://api.digitalocean.com/v2/volumes/${volumeId}`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${this.config.digitalOcean.token}` },
+    });
+    if (!res.ok && res.status !== 404) throw new Error(`DigitalOcean volume delete failed: ${res.status} ${await res.text()}`);
+    return { ok: true };
+  }
 }
 
 export class NullProvisioner {
@@ -84,6 +153,19 @@ export class NullProvisioner {
     this.created = [];
     this.createdOptions = [];
     this.destroyed = [];
+    this.createdVolumes = [];
+    this.destroyedVolumes = [];
+  }
+
+  async createBrowserVolume(session, opts = {}) {
+    const volume = {
+      volume_id: `mock-volume-${session.id}`,
+      volume_name: digitalOceanVolumeName(session.id),
+      volume_size_gib: Number(opts.sizeGiB || 2),
+      request: null,
+    };
+    this.createdVolumes.push(volume);
+    return volume;
   }
 
   async createBrowserDroplet(session, opts = {}) {
@@ -105,6 +187,15 @@ export class NullProvisioner {
     this.destroyed.push(dropletId);
     return { ok: true };
   }
+
+  async waitForVolumeDetached() {
+    return { ok: true };
+  }
+
+  async destroyVolume(volumeId) {
+    this.destroyedVolumes.push(volumeId);
+    return { ok: true };
+  }
 }
 
 export function digitalOceanDropletName(sessionId) {
@@ -115,6 +206,15 @@ export function digitalOceanDropletName(sessionId) {
     .replace(/[^a-z0-9]+$/, '')
     .slice(0, 48) || 'session';
   return `webbrain-${suffix}`;
+}
+
+export function digitalOceanVolumeName(sessionId) {
+  const suffix = String(sessionId || 'session')
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 44) || 'session';
+  return `wb-profile-${suffix}`;
 }
 
 export function isTcpReachable(host, port, timeoutMs = 1000) {

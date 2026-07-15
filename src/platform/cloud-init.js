@@ -16,6 +16,31 @@ export function renderCloudInit({ session, config, providerApiKey = '', proxyUrl
   const webbrainDir = '/opt/webbrain3';
   const extensionDir = `${webbrainDir}/src/chrome`;
   const extensionId = chromeExtensionIdForPath(extensionDir);
+  const hasProfileVolume = Boolean(session.volume_id && session.volume_name);
+  const profileMount = config.droplet.profileMount || '/mnt/webbrain-profile';
+  const profileDir = hasProfileVolume ? `${profileMount}/chrome` : `${appDir}/.webbrain-sessions/${session.id}`;
+  const proxyStatePath = hasProfileVolume ? `${profileMount}/proxy.json` : config.browserProxy.statePath;
+  const downloadsSyncEnabled = config.downloads?.spaces?.enabled === true;
+  const downloadsStagingDir = '/var/lib/webbrain/download-staging';
+  const profileMountScript = hasProfileVolume ? `#!/usr/bin/env bash
+set -euo pipefail
+device=${shellQuote(`/dev/disk/by-id/scsi-0DO_Volume_${session.volume_name}`)}
+mount_path=${shellQuote(profileMount)}
+for attempt in $(seq 1 120); do
+  [ -b "$device" ] && break
+  sleep 1
+done
+[ -b "$device" ] || { echo "WebBrain profile volume did not appear: $device" >&2; exit 1; }
+uuid=$(blkid -s UUID -o value "$device")
+[ -n "$uuid" ] || { echo "WebBrain profile volume has no filesystem UUID" >&2; exit 1; }
+mkdir -p "$mount_path"
+if ! grep -q "^UUID=$uuid " /etc/fstab; then
+  echo "UUID=$uuid $mount_path ext4 defaults,discard,noatime,nofail 0 2" >> /etc/fstab
+fi
+mountpoint -q "$mount_path" || mount "$mount_path"
+mkdir -p "$mount_path/chrome"
+chmod 0700 "$mount_path" "$mount_path/chrome"
+` : '';
   const env = {
     NODE_ENV: 'production',
     WEBBRAIN_ROLE: 'droplet',
@@ -34,17 +59,25 @@ export function renderCloudInit({ session, config, providerApiKey = '', proxyUrl
     WEBBRAIN_DOWNLOADS_HOST: '127.0.0.1',
     WEBBRAIN_DOWNLOADS_PORT: '6083',
     WEBBRAIN_DOWNLOADS_ROOT: '/root/Downloads',
-    WEBBRAIN_DOWNLOADS_UPLOAD_LIMIT_BYTES: String(5 * 1024 * 1024 * 1024),
+    WEBBRAIN_DOWNLOADS_UPLOAD_LIMIT_BYTES: String(downloadsSyncEnabled
+      ? config.downloads.maxUploadBytes
+      : 5 * 1024 * 1024 * 1024),
+    WEBBRAIN_DOWNLOADS_SYNC_ENABLED: String(downloadsSyncEnabled),
+    WEBBRAIN_DOWNLOADS_STAGING_DIR: downloadsStagingDir,
+    WEBBRAIN_DOWNLOADS_INGEST_URL: `${config.baseUrl}/droplet/downloads`,
     DISPLAY: ':99',
     WEBBRAIN_HEADLESS: 'false',
     WEBBRAIN_START_URL: 'https://webbrain.one',
     WEBBRAIN_BROWSER_BIN: '/opt/chrome-linux64/chrome',
+    WEBBRAIN_PROFILE_DIR: profileDir,
+    WEBBRAIN_PROFILE_MOUNT: hasProfileVolume ? profileMount : '',
+    WEBBRAIN_BROWSER_DISK_CACHE_DIR: '/var/cache/webbrain-chrome',
     WEBBRAIN_BROWSER_PROXY_URL: proxyUrl,
     WEBBRAIN_BROWSER_PROXY_SERVER: `http://${config.browserProxy.relayHost}:${config.browserProxy.relayPort}`,
     WEBBRAIN_BROWSER_PROXY_BYPASS_LIST: config.browserProxy.bypassList,
     WEBBRAIN_PROXY_RELAY_HOST: config.browserProxy.relayHost,
     WEBBRAIN_PROXY_RELAY_PORT: String(config.browserProxy.relayPort),
-    WEBBRAIN_PROXY_STATE_PATH: config.browserProxy.statePath,
+    WEBBRAIN_PROXY_STATE_PATH: proxyStatePath,
     WEBBRAIN_PROXY_VERIFY_URL: config.browserProxy.verifyUrl,
     WEBBRAIN_PROXY_VERIFY_TIMEOUT_MS: String(config.browserProxy.verifyTimeoutMs),
   };
@@ -68,6 +101,10 @@ packages:
   - x11vnc
   - websockify
 write_files:
+${hasProfileVolume ? `  - path: /usr/local/sbin/webbrain-mount-profile
+    permissions: '0755'
+    content: |
+${profileMountScript.split('\n').map(line => `      ${line}`).join('\n')}` : ''}
   - path: /etc/opt/chrome_for_testing/policies/managed/webbrain.json
     permissions: '0644'
     content: |
@@ -132,9 +169,10 @@ ${envText.split('\n').map(line => `      ${line}`).join('\n')}
     content: |
       [Unit]
       Description=WebBrain cloud browser
-      After=webbrain-droplet.service webbrain-sidecar.service webbrain-xvfb.service
+      After=webbrain-droplet.service webbrain-sidecar.service webbrain-xvfb.service${hasProfileVolume ? ' local-fs.target' : ''}
       Wants=webbrain-droplet.service
       Requires=webbrain-xvfb.service
+${hasProfileVolume ? `      RequiresMountsFor=${profileMount}` : ''}
       [Service]
       EnvironmentFile=/etc/webbrain-droplet.env
       WorkingDirectory=${appDir}
@@ -174,6 +212,9 @@ runcmd:
   - cd ${appDir} && npm ci --omit=dev
   - cd ${appDir} && bash scripts/install-downloads-share.sh
   - cd ${webbrainDir} && git checkout ${shellQuote(config.droplet.webbrainRef)}
+${hasProfileVolume ? '  - /usr/local/sbin/webbrain-mount-profile' : ''}
+  - mkdir -p /var/cache/webbrain-chrome ${downloadsStagingDir}
+  - chmod 0700 /var/cache/webbrain-chrome ${downloadsStagingDir}
   - systemctl daemon-reload
   - systemctl enable webbrain-sidecar.service webbrain-xvfb.service webbrain-x11vnc.service webbrain-novnc.service webbrain-droplet.service webbrain-browser.service
   - systemctl start webbrain-sidecar.service webbrain-xvfb.service webbrain-x11vnc.service webbrain-novnc.service webbrain-droplet.service webbrain-browser.service

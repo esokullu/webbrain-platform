@@ -6,6 +6,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
+import { ChromeDownloadSync } from '../src/droplet/download-sync.js';
 import {
   buildCloudStartupTabNormalizationExpression,
   buildCloudStartupTabPlan,
@@ -23,6 +24,11 @@ const sidecarWsUrl = process.env.WEBBRAIN_SIDECAR_WS_URL || 'ws://127.0.0.1:1737
 const startUrl = process.env.WEBBRAIN_START_URL || 'https://webbrain.one';
 const browserProxyServer = process.env.WEBBRAIN_BROWSER_PROXY_SERVER || '';
 const browserProxyBypassList = process.env.WEBBRAIN_BROWSER_PROXY_BYPASS_LIST || '';
+const browserDiskCacheDir = process.env.WEBBRAIN_BROWSER_DISK_CACHE_DIR || '';
+const downloadsSyncEnabled = boolEnv('WEBBRAIN_DOWNLOADS_SYNC_ENABLED', false);
+const downloadsStagingDir = process.env.WEBBRAIN_DOWNLOADS_STAGING_DIR || '/var/lib/webbrain/download-staging';
+const downloadsIngestUrl = process.env.WEBBRAIN_DOWNLOADS_INGEST_URL || '';
+const sessionToken = process.env.WEBBRAIN_SESSION_TOKEN || '';
 
 function commandExists(cmd) {
   if (path.isAbsolute(cmd)) return existsSync(cmd);
@@ -253,9 +259,14 @@ function createCdpClient(webSocketDebuggerUrl) {
   const ws = new WebSocket(webSocketDebuggerUrl);
   let nextId = 1;
   const pending = new Map();
+  const eventHandlers = new Map();
   ws.on('message', raw => {
     const msg = JSON.parse(raw.toString('utf8'));
-    if (!msg.id || !pending.has(msg.id)) return;
+    if (!msg.id) {
+      for (const handler of eventHandlers.get(msg.method) || []) handler(msg.params || {});
+      return;
+    }
+    if (!pending.has(msg.id)) return;
     const item = pending.get(msg.id);
     pending.delete(msg.id);
     if (msg.error) item.reject(new Error(msg.error.message || JSON.stringify(msg.error)));
@@ -268,8 +279,19 @@ function createCdpClient(webSocketDebuggerUrl) {
     }),
     call(method, params = {}) {
       const id = nextId++;
-      ws.send(JSON.stringify({ id, method, params }));
-      return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
+      return new Promise((resolve, reject) => {
+        pending.set(id, { resolve, reject });
+        ws.send(JSON.stringify({ id, method, params }), error => {
+          if (!error) return;
+          pending.delete(id);
+          reject(error);
+        });
+      });
+    },
+    on(method, handler) {
+      const handlers = eventHandlers.get(method) || [];
+      handlers.push(handler);
+      eventHandlers.set(method, handlers);
     },
     close() {
       ws.close();
@@ -403,6 +425,7 @@ async function main() {
   ];
   if (browserProxyServer) args.push(`--proxy-server=${browserProxyServer}`);
   if (browserProxyBypassList) args.push(`--proxy-bypass-list=${browserProxyBypassList}`);
+  if (browserDiskCacheDir) args.push(`--disk-cache-dir=${browserDiskCacheDir}`);
   if (boolEnv('WEBBRAIN_HEADLESS', false)) args.push('--headless=new');
   if (process.getuid?.() === 0) args.push('--no-sandbox');
   args.push(startUrl);
@@ -411,7 +434,20 @@ async function main() {
   process.on('SIGINT', () => child.kill('SIGINT'));
   process.on('SIGTERM', () => child.kill('SIGTERM'));
 
-  await waitForDevtools();
+  const devtoolsVersion = await waitForDevtools();
+  let downloadsCdp = null;
+  let downloadSync = null;
+  if (downloadsSyncEnabled) {
+    if (!downloadsIngestUrl || !sessionToken) throw new Error('Shared Downloads sync configuration is incomplete.');
+    downloadsCdp = createCdpClient(devtoolsVersion.webSocketDebuggerUrl);
+    await downloadsCdp.open();
+    downloadSync = new ChromeDownloadSync({
+      stagingDir: downloadsStagingDir,
+      ingestUrl: downloadsIngestUrl,
+      sessionToken,
+    });
+    await downloadSync.start(downloadsCdp);
+  }
   const extensionId = await waitForExtensionId();
   const seeded = await preseedExtension(extensionId);
   if (!seeded?.ok || seeded?.bridge?.error) {
@@ -437,7 +473,11 @@ async function main() {
     tab_normalization: tabNormalization,
   }, null, 2));
 
-  child.on('exit', code => process.exit(code ?? 0));
+  child.on('exit', code => {
+    downloadSync?.close();
+    downloadsCdp?.close();
+    process.exit(code ?? 0);
+  });
 }
 
 main().catch(e => {

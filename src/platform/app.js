@@ -173,7 +173,7 @@ function loginPage(error = '', registrationEnabled = false) {
 </html>`;
 }
 
-function dashboardPage(user) {
+function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
   return `<!doctype html>
 <html>
 <head>
@@ -636,6 +636,7 @@ function dashboardPage(user) {
                 <button class="secondary" id="connectBtn" type="button" disabled>Connect</button>
                 <button class="secondary" id="proxyBtn" type="button" disabled>Proxy</button>
                 <button class="secondary" id="downloadsBtn" type="button" disabled>Downloads</button>
+                <button class="secondary" id="lifecycleBtn" type="button" disabled>Pause</button>
                 <a class="button-link" id="externalLink" href="#" target="_blank" rel="noopener" style="display:none">Open separately</a>
                 <button class="danger" id="deleteSessionBtn" type="button" disabled>Delete</button>
               </div>
@@ -896,7 +897,9 @@ function dashboardPage(user) {
   <dialog class="downloads-dialog" id="downloadsDialog">
     <div class="dialog-body">
       <h2>Downloads access</h2>
-      <p>Files stay on this browser Droplet. Use the credentials below when the browser asks you to sign in.</p>
+      <p>${sharedDownloadsEnabled
+        ? 'Downloads use your private shared storage and remain available while browsers are paused.'
+        : 'Files stay on this running browser Droplet until shared storage is configured.'} Use the credentials below when asked to sign in.</p>
       <div class="downloads-ticket" aria-busy="false" id="downloadsTicket">
         <span class="downloads-ticket-kicker">Private file tray</span>
         <div class="downloads-credential">
@@ -915,7 +918,9 @@ function dashboardPage(user) {
           <button class="secondary downloads-copy" id="copyDownloadsPasswordBtn" type="button">Copy</button>
         </div>
       </div>
-      <p class="downloads-note">Uploads are limited to 5 GB per file. Existing names receive an automatic numbered suffix.</p>
+      <p class="downloads-note">${sharedDownloadsEnabled
+        ? 'Your account has a 25 GiB fair-use allowance.'
+        : 'Uploads are limited to 5 GB per file.'} Existing names receive an automatic numbered suffix.</p>
       <div class="message" id="downloadsMessage" aria-live="polite"></div>
       <div class="dialog-actions">
         <button class="secondary" type="button" id="closeDownloadsBtn">Close</button>
@@ -938,6 +943,7 @@ function dashboardPage(user) {
   <script>
     const sessionsEl = document.getElementById('sessions');
     const dashboardGrid = document.getElementById('dashboardGrid');
+    const sharedDownloadsEnabled = ${JSON.stringify(sharedDownloadsEnabled)};
     const sessionPanel = document.getElementById('sessionPanel');
     const collapseSessionsBtn = document.getElementById('collapseSessionsBtn');
     const toggleDestroyedBtn = document.getElementById('toggleDestroyedBtn');
@@ -958,6 +964,7 @@ function dashboardPage(user) {
     const connectBtn = document.getElementById('connectBtn');
     const proxyBtn = document.getElementById('proxyBtn');
     const downloadsBtn = document.getElementById('downloadsBtn');
+    const lifecycleBtn = document.getElementById('lifecycleBtn');
     const deleteSessionBtn = document.getElementById('deleteSessionBtn');
     const renameSessionBtn = document.getElementById('renameSessionBtn');
     const viewerTitle = document.getElementById('viewerTitle');
@@ -2209,11 +2216,23 @@ function dashboardPage(user) {
       const isConnected = !!connection;
       const isConnecting = !!session && connectingSessionIds.has(session.id);
       const canConnect = !!session && !!session.public_ip && session.status === 'ready';
+      const canPause = sharedDownloadsEnabled && !!session && ['ready', 'pausing'].includes(session.status) && session.volume;
+      const canResume = !!session && session.status === 'paused' && session.volume;
 
       connectBtn.textContent = isConnected ? 'Disconnect' : (isConnecting ? 'Connecting…' : 'Connect');
       connectBtn.disabled = isConnecting || (!isConnected && !canConnect);
       proxyBtn.disabled = !session || session.status === 'destroyed' || session.droplet_connected !== true;
-      downloadsBtn.disabled = !canConnect;
+      downloadsBtn.disabled = !session
+        || !['ready', 'paused'].includes(session.status)
+        || (session.status === 'paused' && !sharedDownloadsEnabled);
+      lifecycleBtn.textContent = session?.status === 'paused'
+        ? 'Resume'
+        : session?.status === 'pausing'
+          ? 'Finish pause'
+          : ['resuming', 'provisioning'].includes(session?.status)
+            ? 'Starting…'
+            : 'Pause';
+      lifecycleBtn.disabled = !canPause && !canResume;
       deleteSessionBtn.disabled = !session || session.status === 'destroyed';
       renameSessionBtn.disabled = !session || session.status === 'destroyed';
       viewerTitle.textContent = session ? browserName(session) + ' · ' + session.status : 'Browser preview';
@@ -2239,12 +2258,18 @@ function dashboardPage(user) {
         if (!session) {
           viewerStateTitle.textContent = 'Select a browser';
           viewerStateDescription.textContent = 'Choose a browser session to preview it here.';
-        } else if (session.status === 'provisioning' || (session.status === 'ready' && !session.public_ip)) {
+        } else if (['provisioning', 'resuming'].includes(session.status) || (session.status === 'ready' && !session.public_ip)) {
           viewerEmpty.classList.add('is-provisioning');
           viewerEmpty.setAttribute('aria-busy', 'true');
           viewerStateVisual.style.display = '';
           viewerStateTitle.textContent = 'Preparing your browser';
           viewerStateDescription.textContent = 'Starting the cloud machine and WebBrain. This usually takes a few minutes.';
+        } else if (session.status === 'pausing') {
+          viewerStateTitle.textContent = 'Pausing your browser';
+          viewerStateDescription.textContent = 'Saving the Chrome profile and detaching its private 2 GB session disk.';
+        } else if (session.status === 'paused') {
+          viewerStateTitle.textContent = 'Browser is paused';
+          viewerStateDescription.textContent = 'The Droplet is off. Your Chrome session is kept on its private 2 GB disk, and Downloads remain available.';
         } else if (canConnect) {
           viewerEmpty.classList.add('is-ready');
           viewerStateVisual.style.display = '';
@@ -2408,7 +2433,7 @@ function dashboardPage(user) {
 
     async function openDownloadsDialog() {
       const session = selectedSession();
-      if (!session || session.status !== 'ready' || !session.public_ip) return;
+      if (!session || !['ready', 'paused'].includes(session.status)) return;
       state.downloadsTargetId = session.id;
       setDownloadsAccess(null);
       showMessage(downloadsMessage, 'Creating private access…');
@@ -2428,6 +2453,31 @@ function dashboardPage(user) {
         }
       } finally {
         if (state.downloadsTargetId === session.id) downloadsTicket.setAttribute('aria-busy', 'false');
+      }
+    }
+
+    async function toggleBrowserLifecycle() {
+      const session = selectedSession();
+      if (!session || !['ready', 'pausing', 'paused'].includes(session.status) || !session.volume) return;
+      const action = session.status === 'paused' ? 'resume' : 'pause';
+      lifecycleBtn.disabled = true;
+      if (viewerConnections.has(session.id)) removeViewerConnection(session.id);
+      showMessage(sessionMessage, action === 'pause'
+        ? 'Finishing downloads and safely pausing the browser…'
+        : 'Creating a new Droplet and attaching the saved Chrome session…');
+      try {
+        const body = await api('/api/browser-sessions/' + encodeURIComponent(session.id) + '/' + action, {
+          method: 'POST',
+          body: {},
+        });
+        state.sessions = state.sessions.map(item => item.id === session.id ? body.browser_session : item);
+        renderSessions();
+        showMessage(sessionMessage, action === 'pause'
+          ? 'Browser paused. Downloads remain available.'
+          : 'Browser is starting with its saved Chrome session.');
+      } catch (error) {
+        showMessage(sessionMessage, error.message, true);
+        await refreshOne(session.id).catch(() => {});
       }
     }
 
@@ -2498,7 +2548,7 @@ function dashboardPage(user) {
       const session = selectedSession();
       if (!session || session.status === 'destroyed') return;
       state.deleteTargetId = session.id;
-      deleteDialogDescription.textContent = 'This permanently destroys “' + browserName(session) + '” and cannot be undone.';
+      deleteDialogDescription.textContent = 'This permanently destroys “' + browserName(session) + '” and its private 2 GB Chrome session disk. Shared Downloads remain in your account.';
       deleteConfirmInput.value = '';
       confirmDeleteBtn.disabled = true;
       deleteDialog.showModal();
@@ -2675,6 +2725,7 @@ function dashboardPage(user) {
       showMessage(proxyMessage, '');
     });
     downloadsBtn.addEventListener('click', openDownloadsDialog);
+    lifecycleBtn.addEventListener('click', toggleBrowserLifecycle);
     closeDownloadsBtn.addEventListener('click', () => downloadsDialog.close());
     copyDownloadsUrlBtn.addEventListener('click', () => copyDownloadsValue(downloadsUrl, copyDownloadsUrlBtn));
     copyDownloadsUsernameBtn.addEventListener('click', () => copyDownloadsValue(downloadsUsername, copyDownloadsUsernameBtn));
@@ -2797,7 +2848,7 @@ function normalizeRunSnapshot(snapshot, existing = {}) {
   };
 }
 
-export function createPlatformApp({ store, provisioner, controlChannel, config }) {
+export function createPlatformApp({ store, provisioner, controlChannel, config, downloadsHandler = null }) {
   const app = express();
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: false }));
@@ -2894,12 +2945,48 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
     });
   }
 
+  async function activeRunsForSession(session) {
+    const activeRuns = [];
+    for (let run of await store.listCloudRunsForSession(session.id)) {
+      if (TERMINAL_RUN_STATUSES.has(run.status)) continue;
+      if (controlChannel.isConnected(session.id)) {
+        const snapshot = await controlChannel.send(session.id, 'status', { run_id: run.id }, 3000).catch(() => null);
+        if (snapshot) run = await store.updateCloudRun(run.id, normalizeRunSnapshot(snapshot, run));
+      }
+      if (!TERMINAL_RUN_STATUSES.has(run.status)) activeRuns.push(run);
+    }
+    return activeRuns;
+  }
+
   app.get('/healthz', (req, res) => {
     res.json({ ok: true, role: 'platform' });
   });
 
   app.get('/docs', (req, res) => {
     res.type('html').send(docsPage());
+  });
+
+  app.put('/droplet/downloads/*', async (req, res, next) => {
+    try {
+      if (!downloadsHandler) return jsonError(res, 503, 'Shared Downloads storage is not configured');
+      const authHeader = String(req.headers.authorization || '');
+      const token = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7).trim() : '';
+      const session = token ? await store.getBrowserSessionBySecret(token) : null;
+      if (!session || ['stopping', 'destroyed', 'failed'].includes(session.status)) {
+        return jsonError(res, 401, 'Browser session authentication required');
+      }
+      const uploaded = await downloadsHandler.uploadStream({
+        userId: session.user_id,
+        requestedPath: req.params[0],
+        stream: req,
+        contentLength: req.headers['content-length'],
+        contentType: req.headers['content-type'] || 'application/octet-stream',
+        idempotencyKey: req.headers['x-webbrain-download-id'] || '',
+      });
+      res.status(201).json(uploaded);
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.all('/v1/*', async (req, res, next) => {
@@ -2935,7 +3022,9 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
   });
 
   app.get('/', (req, res) => {
-    res.type('html').send(req.auth?.user ? dashboardPage(req.auth.user) : loginPage('', config.registrationEnabled));
+    res.type('html').send(req.auth?.user
+      ? dashboardPage(req.auth.user, { sharedDownloadsEnabled: config.downloads?.spaces?.enabled === true })
+      : loginPage('', config.registrationEnabled));
   });
 
   app.post('/auth/register', async (req, res, next) => {
@@ -3117,19 +3206,40 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
         status: 'provisioning',
         droplet_id: null,
         public_ip: null,
+        volume_id: null,
+        volume_name: null,
+        volume_size_gib: null,
         region: req.body.region || config.digitalOcean.region,
         size: req.body.size || config.digitalOcean.size,
         connect_secret: randomSecret(32),
         proxy_enabled: Boolean(proxyEndpoint),
         proxy_endpoint: proxyEndpoint,
         proxy_updated_at: proxyEndpoint ? now : null,
+        paused_at: null,
         expires_at: isoAfterMs(Number(req.body.ttl_ms || config.browserSessionTtlMs)),
         created_at: now,
         updated_at: now,
       });
       let provisioned;
+      let volume;
       try {
-        provisioned = await provisioner.createBrowserDroplet(session, {
+        volume = await provisioner.createBrowserVolume(session, {
+          sizeGiB: config.digitalOcean.volumeSizeGiB,
+          region: session.region,
+        });
+        let sessionWithVolume;
+        try {
+          sessionWithVolume = await store.updateBrowserSession(session.id, {
+            volume_id: volume.volume_id,
+            volume_name: volume.volume_name,
+            volume_size_gib: volume.volume_size_gib,
+            updated_at: nowIso(),
+          });
+        } catch (error) {
+          await provisioner.destroyVolume(volume.volume_id).catch(() => {});
+          throw error;
+        }
+        provisioned = await provisioner.createBrowserDroplet(sessionWithVolume, {
           providerApiKey: req.body.provider_api_key || session.connect_secret,
           proxyUrl,
         });
@@ -3137,12 +3247,20 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
         await store.updateBrowserSession(session.id, { status: 'failed', updated_at: nowIso() });
         throw e;
       }
-      const updated = await store.updateBrowserSession(session.id, {
-        status: provisioned.status || 'provisioning',
-        droplet_id: provisioned.droplet_id || null,
-        public_ip: provisioned.public_ip || null,
-        updated_at: nowIso(),
-      });
+      let updated;
+      try {
+        updated = await store.updateBrowserSession(session.id, {
+          status: provisioned.status || 'provisioning',
+          droplet_id: provisioned.droplet_id || null,
+          public_ip: provisioned.public_ip || null,
+          updated_at: nowIso(),
+        });
+      } catch (error) {
+        await provisioner.destroyDroplet(provisioned.droplet_id).catch(() => {});
+        await provisioner.waitForVolumeDetached(volume.volume_id).catch(() => {});
+        await store.updateBrowserSession(session.id, { status: 'failed', updated_at: nowIso() }).catch(() => {});
+        throw error;
+      }
       await audit(req, 'browser_session.create', 'browser_session', session.id, { droplet_id: updated.droplet_id });
       res.status(201).json({ browser_session: publicBrowserSession(updated) });
     } catch (e) {
@@ -3199,24 +3317,21 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
     try {
       const session = await ownedBrowserSession(req, res);
       if (!session) return;
+      if (session.status !== 'ready') return jsonError(res, 409, 'Browser must be ready before changing its proxy.');
       if (!clear
           && !Object.prototype.hasOwnProperty.call(req.body, 'proxy_url')
           && !Object.prototype.hasOwnProperty.call(req.body, 'proxy')) {
         return jsonError(res, 400, '`proxy_url` or `proxy` is required; use an empty value for direct mode');
       }
-      const activeRuns = [];
-      for (let run of await store.listCloudRunsForSession(session.id)) {
-        if (TERMINAL_RUN_STATUSES.has(run.status)) continue;
-        if (controlChannel.isConnected(session.id)) {
-          const snapshot = await controlChannel.send(session.id, 'status', { run_id: run.id }, 3000).catch(() => null);
-          if (snapshot) run = await store.updateCloudRun(run.id, normalizeRunSnapshot(snapshot, run));
-        }
-        if (!TERMINAL_RUN_STATUSES.has(run.status)) activeRuns.push(run);
-      }
+      const activeRuns = await activeRunsForSession(session);
       if (activeRuns.length) {
         return jsonError(res, 409, 'Abort the active browser run before changing its proxy.', {
           active_run_ids: activeRuns.map(run => run.id),
         });
+      }
+      const latestSession = await store.getBrowserSession(session.id);
+      if (latestSession?.status !== 'ready') {
+        return jsonError(res, 409, 'Browser must be ready before changing its proxy.');
       }
 
       const proxyUrl = clear
@@ -3268,7 +3383,9 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
 
   async function refreshProvisioningSession(session) {
     const runtime = await browserRuntimeState(session);
-    if (!session.droplet_id || ['failed', 'stopping', 'destroyed'].includes(session.status)) return { ...session, ...runtime };
+    if (!session.droplet_id || ['failed', 'pausing', 'paused', 'stopping', 'destroyed'].includes(session.status)) {
+      return { ...session, ...runtime };
+    }
     const refreshed = await provisioner.getDroplet(session.droplet_id).catch(() => null);
     if (!refreshed?.status) return { ...session, ...runtime };
     const status = refreshed.status === 'ready' && !runtime.runtime_ready ? 'provisioning' : refreshed.status;
@@ -3283,13 +3400,149 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
     return { ...updated, ...runtime };
   }
 
+  app.post('/api/browser-sessions/:sessionId/pause', requireAuth, async (req, res, next) => {
+    let reserved = false;
+    let destroyConfirmed = false;
+    try {
+      const session = await ownedBrowserSession(req, res);
+      if (!session) return;
+      if (!config.downloads?.spaces?.enabled) {
+        return jsonError(res, 503, 'Shared Downloads storage must be configured before browsers can be paused.');
+      }
+      if (!session.volume_id) return jsonError(res, 409, 'This browser does not have persistent session storage');
+      if (!['ready', 'pausing'].includes(session.status)) return jsonError(res, 409, 'Only a ready browser can be paused');
+      const retrying = session.status === 'pausing';
+      if (!retrying) {
+        await store.updateBrowserSession(session.id, { status: 'pausing', updated_at: nowIso() });
+        reserved = true;
+        const activeRuns = await activeRunsForSession(session);
+        if (activeRuns.length) {
+          await store.updateBrowserSession(session.id, { status: 'ready', updated_at: nowIso() });
+          reserved = false;
+          return jsonError(res, 409, 'Abort the active browser run before pausing.', {
+            active_run_ids: activeRuns.map(run => run.id),
+          });
+        }
+      } else {
+        reserved = true;
+      }
+      if (!controlChannel.isConnected(session.id)) {
+        if (retrying) {
+          const detached = await provisioner.waitForVolumeDetached(session.volume_id, 1500)
+            .then(() => true)
+            .catch(() => false);
+          if (detached) {
+            const updated = await store.updateBrowserSession(session.id, {
+              status: 'paused',
+              droplet_id: null,
+              public_ip: null,
+              paused_at: nowIso(),
+              updated_at: nowIso(),
+            });
+            reserved = false;
+            await audit(req, 'browser_session.pause', 'browser_session', session.id, {
+              volume_id: session.volume_id,
+              reconciled: true,
+            });
+            return res.json({ browser_session: publicBrowserSession(updated) });
+          }
+        }
+        if (!retrying) {
+          await store.updateBrowserSession(session.id, { status: 'ready', updated_at: nowIso() });
+          reserved = false;
+        }
+        return jsonError(res, 409, 'Browser control is not connected; wait for it to become ready before pausing.');
+      }
+
+      await controlChannel.send(session.id, 'pause.prepare', {}, 30_000);
+      await provisioner.destroyDroplet(session.droplet_id);
+      destroyConfirmed = true;
+      await provisioner.waitForVolumeDetached(session.volume_id);
+      const updated = await store.updateBrowserSession(session.id, {
+        status: 'paused',
+        droplet_id: null,
+        public_ip: null,
+        paused_at: nowIso(),
+        updated_at: nowIso(),
+      });
+      reserved = false;
+      await audit(req, 'browser_session.pause', 'browser_session', session.id, { volume_id: session.volume_id });
+      res.json({ browser_session: publicBrowserSession(updated) });
+    } catch (error) {
+      if (reserved && !destroyConfirmed) {
+        const sessionId = req.params.sessionId;
+        const recovered = await controlChannel.send(sessionId, 'pause.cancel', {}, 15_000)
+          .then(() => true)
+          .catch(() => false);
+        if (recovered) await store.updateBrowserSession(sessionId, { status: 'ready', updated_at: nowIso() }).catch(() => {});
+      }
+      next(error);
+    }
+  });
+
+  app.post('/api/browser-sessions/:sessionId/resume', requireAuth, async (req, res, next) => {
+    try {
+      const session = await ownedBrowserSession(req, res);
+      if (!session) return;
+      if (session.status !== 'paused') return jsonError(res, 409, 'Only a paused browser can be resumed');
+      if (!session.volume_id) return jsonError(res, 409, 'Browser profile storage is missing');
+
+      const resuming = await store.updateBrowserSession(session.id, {
+        status: 'resuming',
+        paused_at: null,
+        updated_at: nowIso(),
+      });
+      let provisioned;
+      try {
+        provisioned = await provisioner.createBrowserDroplet(resuming, {
+          providerApiKey: session.connect_secret,
+          proxyUrl: '',
+        });
+      } catch (error) {
+        await store.updateBrowserSession(session.id, { status: 'paused', paused_at: nowIso(), updated_at: nowIso() });
+        throw error;
+      }
+      let updated;
+      try {
+        updated = await store.updateBrowserSession(session.id, {
+          status: provisioned.status || 'provisioning',
+          droplet_id: provisioned.droplet_id || null,
+          public_ip: provisioned.public_ip || null,
+          updated_at: nowIso(),
+        });
+      } catch (error) {
+        await provisioner.destroyDroplet(provisioned.droplet_id).catch(() => {});
+        await provisioner.waitForVolumeDetached(session.volume_id).catch(() => {});
+        await store.updateBrowserSession(session.id, { status: 'paused', paused_at: nowIso(), updated_at: nowIso() });
+        throw error;
+      }
+      await audit(req, 'browser_session.resume', 'browser_session', session.id, { droplet_id: updated.droplet_id });
+      res.status(202).json({ browser_session: publicBrowserSession(updated) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.delete('/api/browser-sessions/:sessionId', requireAuth, async (req, res, next) => {
     try {
       const session = await ownedBrowserSession(req, res);
       if (!session) return;
       await store.updateBrowserSession(session.id, { status: 'stopping', updated_at: nowIso() });
       await provisioner.destroyDroplet(session.droplet_id);
-      const updated = await store.updateBrowserSession(session.id, { status: 'destroyed', updated_at: nowIso() });
+      if (session.volume_id) {
+        await provisioner.waitForVolumeDetached(session.volume_id);
+        await provisioner.destroyVolume(session.volume_id);
+      }
+      const updated = await store.updateBrowserSession(session.id, {
+        status: 'destroyed',
+        droplet_id: null,
+        public_ip: null,
+        volume_id: null,
+        volume_name: null,
+        volume_size_gib: null,
+        paused_at: null,
+        updated_at: nowIso(),
+      });
       await audit(req, 'browser_session.destroy', 'browser_session', session.id);
       res.json({ browser_session: publicBrowserSession(updated) });
     } catch (e) {
@@ -3326,9 +3579,13 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
     let session = await ownedBrowserSession(req, res);
     if (!session) return;
     session = await refreshProvisioningSession(session);
-    if (session.status !== 'ready' || !session.public_ip) {
+    if (!config.downloads?.spaces?.enabled && (session.status !== 'ready' || !session.public_ip)) {
       return jsonError(res, 409, 'Browser session is not ready');
     }
+    if (config.downloads?.spaces?.enabled && !['ready', 'paused'].includes(session.status)) {
+      return jsonError(res, 409, 'Browser session is not ready');
+    }
+    if (['stopping', 'destroyed', 'failed'].includes(session.status)) return jsonError(res, 409, 'Browser session is not available');
     if (!config.instanceDomain) {
       return jsonError(res, 503, 'Downloads access requires WEBBRAIN_INSTANCE_DOMAIN and HTTPS');
     }
@@ -3339,7 +3596,9 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
       url: `https://${instanceHostname(session.id, config.instanceDomain)}/downloads/`,
       username: credentials.username,
       password: credentials.password,
-      upload_limit_bytes: DEFAULT_DOWNLOADS_UPLOAD_LIMIT_BYTES,
+      upload_limit_bytes: config.downloads?.spaces?.enabled
+        ? config.downloads.maxUploadBytes
+        : DEFAULT_DOWNLOADS_UPLOAD_LIMIT_BYTES,
       expires_at: session.expires_at,
     });
   });
@@ -3351,6 +3610,10 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
       const task = String(req.body.task || '').trim();
       if (!task) return jsonError(res, 400, '`task` is required');
       const runtime = await browserRuntimeState(session);
+      const latestSession = await store.getBrowserSession(session.id);
+      if (latestSession?.status !== 'ready') {
+        return jsonError(res, 409, 'Browser session must be ready to start a run.', runtime);
+      }
       if (!runtime.runtime_ready) {
         return jsonError(res, 409, 'WebBrain browser runtime is not ready; the extension bridge is not connected.', runtime);
       }
@@ -3440,6 +3703,10 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
         });
       }
       const runtime = await browserRuntimeState(session);
+      const latestSession = await store.getBrowserSession(session.id);
+      if (latestSession?.status !== 'ready') {
+        return jsonError(res, 409, 'Browser session must be ready to continue a run.', runtime);
+      }
       if (!runtime.runtime_ready) {
         return jsonError(res, 409, 'WebBrain browser runtime is not ready; the extension bridge is not connected.', runtime);
       }
@@ -3555,7 +3822,20 @@ export async function cleanupExpiredBrowserSessions({ store, provisioner }) {
   for (const session of expired) {
     await store.updateBrowserSession(session.id, { status: 'stopping', updated_at: nowIso() });
     await provisioner.destroyDroplet(session.droplet_id);
-    cleaned.push(await store.updateBrowserSession(session.id, { status: 'destroyed', updated_at: nowIso() }));
+    if (session.volume_id) {
+      await provisioner.waitForVolumeDetached(session.volume_id);
+      await provisioner.destroyVolume(session.volume_id);
+    }
+    cleaned.push(await store.updateBrowserSession(session.id, {
+      status: 'destroyed',
+      droplet_id: null,
+      public_ip: null,
+      volume_id: null,
+      volume_name: null,
+      volume_size_gib: null,
+      paused_at: null,
+      updated_at: nowIso(),
+    }));
   }
   return cleaned;
 }

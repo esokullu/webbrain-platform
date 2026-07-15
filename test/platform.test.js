@@ -4,7 +4,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import WebSocket, { WebSocketServer } from 'ws';
 import { MemoryStore } from '../src/db/memory.js';
-import { DigitalOceanProvisioner, NullProvisioner, digitalOceanDropletName } from '../src/platform/digitalocean.js';
+import { DigitalOceanProvisioner, NullProvisioner, digitalOceanDropletName, digitalOceanVolumeName } from '../src/platform/digitalocean.js';
 import { loadConfig } from '../src/platform/config.js';
 import { createPlatformServer } from '../src/platform/server.js';
 import { chromeExtensionIdForPath, renderCloudInit } from '../src/platform/cloud-init.js';
@@ -18,7 +18,7 @@ import {
   verifyDownloadsProxyRequest,
 } from '../src/shared/downloads-access.js';
 
-async function startPlatform(env = {}) {
+async function startPlatform(env = {}, { downloadsHandler = null } = {}) {
   const config = loadConfig({
     WEBBRAIN_DB_DRIVER: 'memory',
     WEBBRAIN_PROVISIONER: 'null',
@@ -31,7 +31,7 @@ async function startPlatform(env = {}) {
   });
   const store = new MemoryStore();
   const provisioner = new NullProvisioner();
-  const platform = createPlatformServer({ store, provisioner, config });
+  const platform = createPlatformServer({ store, provisioner, config, downloadsHandler });
   const address = await platform.listen(0, '127.0.0.1');
   return {
     config,
@@ -83,7 +83,12 @@ async function register(base, email) {
 }
 
 test('platform auth, API keys, session ownership, run lifecycle, and abort', async () => {
-  const ctx = await startPlatform();
+  const ctx = await startPlatform({
+    WEBBRAIN_SPACES_ENDPOINT: 'https://nyc3.digitaloceanspaces.com',
+    WEBBRAIN_SPACES_ACCESS_KEY: 'access',
+    WEBBRAIN_SPACES_SECRET_KEY: 'secret',
+    WEBBRAIN_SPACES_BUCKET: 'downloads',
+  }, { downloadsHandler: {} });
   let ws = null;
   try {
   const cookie = await register(ctx.base, 'a@example.com');
@@ -276,6 +281,14 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
       }));
       return;
     }
+    if (msg.action === 'pause.prepare') {
+      ws.send(JSON.stringify({ id: msg.id, ok: true, result: { ready_to_detach: true } }));
+      return;
+    }
+    if (msg.action === 'pause.cancel') {
+      ws.send(JSON.stringify({ id: msg.id, ok: true, result: { resumed: true } }));
+      return;
+    }
     if (msg.action === 'run') {
       assert.equal(msg.payload.api_mutations_allowed, true);
       runPayloads.push(msg.payload);
@@ -394,7 +407,7 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
     username: downloadsAccess.body.username,
     password: downloadsAccess.body.password,
   }, downloadsAccessCredentials(storedSession.connect_secret));
-  assert.equal(downloadsAccess.body.upload_limit_bytes, 5 * 1024 * 1024 * 1024);
+  assert.equal(downloadsAccess.body.upload_limit_bytes, 25 * 1024 * 1024 * 1024);
   assert.equal(downloadsAccess.body.expires_at, storedSession.expires_at);
   const downloadsAudit = ctx.store.auditLogs.find(entry => entry.action === 'browser_session.downloads_access');
   assert.deepEqual(downloadsAudit.metadata, {});
@@ -524,6 +537,14 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   });
   assert.equal(activeContinuation.status, 409);
   assert.equal(activeContinuation.body.status, 'running');
+  const pauseBlockedDuringRun = await request(ctx.base, `/api/browser-sessions/${sessionId}/pause`, {
+    method: 'POST',
+    headers: { cookie },
+    body: '{}',
+  });
+  assert.equal(pauseBlockedDuringRun.status, 409);
+  assert.deepEqual(pauseBlockedDuringRun.body.active_run_ids, [created.body.run_id]);
+  assert.equal((await ctx.store.getBrowserSession(sessionId)).status, 'ready');
   const proxyBlockedDuringRun = await request(ctx.base, `/api/browser-sessions/${sessionId}/proxy`, {
     method: 'PATCH',
     headers: { cookie },
@@ -609,6 +630,37 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   const otherLogs = await request(ctx.base, '/api/runs', { headers: { cookie: otherCookie } });
   assert.equal(otherLogs.status, 200);
   assert.deepEqual(otherLogs.body.runs, []);
+
+  const pausedSession = await request(ctx.base, `/api/browser-sessions/${sessionId}/pause`, {
+    method: 'POST',
+    headers: { cookie },
+    body: '{}',
+  });
+  assert.equal(pausedSession.status, 200);
+  assert.equal(pausedSession.body.browser_session.status, 'paused');
+  assert.equal(pausedSession.body.browser_session.public_ip, null);
+  assert.equal(pausedSession.body.browser_session.volume.size_gib, 2);
+  assert.equal(ctx.provisioner.destroyed.includes(storedSession.droplet_id), true);
+  assert.equal(ctx.provisioner.destroyedVolumes.length, 0);
+
+  const resumedSession = await request(ctx.base, `/api/browser-sessions/${sessionId}/resume`, {
+    method: 'POST',
+    headers: { cookie },
+    body: '{}',
+  });
+  assert.equal(resumedSession.status, 202);
+  assert.equal(resumedSession.body.browser_session.status, 'ready');
+  assert.equal(ctx.provisioner.created.length, 2);
+  assert.equal(ctx.provisioner.created[1].volume_id, storedSession.volume_id);
+
+  const destroyedSession = await request(ctx.base, `/api/browser-sessions/${sessionId}`, {
+    method: 'DELETE',
+    headers: { cookie },
+  });
+  assert.equal(destroyedSession.status, 200);
+  assert.equal(destroyedSession.body.browser_session.status, 'destroyed');
+  assert.equal(destroyedSession.body.browser_session.volume, null);
+  assert.deepEqual(ctx.provisioner.destroyedVolumes, [storedSession.volume_id]);
 
   } finally {
     ws?.close();
@@ -761,6 +813,29 @@ test('browser sessions inherit the platform proxy default unless explicitly disa
     });
     assert.equal(invalid.status, 400);
     assert.equal(ctx.provisioner.created.length, 2);
+  } finally {
+    await ctx.platform.close();
+  }
+});
+
+test('pause stays disabled until shared Downloads storage is configured', async () => {
+  const ctx = await startPlatform();
+  try {
+    const cookie = await register(ctx.base, 'pause-storage@example.com');
+    const created = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: '{}',
+    });
+    assert.equal(created.status, 201);
+    const paused = await request(ctx.base, `/api/browser-sessions/${created.body.browser_session.id}/pause`, {
+      method: 'POST',
+      headers: { cookie },
+      body: '{}',
+    });
+    assert.equal(paused.status, 503);
+    assert.match(paused.body.error, /Shared Downloads storage/);
+    assert.equal((await ctx.store.getBrowserSession(created.body.browser_session.id)).status, 'ready');
   } finally {
     await ctx.platform.close();
   }
@@ -1196,6 +1271,84 @@ test('instance subdomains proxy HTTP and WebSocket traffic to the session drople
   }
 });
 
+test('shared Downloads remain authenticated and available for paused browsers without a Droplet', async () => {
+  const handledUsers = [];
+  const downloadsHandler = {
+    async handleRequest(req, res, { userId }) {
+      handledUsers.push(userId);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ entries: [], paused: true }));
+    },
+  };
+  const ctx = await startPlatform({
+    WEBBRAIN_SPACES_ENDPOINT: 'https://nyc3.digitaloceanspaces.com',
+    WEBBRAIN_SPACES_ACCESS_KEY: 'access',
+    WEBBRAIN_SPACES_SECRET_KEY: 'secret',
+    WEBBRAIN_SPACES_BUCKET: 'downloads',
+  }, { downloadsHandler });
+  try {
+    const cookie = await register(ctx.base, 'paused-downloads@example.com');
+    const user = await ctx.store.findUserByEmail('paused-downloads@example.com');
+    const session = await ctx.store.createBrowserSession({
+      id: 'bs_pausedfiles',
+      user_id: user.id,
+      display_name: 'Paused',
+      status: 'paused',
+      droplet_id: null,
+      public_ip: null,
+      region: 'nyc3',
+      size: 's-2vcpu-4gb',
+      volume_id: 'vol-paused',
+      volume_name: 'wb-profile-bs-pausedfiles',
+      volume_size_gib: 2,
+      connect_secret: 'paused-downloads-secret',
+      proxy_enabled: false,
+      proxy_endpoint: null,
+      proxy_updated_at: null,
+      paused_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    const access = await request(ctx.base, `/api/browser-sessions/${session.id}/downloads-access`, {
+      method: 'POST',
+      headers: { cookie },
+      body: '{}',
+    });
+    assert.equal(access.status, 200);
+    assert.equal(access.body.upload_limit_bytes, 25 * 1024 * 1024 * 1024);
+
+    const makeDownloadsRequest = authorization => new Promise((resolve, reject) => {
+      const target = new URL(ctx.base);
+      const req = http.request({
+        hostname: target.hostname,
+        port: target.port,
+        path: '/downloads/',
+        headers: {
+          host: 'bs-pausedfiles.webbrain.cloud',
+          'x-forwarded-proto': 'https',
+          ...(authorization ? { authorization } : {}),
+        },
+      }, res => {
+        const chunks = [];
+        res.on('data', chunk => chunks.push(chunk));
+        res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+      });
+      req.once('error', reject);
+      req.end();
+    });
+
+    assert.equal((await makeDownloadsRequest('')).status, 401);
+    const basic = `Basic ${Buffer.from(`${access.body.username}:${access.body.password}`).toString('base64')}`;
+    const listing = await makeDownloadsRequest(basic);
+    assert.equal(listing.status, 200);
+    assert.deepEqual(JSON.parse(listing.body), { entries: [], paused: true });
+    assert.deepEqual(handledUsers, [user.id]);
+  } finally {
+    await ctx.platform.close();
+  }
+});
+
 test('browser session cloud-init starts virtual display and noVNC services', () => {
   const config = loadConfig({
     WEBBRAIN_PLATFORM_URL: 'http://platform.example',
@@ -1242,6 +1395,38 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
   assert.match(cloudInit, /After=webbrain-droplet\.service webbrain-sidecar\.service webbrain-xvfb\.service/);
   assert.match(cloudInit, /bash scripts\/install-downloads-share\.sh/);
   assert.match(cloudInit, /systemctl start webbrain-sidecar\.service webbrain-xvfb\.service webbrain-x11vnc\.service webbrain-novnc\.service webbrain-droplet\.service webbrain-browser\.service/);
+});
+
+test('volume-backed cloud-init mounts the fixed profile disk and stages Downloads off-volume', () => {
+  const config = loadConfig({
+    WEBBRAIN_PLATFORM_URL: 'https://webbrain.cloud',
+    WEBBRAIN_SPACES_ENDPOINT: 'https://nyc3.digitaloceanspaces.com',
+    WEBBRAIN_SPACES_ACCESS_KEY: 'access',
+    WEBBRAIN_SPACES_SECRET_KEY: 'secret',
+    WEBBRAIN_SPACES_BUCKET: 'downloads',
+  });
+  const cloudInit = renderCloudInit({
+    session: {
+      id: 'bs_volume',
+      connect_secret: 'connect-secret',
+      volume_id: 'volume-id',
+      volume_name: 'wb-profile-bs-volume',
+      volume_size_gib: 2,
+    },
+    config,
+  });
+
+  assert.match(cloudInit, /scsi-0DO_Volume_wb-profile-bs-volume/);
+  assert.match(cloudInit, /WEBBRAIN_PROFILE_DIR='\/mnt\/webbrain-profile\/chrome'/);
+  assert.match(cloudInit, /WEBBRAIN_PROFILE_MOUNT='\/mnt\/webbrain-profile'/);
+  assert.match(cloudInit, /WEBBRAIN_PROXY_STATE_PATH='\/mnt\/webbrain-profile\/proxy\.json'/);
+  assert.match(cloudInit, /WEBBRAIN_BROWSER_DISK_CACHE_DIR='\/var\/cache\/webbrain-chrome'/);
+  assert.match(cloudInit, /WEBBRAIN_DOWNLOADS_STAGING_DIR='\/var\/lib\/webbrain\/download-staging'/);
+  assert.match(cloudInit, /WEBBRAIN_DOWNLOADS_SYNC_ENABLED='true'/);
+  assert.match(cloudInit, /RequiresMountsFor=\/mnt\/webbrain-profile/);
+  assert.match(cloudInit, /\/usr\/local\/sbin\/webbrain-mount-profile/);
+  assert.doesNotMatch(cloudInit, /mkfs/);
+  assert.doesNotMatch(cloudInit, /ufw allow 608[23]\/tcp/);
 });
 
 test('cloud browser extension id matches Chrome unpacked-extension path hashing', () => {
@@ -1320,4 +1505,45 @@ test('digitalocean provisioner uses hostname-safe droplet names', async () => {
 
   const refreshed = await provisioner.getDroplet(123);
   assert.equal(refreshed.status, 'ready');
+});
+
+test('digitalocean provisioner creates, attaches, and deletes a fixed 2 GiB profile volume', async () => {
+  const config = loadConfig({
+    DO_API_TOKEN: 'do-token',
+    DO_REGION: 'nyc3',
+    WEBBRAIN_PLATFORM_URL: 'https://webbrain.cloud',
+  });
+  const requests = [];
+  const provisioner = new DigitalOceanProvisioner(config, async (url, options = {}) => {
+    requests.push({ url, options, body: options.body ? JSON.parse(options.body) : null });
+    if (url.endsWith('/v2/volumes') && options.method === 'POST') {
+      return { ok: true, async json() { return { volume: { id: 'vol-1', name: 'wb-profile-bs-volume', size_gigabytes: 2 } }; } };
+    }
+    if (url.endsWith('/v2/volumes/vol-1') && !options.method) {
+      return { ok: true, async json() { return { volume: { id: 'vol-1', droplet_ids: [] } }; } };
+    }
+    if (url.endsWith('/v2/droplets') && options.method === 'POST') {
+      return { ok: true, async json() { return { droplet: { id: 123, networks: { v4: [] } } }; } };
+    }
+    if (url.endsWith('/v2/volumes/vol-1') && options.method === 'DELETE') {
+      return { ok: true, status: 204, async text() { return ''; } };
+    }
+    throw new Error(`Unexpected request: ${options.method || 'GET'} ${url}`);
+  });
+  const session = { id: 'bs_volume', connect_secret: 'secret', region: 'nyc3', size: 's-2vcpu-4gb' };
+  const volume = await provisioner.createBrowserVolume(session);
+  assert.deepEqual(volume, {
+    volume_id: 'vol-1',
+    volume_name: 'wb-profile-bs-volume',
+    volume_size_gib: 2,
+    request: requests[0].body,
+  });
+  assert.equal(requests[0].body.size_gigabytes, 2);
+  assert.equal(requests[0].body.name, digitalOceanVolumeName(session.id));
+
+  await provisioner.createBrowserDroplet({ ...session, ...volume });
+  const dropletRequest = requests.find(item => item.url.endsWith('/v2/droplets'));
+  assert.deepEqual(dropletRequest.body.volumes, ['vol-1']);
+  await provisioner.destroyVolume('vol-1');
+  assert.equal(requests.at(-1).options.method, 'DELETE');
 });

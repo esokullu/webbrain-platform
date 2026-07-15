@@ -100,6 +100,12 @@ class WebBrainClient:
     def delete_browser_session(self, session_id: str):
         return self._request("DELETE", f"/api/browser-sessions/{self._id(session_id)}")["browser_session"]
 
+    def pause_browser_session(self, session_id: str):
+        return self._request("POST", f"/api/browser-sessions/{self._id(session_id)}/pause", {})["browser_session"]
+
+    def resume_browser_session(self, session_id: str):
+        return self._request("POST", f"/api/browser-sessions/{self._id(session_id)}/resume", {})["browser_session"]
+
     def create_connect_token(self, session_id: str, **options):
         return self._request("POST", f"/api/browser-sessions/{self._id(session_id)}/connect-token", options)
 

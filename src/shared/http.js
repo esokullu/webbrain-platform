@@ -8,6 +8,12 @@ export function publicBrowserSession(row) {
     public_ip: row.public_ip || null,
     region: row.region,
     size: row.size,
+    volume: row.volume_id ? {
+      id: row.volume_id,
+      name: row.volume_name || null,
+      size_gib: Number(row.volume_size_gib || 0) || null,
+    } : null,
+    paused_at: row.paused_at || null,
     expires_at: row.expires_at,
     created_at: row.created_at,
     updated_at: row.updated_at,

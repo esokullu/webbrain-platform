@@ -345,7 +345,7 @@ export function docsPage() {
         <section class="docs-section" id="sessions">
           <p class="section-kicker">Lifecycle</p>
           <h2>Browser sessions</h2>
-          <p>A session is a persistent Chrome profile on its own cloud machine. Create it, poll until <span class="inline-code">runtime_ready</span> is true, then start runs. Destroy it when it is no longer needed.</p>
+          <p>A session keeps its Chrome profile on a fixed private 2 GiB volume attached to its cloud machine. Create it, poll until <span class="inline-code">runtime_ready</span> is true, then start runs. After shared Downloads storage is configured, pause it to destroy the billable Droplet while retaining the profile; resume it to attach that volume to a new Droplet. There is no automatic disk expansion.</p>
           <div class="endpoint-list">
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions</code><span>Create a browser.</span></div>
             <div class="endpoint"><span class="method">GET</span><code>/api/browser-sessions</code><span>List your sessions.</span></div>
@@ -354,7 +354,9 @@ export function docsPage() {
             <div class="endpoint"><span class="method">GET</span><code>/api/browser-sessions/:sessionId/proxy</code><span>Read proxy and exit IP.</span></div>
             <div class="endpoint"><span class="method">PATCH</span><code>/api/browser-sessions/:sessionId/proxy</code><span>Switch proxy without restart.</span></div>
             <div class="endpoint"><span class="method">DELETE</span><code>/api/browser-sessions/:sessionId/proxy</code><span>Return to a direct connection.</span></div>
-            <div class="endpoint"><span class="method">DELETE</span><code>/api/browser-sessions/:sessionId</code><span>Destroy a browser.</span></div>
+            <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/pause</code><span>Stop the Droplet and retain the profile.</span></div>
+            <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/resume</code><span>Attach the profile to a new Droplet.</span></div>
+            <div class="endpoint"><span class="method">DELETE</span><code>/api/browser-sessions/:sessionId</code><span>Destroy the browser and profile volume.</span></div>
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/connect-token</code><span>Create a noVNC link.</span></div>
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/downloads-access</code><span>Create private Downloads credentials.</span></div>
           </div>
@@ -363,9 +365,10 @@ export function docsPage() {
         <section class="docs-section" id="downloads">
           <p class="section-kicker">File transfer</p>
           <h2>Upload and download files</h2>
-          <p>For a ready browser, request short-lived access metadata from <span class="inline-code">POST /api/browser-sessions/:sessionId/downloads-access</span>. The response contains an HTTPS <span class="inline-code">url</span>, <span class="inline-code">username</span>, <span class="inline-code">password</span>, <span class="inline-code">upload_limit_bytes</span>, and <span class="inline-code">expires_at</span>. It is returned with <span class="inline-code">Cache-Control: no-store</span>; do not log it.</p>
+          <p>For a ready or paused browser, request access metadata from <span class="inline-code">POST /api/browser-sessions/:sessionId/downloads-access</span>. The response contains an HTTPS <span class="inline-code">url</span>, <span class="inline-code">username</span>, <span class="inline-code">password</span>, <span class="inline-code">upload_limit_bytes</span>, and <span class="inline-code">expires_at</span>. It is returned with <span class="inline-code">Cache-Control: no-store</span>; do not log it.</p>
           <pre class="command-block language-shell"><code>${highlightedCode(DOWNLOADS_SHELL_EXAMPLE, 'rest')}</code></pre>
-          <p>Directory requests return the browser file tray by default and JSON when sent <span class="inline-code">Accept: application/json</span>. Files support <span class="inline-code">GET</span>, <span class="inline-code">HEAD</span>, and one HTTP byte range; raw <span class="inline-code">PUT</span> uploads stream up to 5 GB. Existing names receive a numbered suffix. Delete, rename, and folder creation are not available.</p>
+          <p>Downloads are shared by all browsers owned by the same user, remain online while Droplets are paused, and have a default 25 GiB fair-use allowance per user. Directory requests return the file tray by default and JSON when sent <span class="inline-code">Accept: application/json</span>. Files support <span class="inline-code">GET</span>, <span class="inline-code">HEAD</span>, one HTTP byte range, and raw streaming <span class="inline-code">PUT</span> uploads. Existing names receive a numbered suffix. Delete, rename, and folder creation are not available.</p>
+          <p>Chrome writes downloads to temporary Droplet staging. After Chrome reports completion, WebBrain uploads the file to shared storage and removes the local copy only after confirmation. Pause is refused while staging or sync work remains.</p>
           <h3>Client helpers</h3>
           <p>Node.js and PHP expose <span class="inline-code">listDownloads</span>, <span class="inline-code">uploadDownloadsFile</span>, and <span class="inline-code">downloadDownloadsFile</span>. Python exposes <span class="inline-code">list_downloads</span>, <span class="inline-code">upload_downloads_file</span>, and <span class="inline-code">download_downloads_file</span>. All transfer file bodies as streams and protect existing local files unless overwrite is explicitly enabled.</p>
         </section>
@@ -412,7 +415,7 @@ export function docsPage() {
         <section class="docs-section" id="clients">
           <p class="section-kicker">No dependencies</p>
           <h2>Use your language</h2>
-          <p>The repository includes small clients with the same core operations: session lifecycle, readiness, runs, follow-up turns, polling, aborting, structured output, noVNC links, and streaming private Downloads transfers.</p>
+          <p>The repository includes small clients with the same core operations: session creation, pause and resume, readiness, runs, follow-up turns, polling, aborting, structured output, noVNC links, and streaming private Downloads transfers.</p>
           <div class="client-cards">
             <a class="client-card" href="https://github.com/esokullu/webbrain-platform/tree/main/clients/node"><strong>Node.js</strong><span>Node 18+ · native fetch</span></a>
             <a class="client-card" href="https://github.com/esokullu/webbrain-platform/tree/main/clients/python"><strong>Python</strong><span>Python 3.9+ · standard library</span></a>

@@ -2,17 +2,26 @@ import http from 'node:http';
 import { createPlatformApp } from './app.js';
 import { DropletControlChannel } from './control-channel.js';
 import { createInstanceProxy } from './instance-proxy.js';
+import { createObjectDownloadsHandler } from './object-downloads.js';
+import { createSpacesObjectStore } from './spaces-object-store.js';
 
-export function createPlatformServer({ store, provisioner, config }) {
+export function createPlatformServer({ store, provisioner, config, downloadsHandler: injectedDownloadsHandler = null }) {
+  const spacesObjectStore = injectedDownloadsHandler ? null : createSpacesObjectStore(config.downloads?.spaces);
+  const downloadsHandler = injectedDownloadsHandler || (spacesObjectStore ? createObjectDownloadsHandler({
+    objectStore: spacesObjectStore,
+    quotaBytes: config.downloads.quotaBytes,
+    maxUploadBytes: config.downloads.maxUploadBytes,
+  }) : null);
   const controlChannel = new DropletControlChannel({
     store,
     requestTimeoutMs: config.runWaitTimeoutMs,
   });
-  const app = createPlatformApp({ store, provisioner, controlChannel, config });
+  const app = createPlatformApp({ store, provisioner, controlChannel, config, downloadsHandler });
   const instanceProxy = createInstanceProxy({
     store,
     domain: config.instanceDomain,
     targetPort: config.droplet.noVncGatePort,
+    downloadsHandler,
   });
   const server = http.createServer((req, res) => {
     instanceProxy.handleRequest(req, res)
@@ -28,6 +37,10 @@ export function createPlatformServer({ store, provisioner, config }) {
         res.end('Instance proxy error');
       });
   });
+  // Downloads are streamed and can legitimately take longer than Node's
+  // default five-minute whole-request timer. Header and socket protections
+  // remain in place, and production traffic arrives through the HTTPS proxy.
+  server.requestTimeout = 0;
   instanceProxy.attach(server);
   controlChannel.attach(server);
 
@@ -40,7 +53,10 @@ export function createPlatformServer({ store, provisioner, config }) {
     },
     close() {
       return new Promise(resolve => {
-        Promise.all([controlChannel.close(), instanceProxy.close()]).then(() => server.close(resolve));
+        Promise.all([controlChannel.close(), instanceProxy.close()]).then(() => {
+          spacesObjectStore?.close();
+          server.close(resolve);
+        });
       });
     },
   };

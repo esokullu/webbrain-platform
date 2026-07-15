@@ -31,6 +31,11 @@ Platform:
 - `WEBBRAIN_DB_DRIVER=mysql`
 - `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`
 - `DO_API_TOKEN`, `DO_REGION`, `DO_SIZE`, `DO_IMAGE`, `DO_SSH_KEYS`
+- `DO_BROWSER_VOLUME_SIZE_GIB` (defaults to a fixed 2 GiB Chrome-profile volume; volumes are not auto-expanded)
+- `WEBBRAIN_SPACES_ENDPOINT`, `WEBBRAIN_SPACES_ACCESS_KEY`, `WEBBRAIN_SPACES_SECRET_KEY`, `WEBBRAIN_SPACES_BUCKET`
+- `WEBBRAIN_SPACES_S3_REGION` (defaults to `us-east-1`, the S3 signing region used by DigitalOcean Spaces)
+- `WEBBRAIN_DOWNLOADS_USER_QUOTA_BYTES` (defaults to 25 GiB fair use per user)
+- `WEBBRAIN_DOWNLOADS_MAX_UPLOAD_BYTES` (defaults to 25 GiB)
 - `WEBBRAIN_PLATFORM_URL`
 - `WEBBRAIN_INSTANCE_DOMAIN` (for example, `webbrain.cloud`; serves each browser session at an HTTPS subdomain)
 - `WEBBRAIN_REGISTRATION_ENABLED=true` only when public account creation should be available (disabled by default)
@@ -59,6 +64,8 @@ Droplet cloud-init passes:
 - `WEBBRAIN_BROWSER_PROXY_SERVER` (the local relay Chrome uses)
 - `WEBBRAIN_BROWSER_PROXY_BYPASS_LIST`
 - `WEBBRAIN_PROXY_RELAY_HOST`, `WEBBRAIN_PROXY_RELAY_PORT`, `WEBBRAIN_PROXY_STATE_PATH`
+- `WEBBRAIN_PROFILE_DIR`, `WEBBRAIN_PROFILE_MOUNT`, `WEBBRAIN_BROWSER_DISK_CACHE_DIR`
+- `WEBBRAIN_DOWNLOADS_SYNC_ENABLED`, `WEBBRAIN_DOWNLOADS_STAGING_DIR`, `WEBBRAIN_DOWNLOADS_INGEST_URL`
 
 ## Browser Automation API
 
@@ -119,6 +126,12 @@ The response is `201 Created`:
     "public_ip": null,
     "region": "nyc3",
     "size": "s-2vcpu-4gb",
+    "volume": {
+      "id": "volume-id",
+      "name": "wb-profile-bs-0123456789abcdef",
+      "size_gib": 2
+    },
+    "paused_at": null,
     "expires_at": "2026-07-13T12:00:00.000Z",
     "created_at": "2026-07-13T06:00:00.000Z",
     "updated_at": "2026-07-13T06:00:00.000Z",
@@ -172,7 +185,7 @@ confirms that the WebBrain extension bridge is connected and can accept runs.
 
 ### Access a browser's Downloads folder
 
-Request the private HTTPS URL and Basic Auth credentials for a ready browser:
+Request the private HTTPS URL and Basic Auth credentials for a ready or paused browser:
 
 ```bash
 curl -sS -X POST \
@@ -184,10 +197,13 @@ curl -sS -X POST \
 
 The response contains `url`, `username`, `password`, `upload_limit_bytes`, and
 `expires_at`, and is marked `Cache-Control: no-store`. Credentials stay fixed
-for the session lifetime and stop working when the session is destroyed. The
-file tray supports listing, downloads (including `HEAD` and byte ranges), and
-uploads up to 5 GB per file. Name collisions receive a numbered suffix; delete,
-rename, and folder creation are intentionally unavailable.
+for the session lifetime and stop working when the session is destroyed. Files
+use a private per-user shared namespace, so all browsers owned by the same user
+see the same Downloads and the URL remains online while a browser is paused.
+The default fair-use allowance is 25 GiB per user. The tray supports listing,
+downloads (including `HEAD` and byte ranges), and streaming uploads. Name
+collisions receive a numbered suffix; delete, rename, and folder creation are
+intentionally unavailable.
 
 For terminal use, keep the credential response in shell variables (the literal
 password is not written to shell history):
@@ -246,6 +262,35 @@ The Node.js, Python, and PHP clients wrap these operations with streaming
 and `downloadDownloadsFile`/`download_downloads_file` helpers. Pass a previously
 returned access object to several calls to avoid requesting the same session
 credential repeatedly; clients do not cache it on their own.
+
+Chrome downloads first stream to the Droplet's ephemeral root disk. When Chrome
+reports completion, the launcher uploads the file to shared storage, verifies
+the platform response, and then removes the staged copy. A browser cannot be
+paused while a download or its upload is pending.
+
+### Pause and resume a browser
+
+Pausing cleanly stops Chrome, flushes and unmounts its fixed 2 GiB profile
+volume, and destroys the billable Droplet while retaining the volume. Resuming
+creates a new Droplet, attaches the same volume, and restores the Chrome profile
+and saved proxy configuration. Downloads remain online throughout. Pause is
+enabled only after all four `WEBBRAIN_SPACES_*` storage values are configured,
+so destroying a Droplet can never discard local-only Downloads.
+
+```bash
+curl -sS -X POST \
+  "https://webbrain.cloud/api/browser-sessions/$WEBBRAIN_SESSION_ID/pause" \
+  -H "Authorization: Bearer $WEBBRAIN_API_KEY" \
+  -H 'Content-Type: application/json' -d '{}'
+
+curl -sS -X POST \
+  "https://webbrain.cloud/api/browser-sessions/$WEBBRAIN_SESSION_ID/resume" \
+  -H "Authorization: Bearer $WEBBRAIN_API_KEY" \
+  -H 'Content-Type: application/json' -d '{}'
+```
+
+Pause returns `409` if a run or download sync is active. Resume returns `202`
+and the session moves through provisioning until `runtime_ready` is true again.
 
 ### Change a running browser's proxy
 
@@ -496,7 +541,9 @@ Abort is cooperative. A run can briefly report `aborting` before becoming
 | `GET` | `/api/browser-sessions` | List the authenticated user's browser sessions. |
 | `GET` | `/api/browser-sessions/:sessionId` | Read provisioning and runtime readiness. |
 | `PATCH` | `/api/browser-sessions/:sessionId` | Set or clear the browser's `display_name`. |
-| `DELETE` | `/api/browser-sessions/:sessionId` | Destroy the browser session and its Droplet. |
+| `POST` | `/api/browser-sessions/:sessionId/pause` | Safely stop Chrome, retain its 2 GiB profile volume, and destroy the Droplet. |
+| `POST` | `/api/browser-sessions/:sessionId/resume` | Create a new Droplet and attach the saved profile volume. |
+| `DELETE` | `/api/browser-sessions/:sessionId` | Destroy the browser session, Droplet, and profile volume. |
 | `POST` | `/api/browser-sessions/:sessionId/connect-token` | Create a short-lived signed noVNC URL. |
 | `POST` | `/api/browser-sessions/:sessionId/downloads-access` | Create private Downloads URL and Basic Auth credentials. |
 
@@ -553,13 +600,12 @@ ws(s)://<platform>/droplet/control?session_token=<session secret>
 The command sidecar remains local-only. noVNC is exposed through the droplet gate on `6081` and requires a short-lived signed token from `POST /api/browser-sessions/:sessionId/connect-token`. When `WEBBRAIN_INSTANCE_DOMAIN` is set, the platform proxies noVNC over the wildcard HTTPS hostname `bs-<session-id>.<domain>` so browser assets and WebSockets remain same-site with the dashboard.
 
 Downloads use the same HTTPS instance hostname under `/downloads/`. The
-platform validates session-specific Basic Auth, removes the credential, and
-forwards a short-lived signed request to the Droplet gateway. Caddy and the file
-service listen only on `127.0.0.1:6082` and `127.0.0.1:6083`; no additional
-public Droplet or firewall port is opened. Provisioning uses Caddy's
-[official Debian/Ubuntu package](https://caddyserver.com/docs/install), while
-Basic Auth is accepted only on the HTTPS instance surface in line with Caddy's
-[transport guidance](https://caddyserver.com/docs/caddyfile/directives/basic_auth/).
+platform validates session-specific Basic Auth and serves the user's private
+DigitalOcean Spaces prefix directly, so the tray remains available without a
+running Droplet. Chrome uses the Droplet root disk only as temporary staging;
+completed files are streamed to the platform and removed after confirmation.
+The legacy localhost-only Caddy service remains as a compatibility fallback
+when Spaces is not configured, and no additional public Droplet port is opened.
 
 Legacy Chrome managed-storage policy example (the VM launcher currently seeds
 the same values directly into the isolated browser profile):

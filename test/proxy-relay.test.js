@@ -7,6 +7,7 @@ import path from 'node:path';
 import { Server as ProxyChainServer } from 'proxy-chain';
 import { BrowserProxyRelay } from '../src/droplet/proxy-relay.js';
 import { DropletControlClient } from '../src/droplet/control-client.js';
+import { prepareDropletForPause } from '../src/droplet/pause.js';
 import { normalizeProxyUrl, proxyUrlFromParts, publicProxyEndpoint } from '../src/shared/proxy.js';
 
 async function proxyRequest(port, url = 'http://exit.test/ip') {
@@ -85,6 +86,43 @@ test('droplet control exposes proxy status and verified live updates', async () 
     proxyUrl: 'http://user:pass@proxy.example:8080',
     options: { verify: true, verifyUrl: 'http://exit.test/ip' },
   }]);
+});
+
+test('pause preparation refuses staged downloads and otherwise stops, flushes, and unmounts in order', async () => {
+  const commands = [];
+  await assert.rejects(() => prepareDropletForPause({
+    profileMount: '/mnt/webbrain-profile',
+    downloadsStagingDir: '/staging',
+    readdirImpl: async () => ['pending-download'],
+    execFileImpl: async (...args) => commands.push(args),
+  }), error => error.status === 409 && /finish syncing/.test(error.message));
+  assert.deepEqual(commands, []);
+
+  let reads = 0;
+  const ready = await prepareDropletForPause({
+    profileMount: '/mnt/webbrain-profile',
+    downloadsStagingDir: '/staging',
+    readdirImpl: async () => { reads += 1; return []; },
+    execFileImpl: async (command, args) => { commands.push([command, args]); },
+  });
+  assert.deepEqual(ready, { ready_to_detach: true });
+  assert.equal(reads, 2);
+  assert.deepEqual(commands, [
+    ['systemctl', ['stop', 'webbrain-browser.service']],
+    ['sync', []],
+    ['mountpoint', ['-q', '/mnt/webbrain-profile']],
+    ['umount', ['/mnt/webbrain-profile']],
+  ]);
+
+  const control = new DropletControlClient({
+    controlUrl: 'ws://127.0.0.1/control',
+    sessionToken: 'test',
+    pausePrepare: async payload => ({ payload, prepared: true }),
+  });
+  assert.deepEqual(await control.handleCommand('pause.prepare', { test: 1 }), {
+    payload: { test: 1 },
+    prepared: true,
+  });
 });
 
 test('droplet control forwards run metadata and clarification responses', async () => {

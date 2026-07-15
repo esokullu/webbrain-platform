@@ -43,6 +43,7 @@ Next steps (manual, needs your secrets):
        git clone https://<GITHUB_TOKEN>@github.com/esokullu/webbrain-platform.git .
   2) npm install --omit=dev
   3) Set env: WEBBRAIN_DB_DRIVER, MYSQL_*, DO_API_TOKEN, DO_REGION, DO_SIZE,
-     DO_IMAGE, DO_SSH_KEYS, WEBBRAIN_PLATFORM_URL, model proxy vars.
+     DO_IMAGE, DO_SSH_KEYS, DO_BROWSER_VOLUME_SIZE_GIB, WEBBRAIN_PLATFORM_URL,
+     WEBBRAIN_SPACES_*, WEBBRAIN_DOWNLOADS_*, and model proxy vars.
   4) Run: npm run start:platform   (consider a systemd unit for production)
 NOTE
