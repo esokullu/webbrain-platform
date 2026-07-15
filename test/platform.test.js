@@ -860,6 +860,11 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /Switch to Browsers at any time to watch it/);
     assert.match(res.text, /body: \{ task, wait: false \}/);
     assert.match(res.text, /function pollConsoleRun\(\)/);
+    assert.match(res.text, /id = 'abortConsoleRunBtn'/);
+    assert.match(res.text, /function abortConsoleRun\(\)/);
+    assert.match(res.text, /runs\/' \+ encodeURIComponent\(runId\) \+ '\/abort'/);
+    assert.match(res.text, /state\.consoleAbortPending \? 'Aborting…' : 'Abort run'/);
+    assert.match(res.text, /requestVersion !== consoleRunRequestVersion/);
     assert.match(res.text, /terminalRunStatuses/);
     assert.match(res.text, /function appendRunProgress\(/);
     assert.match(res.text, /className = 'run-progress-log'/);
@@ -1067,6 +1072,7 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
   assert.match(cloudInit, /WEBBRAIN_BROWSER_PROXY_BYPASS_LIST='platform\.example'/);
   assert.match(cloudInit, /WEBBRAIN_PROXY_STATE_PATH='\/var\/lib\/webbrain\/proxy\.json'/);
   assert.match(cloudInit, /WEBBRAIN_START_URL='https:\/\/webbrain\.one'/);
+  assert.match(cloudInit, /"PasswordManagerEnabled":false/);
   assert.match(cloudInit, /"toolbar_pin":"force_pinned"/);
   assert.match(cloudInit, new RegExp(chromeExtensionIdForPath('/opt/webbrain3/src/chrome')));
   assert.match(cloudInit, /package_upgrade: false/);

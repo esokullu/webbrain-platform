@@ -350,8 +350,10 @@ function dashboardPage(user) {
     .run-empty { min-height: 296px; display: grid; place-items: center; padding: 28px; border: 1px dashed var(--border); border-radius: 11px; color: var(--text-dim); text-align: center; }
     .run-empty strong { display: block; margin-bottom: 4px; color: var(--text); font-size: 14px; }
     .run-state { display: grid; gap: 15px; }
-    .run-status-line { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding-bottom: 13px; border-bottom: 1px solid var(--border); }
+    .run-status-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; padding-bottom: 13px; border-bottom: 1px solid var(--border); }
     .run-status-title { min-width: 0; display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 800; }
+    .run-status-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+    .run-abort-button { min-height: 30px; padding: 4px 9px; font-size: 11px; }
     .run-spinner { width: 16px; height: 16px; flex: 0 0 16px; border: 2px solid rgba(91,82,232,.18); border-top-color: var(--accent); border-radius: 50%; animation: run-spin .8s linear infinite; }
     .run-status-badge { min-height: 24px; display: inline-flex; align-items: center; padding: 0 8px; border-radius: 999px; background: rgba(91,82,232,.09); color: var(--accent); font-size: 10px; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
     .run-status-badge.completed { background: rgba(45,136,102,.10); color: var(--success); }
@@ -986,6 +988,7 @@ function dashboardPage(user) {
       consoleRunSessionId: null,
       consoleRunTask: '',
       consoleProgressExpanded: false,
+      consoleAbortPending: false,
       runLogs: [],
       logsOffset: 0,
       logsHasMore: false,
@@ -1004,6 +1007,7 @@ function dashboardPage(user) {
     const connectingSessionIds = new Set();
     const terminalRunStatuses = new Set(['completed', 'failed', 'aborted']);
     let consolePollTimer = null;
+    let consoleRunRequestVersion = 0;
     const sessionsCollapsedKey = 'webbrain.sessionsCollapsed';
 
     function setDashboardView(view, updateUrl) {
@@ -1670,7 +1674,21 @@ function dashboardPage(user) {
       const badge = document.createElement('span');
       badge.className = 'run-status-badge ' + status;
       badge.textContent = status;
-      statusLine.append(statusTitle, badge);
+      const statusActions = document.createElement('div');
+      statusActions.className = 'run-status-actions';
+      statusActions.append(badge);
+      if (active && run.run_id) {
+        const abortButton = document.createElement('button');
+        abortButton.id = 'abortConsoleRunBtn';
+        abortButton.className = 'danger run-abort-button';
+        abortButton.type = 'button';
+        abortButton.textContent = state.consoleAbortPending ? 'Aborting…' : 'Abort run';
+        abortButton.disabled = state.consoleAbortPending;
+        abortButton.setAttribute('aria-label', 'Abort run ' + run.run_id);
+        abortButton.addEventListener('click', abortConsoleRun);
+        statusActions.append(abortButton);
+      }
+      statusLine.append(statusTitle, statusActions);
       content.append(statusLine);
 
       const session = state.sessions.find(item => item.id === state.consoleRunSessionId);
@@ -1954,7 +1972,7 @@ function dashboardPage(user) {
     function scheduleConsolePoll() {
       if (consolePollTimer) clearTimeout(consolePollTimer);
       consolePollTimer = null;
-      if (consoleRunIsActive() && state.consoleRun?.run_id) {
+      if (consoleRunIsActive() && state.consoleRun?.run_id && !state.consoleAbortPending) {
         consolePollTimer = setTimeout(pollConsoleRun, 1000);
       }
     }
@@ -1962,17 +1980,49 @@ function dashboardPage(user) {
     async function pollConsoleRun() {
       const runId = state.consoleRun?.run_id;
       const sessionId = state.consoleRunSessionId;
-      if (!runId || !sessionId || !consoleRunIsActive()) return;
+      const requestVersion = consoleRunRequestVersion;
+      if (!runId || !sessionId || !consoleRunIsActive() || state.consoleAbortPending) return;
       try {
         const next = await api('/api/browser-sessions/' + encodeURIComponent(sessionId) + '/runs/' + encodeURIComponent(runId));
-        if (state.consoleRun?.run_id !== runId) return;
+        if (requestVersion !== consoleRunRequestVersion || state.consoleRun?.run_id !== runId) return;
         state.consoleRun = next;
         showMessage(consoleMessage, terminalRunStatuses.has(next.status) ? 'Run ' + next.status + '.' : 'Run is active. You can watch it from Browsers.', next.status === 'failed');
         renderConsole();
       } catch (e) {
+        if (requestVersion !== consoleRunRequestVersion) return;
         showMessage(consoleMessage, 'Could not refresh the run yet. Retrying… ' + e.message, true);
       }
       scheduleConsolePoll();
+    }
+
+    async function abortConsoleRun() {
+      const runId = state.consoleRun?.run_id;
+      const sessionId = state.consoleRunSessionId;
+      if (!runId || !sessionId || !consoleRunIsActive() || state.consoleAbortPending) return;
+
+      if (consolePollTimer) clearTimeout(consolePollTimer);
+      consolePollTimer = null;
+      const requestVersion = ++consoleRunRequestVersion;
+      state.consoleAbortPending = true;
+      showMessage(consoleMessage, 'Aborting the run…');
+      renderConsole();
+      try {
+        const next = await api('/api/browser-sessions/' + encodeURIComponent(sessionId) + '/runs/' + encodeURIComponent(runId) + '/abort', {
+          method: 'POST',
+        });
+        if (requestVersion !== consoleRunRequestVersion || state.consoleRun?.run_id !== runId) return;
+        state.consoleRun = next;
+        showMessage(consoleMessage, 'Run aborted.');
+      } catch (e) {
+        if (requestVersion !== consoleRunRequestVersion) return;
+        showMessage(consoleMessage, 'Could not abort the run. ' + e.message, true);
+      } finally {
+        if (requestVersion === consoleRunRequestVersion) {
+          state.consoleAbortPending = false;
+          renderConsole();
+          scheduleConsolePoll();
+        }
+      }
     }
 
     async function executeConsoleRun() {
@@ -1987,6 +2037,8 @@ function dashboardPage(user) {
       state.consoleRunSessionId = session.id;
       state.consoleRunTask = task;
       state.consoleProgressExpanded = false;
+      state.consoleAbortPending = false;
+      consoleRunRequestVersion += 1;
       state.consoleRun = { status: 'starting', run_id: '', result: null, summary: '', final_url: '', error: '', updates: [] };
       showMessage(consoleMessage, 'Starting the asynchronous run…');
       renderSessions();
