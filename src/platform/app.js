@@ -3092,6 +3092,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
       }
       const started = await controlChannel.send(session.id, 'run', {
         task,
+        api_mutations_allowed: true,
         output_schema: req.body.output_schema ?? req.body.outputSchema ?? null,
         tab_id: req.body.tab_id ?? req.body.tabId ?? null,
         wait: false,

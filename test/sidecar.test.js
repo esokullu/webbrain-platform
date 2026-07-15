@@ -28,6 +28,7 @@ test('sidecar run lifecycle proxies cloud_run/status/abort to extension bridge',
     if (msg.type === 'hello') return;
     if (msg.action === 'cloud_run') {
       assert.equal(msg.payload.tabId, 42);
+      assert.equal(msg.payload.apiMutationsAllowed, true);
       statuses.set('run_test', {
         runId: 'run_test',
         status: 'running',
@@ -66,6 +67,7 @@ test('sidecar run lifecycle proxies cloud_run/status/abort to extension bridge',
     method: 'POST',
     body: JSON.stringify({
       task: 'Summarize',
+      api_mutations_allowed: true,
       output_schema: { title: 'string' },
       tab_id: 42,
       wait: false,
@@ -79,6 +81,7 @@ test('sidecar run lifecycle proxies cloud_run/status/abort to extension bridge',
     method: 'POST',
     body: JSON.stringify({
       task: 'Summarize and wait',
+      api_mutations_allowed: true,
       output_schema: { title: 'string' },
       tab_id: 42,
       wait: true,
@@ -97,7 +100,7 @@ test('sidecar run lifecycle proxies cloud_run/status/abort to extension bridge',
 
   const interrupted = await request(base, '/api/browser-sessions/bs_1/runs', {
     method: 'POST',
-    body: JSON.stringify({ task: 'Disconnect me', tab_id: 42, wait: false }),
+    body: JSON.stringify({ task: 'Disconnect me', api_mutations_allowed: true, tab_id: 42, wait: false }),
   });
   assert.equal(interrupted.status, 202);
   ws.close();

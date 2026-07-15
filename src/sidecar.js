@@ -113,6 +113,7 @@ export function createSidecarServer(options = {}) {
     const outputSchema = body.output_schema ?? body.outputSchema ?? null;
     const started = await sendExtension('cloud_run', {
       task,
+      apiMutationsAllowed: body.api_mutations_allowed === true || body.apiMutationsAllowed === true,
       outputSchema,
       tabId: body.tab_id ?? body.tabId,
     });

@@ -253,6 +253,7 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
       return;
     }
     if (msg.action === 'run') {
+      assert.equal(msg.payload.api_mutations_allowed, true);
       assert.equal(msg.payload.tab_id ?? null, msg.payload.task === 'Long task' ? 91 : null);
       const runId = `run_cloud_${++runSeq}`;
       statuses.set(runId, { run_id: runId, status: 'running' });

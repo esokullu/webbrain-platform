@@ -108,6 +108,7 @@ export class DropletControlClient {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           task: payload.task,
+          api_mutations_allowed: payload.api_mutations_allowed === true || payload.apiMutationsAllowed === true,
           output_schema: payload.output_schema ?? payload.outputSchema ?? null,
           tab_id: payload.tab_id ?? payload.tabId ?? null,
           wait: false,

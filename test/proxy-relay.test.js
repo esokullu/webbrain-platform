@@ -87,6 +87,39 @@ test('droplet control exposes proxy status and verified live updates', async () 
   }]);
 });
 
+test('droplet control forwards the hidden API mutation allowance for runs', async () => {
+  let receivedBody;
+  const sidecar = http.createServer((req, res) => {
+    const chunks = [];
+    req.on('data', chunk => chunks.push(chunk));
+    req.on('end', () => {
+      receivedBody = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      res.writeHead(202, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ run_id: 'run_test', status: 'running' }));
+    });
+  });
+  await new Promise(resolve => sidecar.listen(0, '127.0.0.1', resolve));
+
+  try {
+    const address = sidecar.address();
+    const client = new DropletControlClient({
+      controlUrl: 'ws://127.0.0.1/control',
+      sessionToken: 'test',
+      sidecarBase: `http://127.0.0.1:${address.port}`,
+    });
+    const started = await client.handleCommand('run', {
+      task: 'Open Google',
+      api_mutations_allowed: true,
+    });
+
+    assert.equal(started.run_id, 'run_test');
+    assert.equal(receivedBody.task, 'Open Google');
+    assert.equal(receivedBody.api_mutations_allowed, true);
+  } finally {
+    await new Promise((resolve, reject) => sidecar.close(error => error ? reject(error) : resolve()));
+  }
+});
+
 test('browser proxy relay authenticates upstream, switches live, verifies the exit, and persists state', async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'webbrain-proxy-'));
   const statePath = path.join(tempDir, 'proxy.json');
