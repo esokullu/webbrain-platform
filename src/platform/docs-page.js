@@ -71,6 +71,24 @@ $finished = $client->waitForRun($ready['id'], $run['run_id']);
 print_r($finished['result']);`,
 };
 
+const DOWNLOADS_SHELL_EXAMPLE = `# Obtain access and keep the secret out of the literal shell history
+DOWNLOADS_ACCESS=$(curl --fail-with-body -sS -X POST "https://webbrain.cloud/api/browser-sessions/$SESSION_ID/downloads-access" -H "Authorization: Bearer $WEBBRAIN_API_KEY" -H "Content-Type: application/json" -d '{}')
+DOWNLOADS_URL=$(printf '%s' "$DOWNLOADS_ACCESS" | jq -r '.url')
+DOWNLOADS_USER=$(printf '%s' "$DOWNLOADS_ACCESS" | jq -r '.username')
+DOWNLOADS_PASSWORD=$(printf '%s' "$DOWNLOADS_ACCESS" | jq -r '.password')
+
+# Machine-readable listing
+curl --fail-with-body -sS -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" -H 'Accept: application/json' "$DOWNLOADS_URL" | jq
+
+# Streaming upload; response.name is the final collision-safe name
+LOCAL_FILE='./report.pdf'
+REMOTE_NAME=$(jq -rn --arg name "$(basename -- "$LOCAL_FILE")" '$name | @uri')
+curl --fail-with-body -sS -X PUT -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" -H 'Content-Type: application/octet-stream' --upload-file "$LOCAL_FILE" "\${DOWNLOADS_URL}\${REMOTE_NAME}" | jq
+
+# Full download and a byte-range download
+curl --fail-with-body -sS -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" --output './report.pdf' "\${DOWNLOADS_URL}\${REMOTE_NAME}"
+curl --fail-with-body -sS -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" -H 'Range: bytes=0-1023' --output './report.first-1KiB' "\${DOWNLOADS_URL}\${REMOTE_NAME}"`;
+
 const TABS = [
   ['rest', 'REST'],
   ['node', 'Node.js'],
@@ -79,7 +97,7 @@ const TABS = [
 ];
 
 const TOKEN_PATTERNS = {
-  rest: /#[^\n]*|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|\$[A-Za-z_][A-Za-z0-9_]*|\b(?:export|until|do|done|sleep|curl|jq)\b|\b(?:true|false|null)\b|\b\d+\b/gm,
+  rest: /#[^\n]*|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*|\b[A-Z_][A-Z0-9_]*(?==)|\b(?:export|until|do|done|sleep|curl|jq|printf|basename)\b|\b(?:true|false|null)\b|\b\d+\b/gm,
   node: /\/\/[^\n]*|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`|\b(?:import|from|const|let|await|new|export|class|async|throw|return|true|false|null|undefined)\b|\b\d+(?:\.\d+)?\b|\b[A-Za-z_$][A-Za-z0-9_$]*(?=\()/gm,
   python: /#[^\n]*|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|\b(?:import|from|as|class|def|return|raise|if|else|elif|while|for|in|with|try|except|True|False|None)\b|\b\d+(?:\.\d+)?\b|\b[A-Za-z_][A-Za-z0-9_]*(?=\()/gm,
   php: /<\?php|\/\/[^\n]*|#[^\n]*|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|\$[A-Za-z_][A-Za-z0-9_]*|\b(?:require_once|new|print_r|true|false|null|function|public|private|class|final|return|throw)\b|\b\d+(?:\.\d+)?\b|(?:->|::)[A-Za-z_][A-Za-z0-9_]*/gm,
@@ -114,7 +132,7 @@ function highlightedCode(source, language) {
     let kind = 'function';
     if (token.startsWith('#') || token.startsWith('//')) kind = 'comment';
     else if (/^['"`]/.test(token)) kind = 'string';
-    else if (token.startsWith('$')) kind = 'variable';
+    else if (token.startsWith('$') || /^[A-Z_][A-Z0-9_]*$/.test(token)) kind = 'variable';
     else if (/^\d/.test(token)) kind = 'number';
     else if (LITERALS.has(token)) kind = 'literal';
     else if (KEYWORDS[language].has(token)) kind = 'keyword';
@@ -346,23 +364,7 @@ export function docsPage() {
           <p class="section-kicker">File transfer</p>
           <h2>Upload and download files</h2>
           <p>For a ready browser, request short-lived access metadata from <span class="inline-code">POST /api/browser-sessions/:sessionId/downloads-access</span>. The response contains an HTTPS <span class="inline-code">url</span>, <span class="inline-code">username</span>, <span class="inline-code">password</span>, <span class="inline-code">upload_limit_bytes</span>, and <span class="inline-code">expires_at</span>. It is returned with <span class="inline-code">Cache-Control: no-store</span>; do not log it.</p>
-          <pre class="command-block"><code># Obtain access and keep the secret out of the literal shell history
-DOWNLOADS_ACCESS=$(curl --fail-with-body -sS -X POST "https://webbrain.cloud/api/browser-sessions/$SESSION_ID/downloads-access" -H "Authorization: Bearer $WEBBRAIN_API_KEY" -H "Content-Type: application/json" -d '{}')
-DOWNLOADS_URL=$(printf '%s' "$DOWNLOADS_ACCESS" | jq -r '.url')
-DOWNLOADS_USER=$(printf '%s' "$DOWNLOADS_ACCESS" | jq -r '.username')
-DOWNLOADS_PASSWORD=$(printf '%s' "$DOWNLOADS_ACCESS" | jq -r '.password')
-
-# Machine-readable listing
-curl --fail-with-body -sS -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" -H 'Accept: application/json' "$DOWNLOADS_URL" | jq
-
-# Streaming upload; response.name is the final collision-safe name
-LOCAL_FILE='./report.pdf'
-REMOTE_NAME=$(jq -rn --arg name "$(basename -- "$LOCAL_FILE")" '$name | @uri')
-curl --fail-with-body -sS -X PUT -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" -H 'Content-Type: application/octet-stream' --upload-file "$LOCAL_FILE" "\${DOWNLOADS_URL}\${REMOTE_NAME}" | jq
-
-# Full download and a byte-range download
-curl --fail-with-body -sS -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" --output './report.pdf' "\${DOWNLOADS_URL}\${REMOTE_NAME}"
-curl --fail-with-body -sS -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" -H 'Range: bytes=0-1023' --output './report.first-1KiB' "\${DOWNLOADS_URL}\${REMOTE_NAME}"</code></pre>
+          <pre class="command-block language-shell"><code>${highlightedCode(DOWNLOADS_SHELL_EXAMPLE, 'rest')}</code></pre>
           <p>Directory requests return the browser file tray by default and JSON when sent <span class="inline-code">Accept: application/json</span>. Files support <span class="inline-code">GET</span>, <span class="inline-code">HEAD</span>, and one HTTP byte range; raw <span class="inline-code">PUT</span> uploads stream up to 5 GB. Existing names receive a numbered suffix. Delete, rename, and folder creation are not available.</p>
           <h3>Client helpers</h3>
           <p>Node.js and PHP expose <span class="inline-code">listDownloads</span>, <span class="inline-code">uploadDownloadsFile</span>, and <span class="inline-code">downloadDownloadsFile</span>. Python exposes <span class="inline-code">list_downloads</span>, <span class="inline-code">upload_downloads_file</span>, and <span class="inline-code">download_downloads_file</span>. All transfer file bodies as streams and protect existing local files unless overwrite is explicitly enabled.</p>

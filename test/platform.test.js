@@ -933,6 +933,10 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /id="logsStatusFilter"/);
     assert.match(res.text, /function loadRunLogs\(/);
     assert.match(res.text, /function selectRunLog\(/);
+    assert.match(res.text, /function copyRunLog\(/);
+    assert.match(res.text, /className = 'log-run-copy'/);
+    assert.match(res.text, /className = 'log-run-events'/);
+    assert.match(res.text, /Copy run summary/);
     assert.match(res.text, /\/api\/runs\?limit=50&offset=/);
     assert.match(res.text, /state\.selectedId = session\.id/);
     assert.doesNotMatch(res.text, /Use this browser from code/);
@@ -1014,6 +1018,10 @@ test('public API documentation provides accessible REST and client tabs', async 
     assert.match(res.text, /Accept: application\/json/);
     assert.match(res.text, /--upload-file/);
     assert.match(res.text, /Range: bytes=0-1023/);
+    assert.match(res.text, /class="command-block language-shell"/);
+    assert.match(res.text, /class="command-block language-shell"><code><span class="tok-comment"># Obtain access/);
+    assert.match(res.text, /<span class="tok-variable">DOWNLOADS_ACCESS<\/span>=\$\(<span class="tok-function">curl<\/span>/);
+    assert.match(res.text, /<span class="tok-function">printf<\/span>/);
     assert.match(res.text, /uploadDownloadsFile/);
     assert.match(res.text, /upload_downloads_file/);
     assert.match(res.text, /\/api\/browser-sessions\/:sessionId\/runs\/:runId\/responses/);

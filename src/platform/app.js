@@ -411,14 +411,19 @@ function dashboardPage(user) {
     .logs-filter span { color: var(--text-dim); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
     .logs-list-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 9px; color: var(--text-dim); font-size: 11px; }
     .logs-list { min-height: 320px; max-height: calc(100vh - 320px); display: grid; align-content: start; gap: 8px; padding-right: 3px; overflow-y: auto; overscroll-behavior: contain; }
-    .log-run { width: 100%; min-height: 0; display: grid; gap: 7px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 10px; background: rgba(89,55,25,.025); color: var(--text); box-shadow: none; text-align: left; white-space: normal; }
+    .log-run-shell { position: relative; min-width: 0; }
+    .log-run { width: 100%; min-height: 0; display: grid; gap: 7px; padding: 11px 62px 11px 12px; border: 1px solid var(--border); border-radius: 10px; background: rgba(89,55,25,.025); color: var(--text); box-shadow: none; text-align: left; white-space: normal; }
     .log-run:hover { border-color: rgba(91,82,232,.28); background: var(--card-hover); transform: none; }
     .log-run.is-selected { border-color: var(--accent); background: rgba(91,82,232,.065); box-shadow: 0 0 0 1px rgba(91,82,232,.07); }
     .log-run-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
     .log-run-time { color: var(--text-dim); font: 10px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .log-run-task { display: -webkit-box; overflow: hidden; color: var(--text); font-size: 13px; font-weight: 720; line-height: 1.42; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-    .log-run-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--text-dim); font-size: 10px; }
+    .log-run-meta { min-width: 0; display: flex; align-items: center; justify-content: flex-start; gap: 5px; color: var(--text-dim); font-size: 10px; }
     .log-run-browser { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .log-run-events { flex: 0 0 auto; white-space: nowrap; }
+    .log-run-copy { position: absolute; right: 8px; bottom: 7px; z-index: 1; min-height: 23px; padding: 2px 7px; border-color: rgba(91,82,232,.18); background: rgba(255,253,248,.76); color: var(--text-dim); box-shadow: none; font-size: 9px; }
+    .log-run-copy:hover { border-color: rgba(91,82,232,.32); background: var(--card); color: var(--accent); transform: none; }
+    .log-run-copy.is-copied { border-color: rgba(45,136,102,.24); color: var(--success); }
     .logs-empty { min-height: 260px; display: grid; place-items: center; padding: 28px; border: 1px dashed var(--border); border-radius: 11px; color: var(--text-dim); text-align: center; }
     .logs-empty strong { display: block; margin-bottom: 4px; color: var(--text); font-size: 14px; }
     .logs-load-more { width: 100%; margin-top: 10px; }
@@ -1823,6 +1828,37 @@ function dashboardPage(user) {
       ));
     }
 
+    function runLogCopyText(run) {
+      const eventCount = Number(run.update_count) || 0;
+      const lines = [
+        'Task: ' + (run.task || 'Untitled browser run'),
+        'Browser: ' + runLogBrowserName(run),
+        'Status: ' + (run.status || 'unknown'),
+        'Events: ' + eventCount,
+        'Run ID: ' + (run.run_id || '—'),
+        'Started: ' + (run.created_at || '—'),
+      ];
+      if (run.summary) lines.push('Summary: ' + run.summary);
+      if (run.error) lines.push('Error: ' + run.error);
+      if (run.final_url) lines.push('Final URL: ' + run.final_url);
+      return lines.join('\\n');
+    }
+
+    async function copyRunLog(run, button) {
+      try {
+        await navigator.clipboard.writeText(runLogCopyText(run));
+        button.textContent = 'Copied';
+        button.classList.add('is-copied');
+        window.setTimeout(() => {
+          if (!button.isConnected) return;
+          button.textContent = 'Copy';
+          button.classList.remove('is-copied');
+        }, 1200);
+      } catch {
+        logsMessage.textContent = 'Clipboard access was denied.';
+      }
+    }
+
     function renderRunLogs() {
       const runs = filteredRunLogs();
       logsList.replaceChildren();
@@ -1843,6 +1879,8 @@ function dashboardPage(user) {
       }
 
       for (const run of runs) {
+        const shell = document.createElement('div');
+        shell.className = 'log-run-shell';
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'log-run' + (run.run_id === state.logsSelectedId ? ' is-selected' : '');
@@ -1865,12 +1903,22 @@ function dashboardPage(user) {
         const browser = document.createElement('span');
         browser.className = 'log-run-browser';
         browser.textContent = runLogBrowserName(run);
+        const eventCount = Number(run.update_count) || 0;
         const events = document.createElement('span');
-        events.textContent = run.update_count + (run.update_count === 1 ? ' event' : ' events');
+        events.className = 'log-run-events';
+        events.textContent = '· ' + eventCount + (eventCount === 1 ? ' event' : ' events');
         meta.append(browser, events);
         button.append(top, task, meta);
         button.addEventListener('click', () => selectRunLog(run));
-        logsList.append(button);
+        const copyButton = document.createElement('button');
+        copyButton.type = 'button';
+        copyButton.className = 'log-run-copy';
+        copyButton.textContent = 'Copy';
+        copyButton.title = 'Copy run summary';
+        copyButton.setAttribute('aria-label', 'Copy run summary for ' + (run.task || 'untitled browser run'));
+        copyButton.addEventListener('click', () => copyRunLog(run, copyButton));
+        shell.append(button, copyButton);
+        logsList.append(shell);
       }
     }
 
