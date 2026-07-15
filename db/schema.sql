@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS cloud_runs (
   id VARCHAR(40) PRIMARY KEY,
   browser_session_id VARCHAR(40) NOT NULL,
   user_id VARCHAR(40) NOT NULL,
+  parent_run_id VARCHAR(40) NULL,
+  tab_id BIGINT NULL,
   task TEXT NOT NULL,
   output_schema JSON NULL,
   status VARCHAR(32) NOT NULL,
@@ -62,7 +64,8 @@ CREATE TABLE IF NOT EXISTS cloud_runs (
   updated_at DATETIME NOT NULL,
   completed_at DATETIME NULL,
   FOREIGN KEY (browser_session_id) REFERENCES browser_sessions(id),
-  FOREIGN KEY (user_id) REFERENCES users(id)
+  FOREIGN KEY (user_id) REFERENCES users(id),
+  UNIQUE INDEX idx_cloud_runs_parent_run (parent_run_id)
 );
 
 CREATE TABLE IF NOT EXISTS audit_logs (

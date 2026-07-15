@@ -46,7 +46,17 @@ if ($finished['status'] === 'needs_user_input') {
 }
 
 print_r($finished['result']);
+
+$followUp = $client->continueRun(
+    $ready['id'],
+    $finished['run_id'],
+    'Now open the first link and summarize it',
+);
+print_r($client->waitForRun($ready['id'], $followUp['run_id'])['result']);
 ```
+
+`continueRun` creates a child run with `parent_run_id` and reuses the same tab
+and WebBrain conversation. Append later turns to the newest child run.
 
 ## Structured output
 
@@ -72,6 +82,7 @@ $run = $client->createRun($session['id'], 'Return the title and visible links', 
 - `deleteBrowserSession($sessionId)`
 - `createRun($sessionId, $task, $options)`
 - `getRun($sessionId, $runId)`
+- `continueRun($sessionId, $runId, $task, $options)`
 - `respondToRun($sessionId, $runId, $clarifyId, $answer)`
 - `waitForRun($sessionId, $runId, ...)`
 - `abortRun($sessionId, $runId)`

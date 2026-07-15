@@ -2578,6 +2578,8 @@ function escapeHtml(value) {
 function normalizeRunSnapshot(snapshot, existing = {}) {
   return {
     status: snapshot.status || existing.status,
+    parent_run_id: snapshot.parent_run_id || snapshot.parentRunId || existing.parent_run_id || null,
+    tab_id: snapshot.tab_id ?? snapshot.tabId ?? existing.tab_id ?? null,
     result: snapshot.result ?? existing.result ?? null,
     summary: snapshot.summary || existing.summary || '',
     final_url: snapshot.final_url || snapshot.finalUrl || existing.final_url || '',
@@ -2650,6 +2652,40 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
       return null;
     }
     return session;
+  }
+
+  async function startStoredCloudRun(req, session, task, parentRun = null) {
+    const outputSchema = req.body.output_schema ?? req.body.outputSchema ?? null;
+    const started = await controlChannel.send(session.id, 'run', {
+      task,
+      api_mutations_allowed: true,
+      output_schema: outputSchema,
+      parent_run_id: parentRun?.id || null,
+      tab_id: parentRun ? parentRun.tab_id : (req.body.tab_id ?? req.body.tabId ?? null),
+      wait: false,
+      timeout_ms: req.body.timeout_ms,
+    });
+    const createdAt = nowIso();
+    return await store.createCloudRun({
+      id: started.run_id || started.runId,
+      browser_session_id: session.id,
+      user_id: req.auth.user.id,
+      parent_run_id: parentRun?.id || null,
+      tab_id: started.tab_id ?? started.tabId ?? (parentRun
+        ? (parentRun.tab_id ?? null)
+        : (req.body.tab_id ?? req.body.tabId ?? null)),
+      task,
+      output_schema: outputSchema,
+      status: started.status || 'running',
+      result: started.result ?? null,
+      summary: started.summary || '',
+      final_url: started.final_url || started.finalUrl || '',
+      error: started.error || '',
+      updates: Array.isArray(started.updates) ? started.updates : [],
+      created_at: createdAt,
+      updated_at: createdAt,
+      completed_at: null,
+    });
   }
 
   app.get('/healthz', (req, res) => {
@@ -3090,30 +3126,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
       if (!runtime.runtime_ready) {
         return jsonError(res, 409, 'WebBrain browser runtime is not ready; the extension bridge is not connected.', runtime);
       }
-      const started = await controlChannel.send(session.id, 'run', {
-        task,
-        api_mutations_allowed: true,
-        output_schema: req.body.output_schema ?? req.body.outputSchema ?? null,
-        tab_id: req.body.tab_id ?? req.body.tabId ?? null,
-        wait: false,
-        timeout_ms: req.body.timeout_ms,
-      });
-      let run = await store.createCloudRun({
-        id: started.run_id || started.runId,
-        browser_session_id: session.id,
-        user_id: req.auth.user.id,
-        task,
-        output_schema: req.body.output_schema ?? req.body.outputSchema ?? null,
-        status: started.status || 'running',
-        result: started.result ?? null,
-        summary: started.summary || '',
-        final_url: started.final_url || started.finalUrl || '',
-        error: started.error || '',
-        updates: Array.isArray(started.updates) ? started.updates : [],
-        created_at: nowIso(),
-        updated_at: nowIso(),
-        completed_at: null,
-      });
+      let run = await startStoredCloudRun(req, session, task);
       await audit(req, 'cloud_run.create', 'cloud_run', run.id, { browser_session_id: session.id });
       if (!req.body.wait) return res.status(202).json(publicRun(run));
 
@@ -3133,6 +3146,8 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
       const runs = rows.slice(0, limit).map(run => ({
         run_id: run.id,
         session_id: run.browser_session_id,
+        parent_run_id: run.parent_run_id || null,
+        tab_id: run.tab_id ?? null,
         task: run.task || '',
         status: run.status,
         summary: run.summary || '',
@@ -3166,6 +3181,49 @@ export function createPlatformApp({ store, provisioner, controlChannel, config }
         if (snapshot) run = await store.updateCloudRun(run.id, normalizeRunSnapshot(snapshot, run));
       }
       res.json(publicRun(run));
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.post('/api/browser-sessions/:sessionId/runs/:runId/messages', requireAuth, async (req, res, next) => {
+    try {
+      const session = await ownedBrowserSession(req, res);
+      if (!session) return;
+      const task = String(req.body.task || '').trim();
+      if (!task) return jsonError(res, 400, '`task` is required');
+      let parentRun = await store.getCloudRun(req.params.runId);
+      if (!parentRun || parentRun.user_id !== req.auth.user.id || parentRun.browser_session_id !== session.id) {
+        return jsonError(res, 404, 'Cloud run not found');
+      }
+      if (!TERMINAL_RUN_STATUSES.has(parentRun.status) && controlChannel.isConnected(session.id)) {
+        const snapshot = await controlChannel.send(session.id, 'status', { run_id: parentRun.id }).catch(() => null);
+        if (snapshot) parentRun = await store.updateCloudRun(parentRun.id, normalizeRunSnapshot(snapshot, parentRun));
+      }
+      if (!TERMINAL_RUN_STATUSES.has(parentRun.status)) {
+        return jsonError(res, 409, 'Cloud run must be finished before it can be continued.', {
+          status: parentRun.status,
+        });
+      }
+      const existingChild = await store.getCloudRunByParentId(parentRun.id);
+      if (existingChild) {
+        return jsonError(res, 409, 'Cloud run has already been continued.', {
+          child_run_id: existingChild.id,
+        });
+      }
+      const runtime = await browserRuntimeState(session);
+      if (!runtime.runtime_ready) {
+        return jsonError(res, 409, 'WebBrain browser runtime is not ready; the extension bridge is not connected.', runtime);
+      }
+      let run = await startStoredCloudRun(req, session, task, parentRun);
+      await audit(req, 'cloud_run.continue', 'cloud_run', run.id, {
+        browser_session_id: session.id,
+        parent_run_id: parentRun.id,
+      });
+      if (!req.body.wait) return res.status(202).json(publicRun(run));
+
+      run = await waitForRun({ run, session, store, controlChannel, config, timeoutMs: req.body.timeout_ms });
+      return res.status(TERMINAL_RUN_STATUSES.has(run.status) ? (run.status === 'completed' ? 200 : 500) : 202).json(publicRun(run));
     } catch (e) {
       next(e);
     }

@@ -109,6 +109,16 @@ export class WebBrainClient {
     return await this.request('GET', `/api/browser-sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}`);
   }
 
+  async continueRun(sessionId, runId, { task, wait = false, timeoutMs, outputSchema } = {}) {
+    if (!task) throw new TypeError('task is required');
+    return await this.request('POST', `/api/browser-sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/messages`, {
+      task,
+      wait,
+      ...(timeoutMs === undefined ? {} : { timeout_ms: timeoutMs }),
+      ...(outputSchema === undefined ? {} : { output_schema: outputSchema }),
+    });
+  }
+
   async abortRun(sessionId, runId) {
     return await this.request('POST', `/api/browser-sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/abort`, {});
   }

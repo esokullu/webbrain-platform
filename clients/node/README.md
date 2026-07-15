@@ -48,7 +48,15 @@ if (finished.status === 'needs_user_input') {
 }
 
 console.log(finished.result);
+
+const followUp = await client.continueRun(ready.id, finished.run_id, {
+  task: 'Now open the first link and summarize it',
+});
+console.log((await client.waitForRun(ready.id, followUp.run_id)).result);
 ```
+
+`continueRun` creates a child run with `parent_run_id` and reuses the same tab
+and WebBrain conversation. Append later turns to the newest child run.
 
 ## Structured output
 
@@ -75,6 +83,7 @@ const run = await client.createRun(session.id, {
 - `deleteBrowserSession(sessionId)`
 - `createRun(sessionId, options)`
 - `getRun(sessionId, runId)`
+- `continueRun(sessionId, runId, options)`
 - `respondToRun(sessionId, runId, clarifyId, answer)`
 - `waitForRun(sessionId, runId, options)`
 - `abortRun(sessionId, runId)`

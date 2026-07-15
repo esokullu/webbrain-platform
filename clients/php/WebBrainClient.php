@@ -150,6 +150,24 @@ final class WebBrainClient
         return $this->request('GET', '/api/browser-sessions/' . self::id($sessionId) . '/runs/' . self::id($runId));
     }
 
+    public function continueRun(string $sessionId, string $runId, string $task, array $options = []): array
+    {
+        if ($task === '') {
+            throw new InvalidArgumentException('task is required');
+        }
+        $body = ['task' => $task, 'wait' => $options['wait'] ?? false];
+        foreach (['timeout_ms', 'output_schema'] as $key) {
+            if (array_key_exists($key, $options)) {
+                $body[$key] = $options[$key];
+            }
+        }
+        return $this->request(
+            'POST',
+            '/api/browser-sessions/' . self::id($sessionId) . '/runs/' . self::id($runId) . '/messages',
+            $body,
+        );
+    }
+
     public function abortRun(string $sessionId, string $runId): array
     {
         return $this->request('POST', '/api/browser-sessions/' . self::id($sessionId) . '/runs/' . self::id($runId) . '/abort', []);

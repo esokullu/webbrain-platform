@@ -355,9 +355,11 @@ export function docsPage() {
           <div class="endpoint-list">
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/runs</code><span>Start a run.</span></div>
             <div class="endpoint"><span class="method">GET</span><code>/api/browser-sessions/:sessionId/runs/:runId</code><span>Read a run.</span></div>
+            <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/runs/:runId/messages</code><span>Append a turn after the run finishes.</span></div>
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/runs/:runId/responses</code><span>Answer its pending <code>clarify_id</code>.</span></div>
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/runs/:runId/abort</code><span>Abort a run.</span></div>
           </div>
+          <p>Post a new <span class="inline-code">task</span> to <span class="inline-code">/messages</span> after a run is completed, failed, or aborted. WebBrain creates an immutable child run with <span class="inline-code">parent_run_id</span> and reuses the same tab and conversation, so the follow-up can continue on the current page or navigate elsewhere. Append later turns to the newest child. Use <span class="inline-code">/responses</span> only for a paused <span class="inline-code">needs_user_input</span> run.</p>
         </section>
 
         <section class="docs-section" id="structured-output">
@@ -378,7 +380,7 @@ export function docsPage() {
         <section class="docs-section" id="clients">
           <p class="section-kicker">No dependencies</p>
           <h2>Use your language</h2>
-          <p>The repository includes small clients with the same core operations: session lifecycle, readiness, runs, polling, aborting, structured output, and noVNC links.</p>
+          <p>The repository includes small clients with the same core operations: session lifecycle, readiness, runs, follow-up turns, polling, aborting, structured output, and noVNC links.</p>
           <div class="client-cards">
             <a class="client-card" href="https://github.com/esokullu/webbrain-platform/tree/main/clients/node"><strong>Node.js</strong><span>Node 18+ · native fetch</span></a>
             <a class="client-card" href="https://github.com/esokullu/webbrain-platform/tree/main/clients/python"><strong>Python</strong><span>Python 3.9+ · standard library</span></a>

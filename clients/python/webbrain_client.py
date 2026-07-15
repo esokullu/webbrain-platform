@@ -125,6 +125,29 @@ class WebBrainClient:
     def get_run(self, session_id: str, run_id: str):
         return self._request("GET", f"/api/browser-sessions/{self._id(session_id)}/runs/{self._id(run_id)}")
 
+    def continue_run(
+        self,
+        session_id: str,
+        run_id: str,
+        task: str,
+        *,
+        wait: bool = False,
+        timeout_ms: Optional[int] = None,
+        output_schema: Optional[Dict[str, Any]] = None,
+    ):
+        if not task:
+            raise ValueError("task is required")
+        body: Dict[str, Any] = {"task": task, "wait": wait}
+        if timeout_ms is not None:
+            body["timeout_ms"] = timeout_ms
+        if output_schema is not None:
+            body["output_schema"] = output_schema
+        return self._request(
+            "POST",
+            f"/api/browser-sessions/{self._id(session_id)}/runs/{self._id(run_id)}/messages",
+            body,
+        )
+
     def abort_run(self, session_id: str, run_id: str):
         return self._request("POST", f"/api/browser-sessions/{self._id(session_id)}/runs/{self._id(run_id)}/abort", {})
 

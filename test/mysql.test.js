@@ -18,6 +18,12 @@ test('dashboard columns are present in fresh schema and existing-database migrat
   assert.match(storeSource, /ALTER TABLE browser_sessions ADD COLUMN proxy_updated_at DATETIME NULL/);
   assert.match(schema, /updates JSON NULL/);
   assert.match(storeSource, /ALTER TABLE cloud_runs ADD COLUMN updates JSON NULL AFTER error/);
+  assert.match(schema, /parent_run_id VARCHAR\(40\) NULL/);
+  assert.match(schema, /tab_id BIGINT NULL/);
+  assert.match(schema, /UNIQUE INDEX idx_cloud_runs_parent_run \(parent_run_id\)/);
+  assert.match(storeSource, /ALTER TABLE cloud_runs ADD COLUMN parent_run_id VARCHAR\(40\) NULL AFTER user_id/);
+  assert.match(storeSource, /ALTER TABLE cloud_runs ADD COLUMN tab_id BIGINT NULL AFTER parent_run_id/);
+  assert.match(storeSource, /CREATE UNIQUE INDEX idx_cloud_runs_parent_run ON cloud_runs \(parent_run_id\)/);
   assert.match(storeSource, /async listCloudRunsForUser\(/);
   assert.match(storeSource, /WHERE user_id = :userId/);
   assert.match(storeSource, /ORDER BY created_at DESC, id DESC/);

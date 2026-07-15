@@ -110,6 +110,7 @@ export class DropletControlClient {
           task: payload.task,
           api_mutations_allowed: payload.api_mutations_allowed === true || payload.apiMutationsAllowed === true,
           output_schema: payload.output_schema ?? payload.outputSchema ?? null,
+          parent_run_id: payload.parent_run_id ?? payload.parentRunId ?? null,
           tab_id: payload.tab_id ?? payload.tabId ?? null,
           wait: false,
           timeout_ms: payload.timeout_ms,

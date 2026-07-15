@@ -29,10 +29,13 @@ test('sidecar run lifecycle proxies cloud_run/status/abort to extension bridge',
     if (msg.action === 'cloud_run') {
       assert.equal(msg.payload.tabId, 42);
       assert.equal(msg.payload.apiMutationsAllowed, true);
-      const runId = msg.payload.task === 'Ask for input' ? 'run_input' : 'run_test';
+      const runId = msg.payload.task === 'Ask for input'
+        ? 'run_input'
+        : (msg.payload.task === 'Continue summary' ? 'run_child' : 'run_test');
       statuses.set(runId, {
         runId,
         status: 'running',
+        parentRunId: msg.payload.parentRunId || null,
         tabId: 7,
         task: msg.payload.task,
         updates: [],
@@ -50,8 +53,8 @@ test('sidecar run lifecycle proxies cloud_run/status/abort to extension bridge',
         return;
       }
       setTimeout(() => {
-        statuses.set('run_test', {
-          ...statuses.get('run_test'),
+        statuses.set(runId, {
+          ...statuses.get(runId),
           status: 'completed',
           result: { title: 'Done' },
           summary: 'Finished.',
@@ -112,6 +115,20 @@ test('sidecar run lifecycle proxies cloud_run/status/abort to extension bridge',
   assert.deepEqual(waited.body.result, { title: 'Done' });
   assert.deepEqual(waited.body.updates.map(update => update.seq), [1, 2]);
   assert.equal(waited.body.updates[1].data.name, 'read_page');
+
+  const followUp = await request(base, '/api/browser-sessions/bs_1/runs', {
+    method: 'POST',
+    body: JSON.stringify({
+      task: 'Continue summary',
+      parent_run_id: 'run_test',
+      api_mutations_allowed: true,
+      tab_id: 42,
+      wait: false,
+    }),
+  });
+  assert.equal(followUp.status, 202);
+  assert.equal(followUp.body.run_id, 'run_child');
+  assert.equal(followUp.body.parent_run_id, 'run_test');
 
   const paused = await request(base, '/runs', {
     method: 'POST',

@@ -157,6 +157,10 @@ export class MemoryStore {
     return clone(this.cloudRuns.get(id) || null);
   }
 
+  async getCloudRunByParentId(parentRunId) {
+    return clone([...this.cloudRuns.values()].find(run => run.parent_run_id === parentRunId) || null);
+  }
+
   async listCloudRunsForSession(browserSessionId) {
     return clone([...this.cloudRuns.values()].filter(r => r.browser_session_id === browserSessionId));
   }

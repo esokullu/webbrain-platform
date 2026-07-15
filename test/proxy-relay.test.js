@@ -111,11 +111,13 @@ test('droplet control forwards run metadata and clarification responses', async 
     const started = await client.handleCommand('run', {
       task: 'Open Google',
       api_mutations_allowed: true,
+      parent_run_id: 'run_parent',
     });
 
     assert.equal(started.run_id, 'run_test');
     assert.equal(received[0].body.task, 'Open Google');
     assert.equal(received[0].body.api_mutations_allowed, true);
+    assert.equal(received[0].body.parent_run_id, 'run_parent');
     const resumed = await client.handleCommand('respond', {
       run_id: 'run_test',
       clarify_id: 'clr_1',

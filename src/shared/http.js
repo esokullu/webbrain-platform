@@ -34,6 +34,8 @@ export function publicRun(row) {
     run_id: row.id || row.run_id,
     status: row.status,
     session_id: row.browser_session_id || row.session_id,
+    parent_run_id: row.parent_run_id || row.parentRunId || null,
+    tab_id: row.tab_id ?? row.tabId ?? null,
     result: row.result ?? null,
     summary: row.summary || '',
     final_url: row.final_url || '',

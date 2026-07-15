@@ -64,6 +64,11 @@ test('Node.js client sends authenticated session and run requests', async () => 
       res.end(JSON.stringify({ run_id: 'run_test', status: 'running', pending_input: null }));
       return;
     }
+    if (req.method === 'POST' && req.url === '/api/browser-sessions/bs_test/runs/run_test/messages') {
+      res.statusCode = 202;
+      res.end(JSON.stringify({ run_id: 'run_child', parent_run_id: 'run_test', status: 'running' }));
+      return;
+    }
     res.statusCode = 404;
     res.end(JSON.stringify({ error: 'Not found' }));
   });
@@ -98,6 +103,12 @@ test('Node.js client sends authenticated session and run requests', async () => 
     assert.equal(resumed.status, 'running');
     const finished = await client.waitForRun(session.id, run.run_id, { pollIntervalMs: 1, timeoutMs: 1000 });
     assert.equal(finished.result, 'Example Domain');
+    const followUp = await client.continueRun(session.id, run.run_id, {
+      task: 'Open the first link',
+      timeoutMs: 30000,
+      outputSchema: { title: 'string' },
+    });
+    assert.equal(followUp.parent_run_id, run.run_id);
     assert.equal(requests.every(entry => entry.authorization === 'Bearer wbp_test'), true);
     assert.deepEqual(requests.find(entry => entry.path.endsWith('/runs')).body, {
       task: 'Open example.com',
@@ -109,6 +120,12 @@ test('Node.js client sends authenticated session and run requests', async () => 
     assert.deepEqual(requests.find(entry => entry.path.endsWith('/responses')).body, {
       clarify_id: 'clr_1',
       answer: 'yes',
+    });
+    assert.deepEqual(requests.find(entry => entry.path.endsWith('/messages')).body, {
+      task: 'Open the first link',
+      wait: false,
+      timeout_ms: 30000,
+      output_schema: { title: 'string' },
     });
     assert.equal(runPolls, 2);
 
@@ -124,10 +141,10 @@ test('Node.js client sends authenticated session and run requests', async () => 
 test('Python and PHP clients expose the shared browser automation operations', async () => {
   const python = await readFile(new URL('../clients/python/webbrain_client.py', import.meta.url), 'utf8');
   const php = await readFile(new URL('../clients/php/WebBrainClient.php', import.meta.url), 'utf8');
-  for (const method of ['create_browser_session', 'update_browser_session', 'get_browser_proxy', 'update_browser_proxy', 'delete_browser_proxy', 'wait_for_browser_session', 'create_run', 'get_run', 'respond_to_run', 'abort_run', 'wait_for_run']) {
+  for (const method of ['create_browser_session', 'update_browser_session', 'get_browser_proxy', 'update_browser_proxy', 'delete_browser_proxy', 'wait_for_browser_session', 'create_run', 'get_run', 'continue_run', 'respond_to_run', 'abort_run', 'wait_for_run']) {
     assert.match(python, new RegExp(`def ${method}\\(`));
   }
-  for (const method of ['createBrowserSession', 'updateBrowserSession', 'getBrowserProxy', 'updateBrowserProxy', 'deleteBrowserProxy', 'waitForBrowserSession', 'createRun', 'getRun', 'respondToRun', 'abortRun', 'waitForRun']) {
+  for (const method of ['createBrowserSession', 'updateBrowserSession', 'getBrowserProxy', 'updateBrowserProxy', 'deleteBrowserProxy', 'waitForBrowserSession', 'createRun', 'getRun', 'continueRun', 'respondToRun', 'abortRun', 'waitForRun']) {
     assert.match(php, new RegExp(`function ${method}\\(`));
   }
   assert.match(python, /Authorization.*Bearer/);
@@ -141,5 +158,6 @@ test('Python and PHP clients expose the shared browser automation operations', a
   for (const readme of readmes) {
     assert.match(readme, /Create a browser and run a task/);
     assert.match(readme, /Structured output/);
+    assert.match(readme, /parent_run_id/);
   }
 });

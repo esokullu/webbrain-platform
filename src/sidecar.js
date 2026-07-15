@@ -31,6 +31,7 @@ function normalizeRun(snapshot, sessionId = null) {
     run_id: snapshot.runId || snapshot.run_id,
     status: snapshot.status,
     session_id: sessionId || snapshot.sessionId || snapshot.session_id || null,
+    parent_run_id: snapshot.parentRunId || snapshot.parent_run_id || null,
     tab_id: snapshot.tabId ?? snapshot.tab_id ?? null,
     pending_input: snapshot.pendingInput || snapshot.pending_input || null,
     result: snapshot.result,
@@ -121,6 +122,7 @@ export function createSidecarServer(options = {}) {
       task,
       apiMutationsAllowed: body.api_mutations_allowed === true || body.apiMutationsAllowed === true,
       outputSchema,
+      parentRunId: body.parent_run_id ?? body.parentRunId ?? null,
       tabId: body.tab_id ?? body.tabId,
     });
     const run = normalizeRun(started, sessionId);

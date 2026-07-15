@@ -199,6 +199,7 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   ws = new WebSocket(`${ctx.wsBase}/droplet/control?session_token=${encodeURIComponent(storedSession.connect_secret)}`);
   await new Promise(resolve => ws.once('open', resolve));
   const statuses = new Map();
+  const runPayloads = [];
   let statusPolls = 0;
   let runSeq = 0;
   ws.on('message', raw => {
@@ -254,14 +255,28 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
     }
     if (msg.action === 'run') {
       assert.equal(msg.payload.api_mutations_allowed, true);
-      assert.equal(msg.payload.tab_id ?? null, msg.payload.task === 'Long task' ? 91 : null);
+      runPayloads.push(msg.payload);
+      const expectedTabId = msg.payload.task === 'Long task'
+        ? 91
+        : (msg.payload.task === 'Open the first result' ? 42 : null);
+      assert.equal(msg.payload.tab_id ?? null, expectedTabId);
       const runId = `run_cloud_${++runSeq}`;
-      statuses.set(runId, { run_id: runId, status: 'running', task: msg.payload.task });
+      statuses.set(runId, {
+        run_id: runId,
+        status: 'running',
+        task: msg.payload.task,
+        parent_run_id: msg.payload.parent_run_id || null,
+        tab_id: msg.payload.tab_id ?? 42,
+      });
       ws.send(JSON.stringify({ id: msg.id, ok: true, result: statuses.get(runId) }));
       return;
     }
     if (msg.action === 'status') {
       const current = statuses.get(msg.payload.run_id);
+      if (current?.task === 'Long task') {
+        ws.send(JSON.stringify({ id: msg.id, ok: true, result: current }));
+        return;
+      }
       if (current?.task === 'Interactive task') {
         if (current.status === 'running' && current.responded) {
           statuses.set(msg.payload.run_id, {
@@ -455,6 +470,13 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
     body: JSON.stringify({ task: 'Long task', tab_id: 91, wait: false }),
   });
   assert.equal(created.status, 202);
+  const activeContinuation = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs/${created.body.run_id}/messages`, {
+    method: 'POST',
+    headers: { cookie },
+    body: JSON.stringify({ task: 'Do another thing' }),
+  });
+  assert.equal(activeContinuation.status, 409);
+  assert.equal(activeContinuation.body.status, 'running');
   const proxyBlockedDuringRun = await request(ctx.base, `/api/browser-sessions/${sessionId}/proxy`, {
     method: 'PATCH',
     headers: { cookie },
@@ -507,6 +529,35 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   assert.equal(oldestLogs.body.runs[0].task, 'Summarize this page');
   assert.equal(oldestLogs.body.runs[0].update_count, 3);
   assert.equal(oldestLogs.body.has_more, false);
+
+  const forbiddenContinuation = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs/${waited.body.run_id}/messages`, {
+    method: 'POST',
+    headers: { cookie: otherCookie },
+    body: JSON.stringify({ task: 'Open the first result' }),
+  });
+  assert.equal(forbiddenContinuation.status, 404);
+
+  statusPolls = 0;
+  const followUp = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs/${waited.body.run_id}/messages`, {
+    method: 'POST',
+    headers: { cookie },
+    body: JSON.stringify({ task: 'Open the first result', wait: true, timeout_ms: 1000 }),
+  });
+  assert.equal(followUp.status, 200);
+  assert.equal(followUp.body.status, 'completed');
+  assert.equal(followUp.body.parent_run_id, waited.body.run_id);
+  assert.equal(followUp.body.tab_id, 42);
+  assert.equal(runPayloads.at(-1).parent_run_id, waited.body.run_id);
+  assert.equal(runPayloads.at(-1).tab_id, 42);
+  assert.equal(ctx.store.auditLogs.some(entry => entry.action === 'cloud_run.continue'), true);
+
+  const duplicateContinuation = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs/${waited.body.run_id}/messages`, {
+    method: 'POST',
+    headers: { cookie },
+    body: JSON.stringify({ task: 'Try to branch' }),
+  });
+  assert.equal(duplicateContinuation.status, 409);
+  assert.equal(duplicateContinuation.body.child_run_id, followUp.body.run_id);
 
   const otherLogs = await request(ctx.base, '/api/runs', { headers: { cookie: otherCookie } });
   assert.equal(otherLogs.status, 200);
@@ -902,6 +953,8 @@ test('public API documentation provides accessible REST and client tabs', async 
     assert.match(res.text, /class="tok-function"/);
     assert.match(res.text, /\/api\/browser-sessions\/:sessionId\/runs/);
     assert.match(res.text, /\/api\/browser-sessions\/:sessionId\/runs\/:runId\/responses/);
+    assert.match(res.text, /\/api\/browser-sessions\/:sessionId\/runs\/:runId\/messages/);
+    assert.match(res.text, /parent_run_id/);
     assert.match(res.text, /needs_user_input/);
     assert.match(res.text, /PATCH[\s\S]*\/api\/browser-sessions\/:sessionId/);
     assert.match(res.text, /tree\/main\/clients\/node/);

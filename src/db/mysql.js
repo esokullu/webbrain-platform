@@ -111,6 +111,33 @@ export class MySqlStore {
     if (!runUpdateColumns.length) {
       await this.pool.query('ALTER TABLE cloud_runs ADD COLUMN updates JSON NULL AFTER error');
     }
+    const runContinuationColumns = [
+      ['parent_run_id', 'ALTER TABLE cloud_runs ADD COLUMN parent_run_id VARCHAR(40) NULL AFTER user_id'],
+      ['tab_id', 'ALTER TABLE cloud_runs ADD COLUMN tab_id BIGINT NULL AFTER parent_run_id'],
+    ];
+    for (const [column, alter] of runContinuationColumns) {
+      const [rows] = await this.pool.execute(
+        `SELECT 1
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'cloud_runs'
+           AND COLUMN_NAME = :column
+         LIMIT 1`,
+        { column }
+      );
+      if (!rows.length) await this.pool.query(alter);
+    }
+    const [runParentIndexes] = await this.pool.execute(
+      `SELECT 1
+       FROM information_schema.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'cloud_runs'
+         AND INDEX_NAME = 'idx_cloud_runs_parent_run'
+       LIMIT 1`
+    );
+    if (!runParentIndexes.length) {
+      await this.pool.query('CREATE UNIQUE INDEX idx_cloud_runs_parent_run ON cloud_runs (parent_run_id)');
+    }
   }
 
   async queryOne(sql, params = {}) {
@@ -307,10 +334,12 @@ export class MySqlStore {
   async createCloudRun(row) {
     await this.pool.execute(
       `INSERT INTO cloud_runs
-       (id,browser_session_id,user_id,task,output_schema,status,result,summary,final_url,error,updates,created_at,updated_at,completed_at)
-       VALUES (:id,:browser_session_id,:user_id,:task,:output_schema,:status,:result,:summary,:final_url,:error,:updates,:created_at,:updated_at,:completed_at)`,
+       (id,browser_session_id,user_id,parent_run_id,tab_id,task,output_schema,status,result,summary,final_url,error,updates,created_at,updated_at,completed_at)
+       VALUES (:id,:browser_session_id,:user_id,:parent_run_id,:tab_id,:task,:output_schema,:status,:result,:summary,:final_url,:error,:updates,:created_at,:updated_at,:completed_at)`,
       {
         ...row,
+        parent_run_id: row.parent_run_id || null,
+        tab_id: row.tab_id ?? null,
         output_schema: encodeJson(row.output_schema),
         result: encodeJson(row.result),
         updates: encodeJson(row.updates || []),
@@ -326,6 +355,13 @@ export class MySqlStore {
     return normalizeCloudRun(await this.queryOne('SELECT * FROM cloud_runs WHERE id = :id', { id }));
   }
 
+  async getCloudRunByParentId(parentRunId) {
+    return normalizeCloudRun(await this.queryOne(
+      'SELECT * FROM cloud_runs WHERE parent_run_id = :parentRunId LIMIT 1',
+      { parentRunId }
+    ));
+  }
+
   async listCloudRunsForSession(browserSessionId) {
     const [rows] = await this.pool.execute(
       'SELECT * FROM cloud_runs WHERE browser_session_id = :browserSessionId ORDER BY created_at DESC',
@@ -338,7 +374,7 @@ export class MySqlStore {
     const safeLimit = Math.max(1, Math.min(101, Math.trunc(Number(limit) || 50)));
     const safeOffset = Math.max(0, Math.trunc(Number(offset) || 0));
     const [rows] = await this.pool.execute(
-      `SELECT id, browser_session_id, user_id, task, status, summary, final_url, error,
+      `SELECT id, browser_session_id, user_id, parent_run_id, tab_id, task, status, summary, final_url, error,
               COALESCE(JSON_LENGTH(updates), 0) AS update_count,
               created_at, updated_at, completed_at
        FROM cloud_runs

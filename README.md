@@ -236,6 +236,8 @@ The response is `202 Accepted` and contains a `run_id`:
   "run_id": "run_0123456789abcdef",
   "status": "running",
   "session_id": "bs_0123456789abcdef",
+  "parent_run_id": null,
+  "tab_id": 42,
   "result": null,
   "summary": "",
   "final_url": "",
@@ -338,6 +340,35 @@ curl -sS -X POST \
 A valid response returns the refreshed run, normally back in `running` state.
 Stale, mismatched, or already-answered clarification IDs return `409`. Answers
 are delivered to the active agent but are not copied into run progress logs.
+
+### Continue a finished run
+
+Append another turn after a run reaches `completed`, `failed`, or `aborted`:
+
+```bash
+curl -sS -X POST \
+  "https://webbrain.cloud/api/browser-sessions/$WEBBRAIN_SESSION_ID/runs/$WEBBRAIN_RUN_ID/messages" \
+  -H "Authorization: Bearer $WEBBRAIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task": "Now open the first result and summarize it",
+    "wait": true,
+    "timeout_ms": 120000
+  }'
+```
+
+This creates a new run rather than changing the finished run. The child
+response has its own `run_id`, sets `parent_run_id` to the finished run, and
+reuses the same browser tab and WebBrain conversation. The follow-up can keep
+working on the current page or navigate somewhere completely different.
+
+Each run can have one direct child, producing a linear conversation history.
+To append again, post to the newest child run. Continuing an active or already
+continued run returns `409`; an already-continued response includes
+`child_run_id`. The request accepts `task`, `wait`, `timeout_ms`, and
+`output_schema`. Use `/responses` instead when a run is paused in
+`needs_user_input`, because that resumes the existing run rather than creating
+a new turn.
 
 ### Structured output
 

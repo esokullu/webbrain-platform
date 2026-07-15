@@ -45,7 +45,17 @@ if finished["status"] == "needs_user_input":
     finished = client.wait_for_run(ready["id"], run["run_id"])
 
 print(finished["result"])
+
+follow_up = client.continue_run(
+    ready["id"],
+    finished["run_id"],
+    "Now open the first link and summarize it",
+)
+print(client.wait_for_run(ready["id"], follow_up["run_id"])["result"])
 ```
+
+`continue_run` creates a child run with `parent_run_id` and reuses the same tab
+and WebBrain conversation. Append later turns to the newest child run.
 
 ## Structured output
 
@@ -70,6 +80,7 @@ run = client.create_run(
 - `delete_browser_session(session_id)`
 - `create_run(session_id, task, ...)`
 - `get_run(session_id, run_id)`
+- `continue_run(session_id, run_id, task, ...)`
 - `respond_to_run(session_id, run_id, clarify_id, answer)`
 - `wait_for_run(session_id, run_id, ...)`
 - `abort_run(session_id, run_id)`
