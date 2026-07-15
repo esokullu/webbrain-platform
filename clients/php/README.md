@@ -60,6 +60,45 @@ print_r($client->waitForRun($ready['id'], $followUp['run_id'])['result']);
 `continueRun` creates a child run with `parent_run_id` and reuses the same tab
 and WebBrain conversation. Append later turns to the newest child run.
 
+## Downloads transfers
+
+The transfer helpers stream file bodies instead of buffering them in memory.
+Reuse one access response for a batch of operations:
+
+```php
+$access = $client->createDownloadsAccess($ready['id']);
+
+$uploaded = $client->uploadDownloadsFile(
+    $ready['id'],
+    './report.pdf',
+    'report.pdf',
+    $access,
+);
+echo $uploaded['name']; // May be "report (1).pdf" on a collision.
+
+$listing = $client->listDownloads($ready['id'], '', $access);
+print_r($listing['entries']);
+
+$client->downloadDownloadsFile(
+    $ready['id'],
+    $uploaded['name'],
+    './saved/report.pdf',
+    $access,
+);
+$client->downloadDownloadsFile(
+    $ready['id'],
+    $uploaded['name'],
+    './saved/report-first-1KiB',
+    $access,
+    'bytes=0-1023',
+);
+```
+
+If `$access` is omitted, each helper calls `createDownloadsAccess` itself. A
+download will not replace an existing local file unless `$overwrite` is
+explicitly `true`. Remote paths reject traversal, dotfile, and control
+character segments.
+
 ## Structured output
 
 ```php
@@ -90,6 +129,9 @@ $run = $client->createRun($session['id'], 'Return the title and visible links', 
 - `abortRun($sessionId, $runId)`
 - `createConnectToken($sessionId, $options)`
 - `createDownloadsAccess($sessionId)`
+- `listDownloads($sessionId, $path, $access)`
+- `uploadDownloadsFile($sessionId, $localPath, $remotePath, $access)`
+- `downloadDownloadsFile($sessionId, $remotePath, $destinationPath, $access, $range, $overwrite)`
 
 Failed HTTP requests throw `WebBrainApiException` with `status` and `body`
 properties.

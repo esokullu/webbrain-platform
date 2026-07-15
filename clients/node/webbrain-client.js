@@ -1,3 +1,10 @@
+import { randomBytes } from 'node:crypto';
+import { createReadStream, createWriteStream } from 'node:fs';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'aborted']);
 const WAIT_RETURN_STATUSES = new Set([...TERMINAL_RUN_STATUSES, 'needs_user_input']);
 
@@ -83,6 +90,110 @@ export class WebBrainClient {
     return await this.request('POST', `/api/browser-sessions/${encodeURIComponent(sessionId)}/downloads-access`, {});
   }
 
+  async listDownloads(sessionId, { path: remotePath = '', access } = {}) {
+    const resolvedAccess = await this.downloadsAccess(sessionId, access);
+    const response = await this.downloadsRequest(resolvedAccess, downloadsUrl(resolvedAccess, remotePath, true), {
+      headers: { accept: 'application/json' },
+    });
+    return await response.json();
+  }
+
+  async uploadDownloadsFile(sessionId, localPath, { remotePath = path.basename(String(localPath)), access } = {}) {
+    const resolvedAccess = await this.downloadsAccess(sessionId, access);
+    const source = String(localPath || '');
+    if (!source) throw new TypeError('localPath is required');
+    const stat = await fs.stat(source);
+    if (!stat.isFile()) throw new TypeError('localPath must point to a regular file');
+    if (resolvedAccess.upload_limit_bytes && stat.size > Number(resolvedAccess.upload_limit_bytes)) {
+      throw new WebBrainApiError('File exceeds the Downloads upload limit', { status: 413 });
+    }
+    const response = await this.downloadsRequest(resolvedAccess, downloadsUrl(resolvedAccess, remotePath), {
+      method: 'PUT',
+      headers: {
+        'content-length': String(stat.size),
+        'content-type': 'application/octet-stream',
+      },
+      body: createReadStream(source),
+      duplex: 'half',
+    });
+    return await response.json();
+  }
+
+  async downloadDownloadsFile(sessionId, remotePath, destinationPath, {
+    access,
+    range,
+    overwrite = false,
+  } = {}) {
+    const resolvedAccess = await this.downloadsAccess(sessionId, access);
+    const destination = String(destinationPath || '');
+    if (!destination) throw new TypeError('destinationPath is required');
+    if (range !== undefined && !/^bytes=(?:\d+-\d*|-\d+)$/.test(String(range))) {
+      throw new TypeError('range must use a single HTTP bytes range, for example bytes=0-1023');
+    }
+    const response = await this.downloadsRequest(resolvedAccess, downloadsUrl(resolvedAccess, remotePath), {
+      headers: range === undefined ? {} : { range: String(range) },
+    });
+    if (range !== undefined && response.status !== 206) {
+      throw new WebBrainApiError('Downloads service did not honor the requested byte range', { status: response.status });
+    }
+    if (!response.body) throw new WebBrainApiError('Downloads response did not include a body');
+
+    await fs.mkdir(path.dirname(destination), { recursive: true });
+    const temporary = path.join(
+      path.dirname(destination),
+      `.${path.basename(destination)}.webbrain-${process.pid}-${randomBytes(6).toString('hex')}.part`,
+    );
+    try {
+      await pipeline(Readable.fromWeb(response.body), createWriteStream(temporary, { flags: 'wx', mode: 0o600 }));
+      if (overwrite) {
+        await fs.rename(temporary, destination);
+      } else {
+        await fs.link(temporary, destination);
+        await fs.unlink(temporary);
+      }
+      const saved = await fs.stat(destination);
+      return {
+        path: destination,
+        size: saved.size,
+        status: response.status,
+        content_type: response.headers.get('content-type'),
+        content_range: response.headers.get('content-range'),
+      };
+    } catch (error) {
+      await fs.rm(temporary, { force: true }).catch(() => {});
+      throw error;
+    }
+  }
+
+  async downloadsAccess(sessionId, access) {
+    const resolved = access || await this.createDownloadsAccess(sessionId);
+    if (!resolved?.url || !resolved?.username || !resolved?.password) {
+      throw new WebBrainApiError('Downloads access response is incomplete');
+    }
+    downloadsBaseUrl(resolved.url);
+    return resolved;
+  }
+
+  async downloadsRequest(access, url, options = {}) {
+    const authorization = `Basic ${Buffer.from(`${access.username}:${access.password}`).toString('base64')}`;
+    const response = await this.fetch(url, {
+      ...options,
+      redirect: 'error',
+      headers: {
+        authorization,
+        ...(options.headers || {}),
+      },
+    });
+    if (response.ok) return response;
+    const text = await response.text();
+    let body = text;
+    try { body = text ? JSON.parse(text) : null; } catch {}
+    throw new WebBrainApiError(body?.error || text || `Downloads request failed with status ${response.status}`, {
+      status: response.status,
+      body,
+    });
+  }
+
   async waitForBrowserSession(sessionId, { pollIntervalMs = 2000, timeoutMs = 300000 } = {}) {
     const deadline = Date.now() + timeoutMs;
     while (true) {
@@ -147,4 +258,42 @@ export class WebBrainClient {
       await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
     }
   }
+}
+
+function downloadsUrl(access, remotePath = '', directory = false) {
+  const segments = downloadsPathSegments(remotePath);
+  const base = downloadsBaseUrl(access.url);
+  const suffix = segments.map(segment => encodeURIComponent(segment)).join('/');
+  return base + suffix + (directory && suffix ? '/' : '');
+}
+
+function downloadsBaseUrl(value) {
+  let url;
+  try {
+    url = new URL(String(value));
+  } catch {
+    throw new TypeError('Downloads access URL is invalid');
+  }
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) {
+    throw new TypeError('Downloads access URL must use HTTPS');
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    throw new TypeError('Downloads access URL cannot contain credentials, a query, or a fragment');
+  }
+  return url.href.endsWith('/') ? url.href : `${url.href}/`;
+}
+
+function downloadsPathSegments(value) {
+  const input = String(value || '');
+  if (!input) return [];
+  const segments = input.split('/');
+  if (segments.some(segment => !segment
+    || segment === '.'
+    || segment === '..'
+    || segment.startsWith('.')
+    || /[\\\0\r\n\u0000-\u001f\u007f]/.test(segment))) {
+    throw new TypeError('Downloads path contains a forbidden segment');
+  }
+  return segments;
 }

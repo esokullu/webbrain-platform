@@ -1,8 +1,100 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import http from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { promisify } from 'node:util';
 import { WebBrainApiError, WebBrainClient } from '../clients/node/webbrain-client.js';
+
+const execFileAsync = promisify(execFile);
+
+async function startDownloadsFixture() {
+  const files = new Map();
+  const basic = `Basic ${Buffer.from('webbrain:fixture-secret').toString('base64')}`;
+  const server = http.createServer(async (req, res) => {
+    if (req.url === '/api/browser-sessions/bs_test/downloads-access') {
+      if (req.headers.authorization !== 'Bearer wbp_test') {
+        res.statusCode = 401;
+        return res.end(JSON.stringify({ error: 'Unauthorized' }));
+      }
+      res.setHeader('content-type', 'application/json');
+      return res.end(JSON.stringify({
+        url: `http://127.0.0.1:${server.address().port}/downloads/`,
+        username: 'webbrain',
+        password: 'fixture-secret',
+        upload_limit_bytes: 1024 * 1024,
+        expires_at: '2026-07-16T00:00:00.000Z',
+      }));
+    }
+    if (!req.url.startsWith('/downloads/') || req.headers.authorization !== basic) {
+      res.statusCode = 401;
+      return res.end('Unauthorized');
+    }
+    const encodedName = new URL(req.url, 'http://127.0.0.1').pathname.slice('/downloads/'.length);
+    const name = decodeURIComponent(encodedName.replace(/\/$/, ''));
+    if (!name && req.method === 'GET') {
+      const entries = [...files.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([fileName, body]) => ({
+          name: fileName,
+          path: fileName,
+          type: 'file',
+          size: body.length,
+          modified_at: '2026-07-15T00:00:00.000Z',
+          url: `/downloads/${encodeURIComponent(fileName)}`,
+        }));
+      res.setHeader('content-type', 'application/json');
+      return res.end(JSON.stringify({ path: '', entries, upload_limit_bytes: 1024 * 1024 }));
+    }
+    if (name && req.method === 'PUT') {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const extension = path.extname(name);
+      const stem = extension ? name.slice(0, -extension.length) : name;
+      let storedName = name;
+      for (let index = 1; files.has(storedName); index += 1) storedName = `${stem} (${index})${extension}`;
+      const body = Buffer.concat(chunks);
+      files.set(storedName, body);
+      res.statusCode = 201;
+      res.setHeader('content-type', 'application/json');
+      return res.end(JSON.stringify({ name: storedName, size: body.length, url: `/downloads/${encodeURIComponent(storedName)}` }));
+    }
+    if (name && req.method === 'GET' && files.has(name)) {
+      const body = files.get(name);
+      const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || ''));
+      let start = 0;
+      let end = body.length - 1;
+      if (range) {
+        start = range[1] ? Number(range[1]) : 0;
+        end = range[2] ? Number(range[2]) : end;
+        res.statusCode = 206;
+        res.setHeader('content-range', `bytes ${start}-${end}/${body.length}`);
+      }
+      res.setHeader('content-type', 'application/octet-stream');
+      return res.end(body.subarray(start, end + 1));
+    }
+    res.statusCode = 404;
+    res.setHeader('content-type', 'application/json');
+    return res.end(JSON.stringify({ error: 'Not found' }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  return {
+    baseUrl: `http://127.0.0.1:${server.address().port}`,
+    files,
+    close: () => new Promise(resolve => server.close(resolve)),
+  };
+}
+
+async function runtimeAvailable(command, argument = '--version') {
+  try {
+    await execFileAsync(command, [argument]);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 test('Node.js client sends authenticated session and run requests', async () => {
   const requests = [];
@@ -151,13 +243,138 @@ test('Node.js client sends authenticated session and run requests', async () => 
   }
 });
 
+test('Node.js client streams Downloads listing, upload, full download, and ranges', async () => {
+  const fixture = await startDownloadsFixture();
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'webbrain-node-client-'));
+  try {
+    const source = path.join(directory, 'source.txt');
+    await writeFile(source, 'abcdefghij');
+    const client = new WebBrainClient({ apiKey: 'wbp_test', baseUrl: fixture.baseUrl });
+    const access = await client.createDownloadsAccess('bs_test');
+    assert.deepEqual((await client.listDownloads('bs_test', { access })).entries, []);
+    const first = await client.uploadDownloadsFile('bs_test', source, { remotePath: 'node sample.txt', access });
+    const second = await client.uploadDownloadsFile('bs_test', source, { remotePath: 'node sample.txt', access });
+    assert.equal(first.name, 'node sample.txt');
+    assert.equal(second.name, 'node sample (1).txt');
+    assert.deepEqual((await client.listDownloads('bs_test', { access })).entries.map(entry => entry.name), [
+      'node sample (1).txt',
+      'node sample.txt',
+    ]);
+
+    const destination = path.join(directory, 'full.txt');
+    const downloaded = await client.downloadDownloadsFile('bs_test', first.name, destination, { access });
+    assert.equal(downloaded.size, 10);
+    assert.equal(await readFile(destination, 'utf8'), 'abcdefghij');
+    await assert.rejects(
+      () => client.downloadDownloadsFile('bs_test', first.name, destination, { access }),
+      error => error.code === 'EEXIST',
+    );
+
+    const partial = path.join(directory, 'partial.txt');
+    const ranged = await client.downloadDownloadsFile('bs_test', first.name, partial, {
+      access,
+      range: 'bytes=2-5',
+    });
+    assert.equal(ranged.status, 206);
+    assert.equal(ranged.content_range, 'bytes 2-5/10');
+    assert.equal(await readFile(partial, 'utf8'), 'cdef');
+    await assert.rejects(
+      () => client.listDownloads('bs_test', { path: '../private', access }),
+      /forbidden segment/,
+    );
+    await assert.rejects(
+      () => client.listDownloads('bs_test', {
+        access: { ...access, url: 'http://downloads.example.com/downloads/' },
+      }),
+      /must use HTTPS/,
+    );
+    await assert.rejects(
+      () => client.downloadDownloadsFile('bs_test', first.name, path.join(directory, 'invalid-range'), {
+        access,
+        range: 'bytes=-',
+      }),
+      /single HTTP bytes range/,
+    );
+  } finally {
+    await fixture.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('Python and PHP clients stream Downloads transfers when their runtimes are installed', async t => {
+  const hasPython = await runtimeAvailable('python3');
+  const hasPhp = await runtimeAvailable('php', '-v');
+  if (!hasPython && !hasPhp) return t.skip('Python and PHP are not installed');
+
+  const fixture = await startDownloadsFixture();
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'webbrain-other-clients-'));
+  const source = path.join(directory, 'source.txt');
+  await writeFile(source, 'abcdefghij');
+  const environment = {
+    ...process.env,
+    WEBBRAIN_FIXTURE_BASE: fixture.baseUrl,
+    WEBBRAIN_FIXTURE_SOURCE: source,
+    WEBBRAIN_FIXTURE_DIRECTORY: directory,
+  };
+  try {
+    if (hasPython) {
+      const pythonSource = `
+import json, os, sys
+sys.path.insert(0, ${JSON.stringify(path.resolve('clients/python'))})
+from webbrain_client import WebBrainClient
+client = WebBrainClient('wbp_test', base_url=os.environ['WEBBRAIN_FIXTURE_BASE'])
+access = client.create_downloads_access('bs_test')
+uploaded = client.upload_downloads_file('bs_test', os.environ['WEBBRAIN_FIXTURE_SOURCE'], remote_path='python sample.txt', access=access)
+listing = client.list_downloads('bs_test', access=access)
+full = os.path.join(os.environ['WEBBRAIN_FIXTURE_DIRECTORY'], 'python-full.txt')
+partial = os.path.join(os.environ['WEBBRAIN_FIXTURE_DIRECTORY'], 'python-partial.txt')
+downloaded = client.download_downloads_file('bs_test', uploaded['name'], full, access=access)
+ranged = client.download_downloads_file('bs_test', uploaded['name'], partial, access=access, byte_range='bytes=3-6')
+print(json.dumps({'uploaded': uploaded, 'names': [entry['name'] for entry in listing['entries']], 'downloaded': downloaded, 'ranged': ranged}))
+`;
+      const { stdout } = await execFileAsync('python3', ['-c', pythonSource], { env: environment });
+      const result = JSON.parse(stdout);
+      assert.equal(result.uploaded.name, 'python sample.txt');
+      assert.equal(result.names.includes('python sample.txt'), true);
+      assert.equal(await readFile(path.join(directory, 'python-full.txt'), 'utf8'), 'abcdefghij');
+      assert.equal(await readFile(path.join(directory, 'python-partial.txt'), 'utf8'), 'defg');
+      assert.equal(result.ranged.status, 206);
+    }
+
+    if (hasPhp) {
+      const phpSource = `
+require_once ${JSON.stringify(path.resolve('clients/php/WebBrainClient.php'))};
+$client = new WebBrainClient('wbp_test', getenv('WEBBRAIN_FIXTURE_BASE'));
+$access = $client->createDownloadsAccess('bs_test');
+$uploaded = $client->uploadDownloadsFile('bs_test', getenv('WEBBRAIN_FIXTURE_SOURCE'), 'php sample.txt', $access);
+$listing = $client->listDownloads('bs_test', '', $access);
+$full = getenv('WEBBRAIN_FIXTURE_DIRECTORY') . '/php-full.txt';
+$partial = getenv('WEBBRAIN_FIXTURE_DIRECTORY') . '/php-partial.txt';
+$downloaded = $client->downloadDownloadsFile('bs_test', $uploaded['name'], $full, $access);
+$ranged = $client->downloadDownloadsFile('bs_test', $uploaded['name'], $partial, $access, 'bytes=1-4');
+echo json_encode(['uploaded' => $uploaded, 'names' => array_column($listing['entries'], 'name'), 'downloaded' => $downloaded, 'ranged' => $ranged], JSON_THROW_ON_ERROR);
+`;
+      const { stdout } = await execFileAsync('php', ['-r', phpSource], { env: environment });
+      const result = JSON.parse(stdout);
+      assert.equal(result.uploaded.name, 'php sample.txt');
+      assert.equal(result.names.includes('php sample.txt'), true);
+      assert.equal(await readFile(path.join(directory, 'php-full.txt'), 'utf8'), 'abcdefghij');
+      assert.equal(await readFile(path.join(directory, 'php-partial.txt'), 'utf8'), 'bcde');
+      assert.equal(result.ranged.status, 206);
+    }
+  } finally {
+    await fixture.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('Python and PHP clients expose the shared browser automation operations', async () => {
   const python = await readFile(new URL('../clients/python/webbrain_client.py', import.meta.url), 'utf8');
   const php = await readFile(new URL('../clients/php/WebBrainClient.php', import.meta.url), 'utf8');
-  for (const method of ['create_browser_session', 'update_browser_session', 'get_browser_proxy', 'update_browser_proxy', 'delete_browser_proxy', 'create_downloads_access', 'wait_for_browser_session', 'create_run', 'get_run', 'continue_run', 'respond_to_run', 'abort_run', 'wait_for_run']) {
+  for (const method of ['create_browser_session', 'update_browser_session', 'get_browser_proxy', 'update_browser_proxy', 'delete_browser_proxy', 'create_downloads_access', 'list_downloads', 'upload_downloads_file', 'download_downloads_file', 'wait_for_browser_session', 'create_run', 'get_run', 'continue_run', 'respond_to_run', 'abort_run', 'wait_for_run']) {
     assert.match(python, new RegExp(`def ${method}\\(`));
   }
-  for (const method of ['createBrowserSession', 'updateBrowserSession', 'getBrowserProxy', 'updateBrowserProxy', 'deleteBrowserProxy', 'createDownloadsAccess', 'waitForBrowserSession', 'createRun', 'getRun', 'continueRun', 'respondToRun', 'abortRun', 'waitForRun']) {
+  for (const method of ['createBrowserSession', 'updateBrowserSession', 'getBrowserProxy', 'updateBrowserProxy', 'deleteBrowserProxy', 'createDownloadsAccess', 'listDownloads', 'uploadDownloadsFile', 'downloadDownloadsFile', 'waitForBrowserSession', 'createRun', 'getRun', 'continueRun', 'respondToRun', 'abortRun', 'waitForRun']) {
     assert.match(php, new RegExp(`function ${method}\\(`));
   }
   assert.match(python, /Authorization.*Bearer/);
@@ -171,6 +388,9 @@ test('Python and PHP clients expose the shared browser automation operations', a
   for (const readme of readmes) {
     assert.match(readme, /Create a browser and run a task/);
     assert.match(readme, /Structured output/);
+    assert.match(readme, /Downloads transfers/);
+    assert.match(readme, /upload.*Downloads.*File|upload_downloads_file/i);
+    assert.match(readme, /download.*Downloads.*File|download_downloads_file/i);
     assert.match(readme, /parent_run_id/);
   }
 });

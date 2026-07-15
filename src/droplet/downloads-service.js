@@ -122,6 +122,28 @@ async function serveDirectory(req, res, root, segments, directoryPath, uploadLim
   entries.sort((a, b) => Number(b.directory) - Number(a.directory)
     || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
 
+  if (acceptsJson(req)) {
+    const body = JSON.stringify({
+      path: segments.join('/'),
+      entries: entries.map(entry => ({
+        name: entry.name,
+        path: [...segments, entry.name].join('/'),
+        type: entry.directory ? 'directory' : 'file',
+        size: entry.size,
+        modified_at: entry.modified.toISOString(),
+        url: entry.url,
+      })),
+      upload_limit_bytes: uploadLimit,
+    });
+    res.writeHead(200, {
+      'cache-control': 'private, no-store',
+      'content-length': Buffer.byteLength(body),
+      'content-type': 'application/json; charset=utf-8',
+    });
+    if (req.method === 'HEAD') return res.end();
+    return res.end(body);
+  }
+
   const nonce = randomBytes(18).toString('base64url');
   res.setHeader('content-security-policy', `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`);
   res.setHeader('cache-control', 'private, no-store');
@@ -131,6 +153,12 @@ async function serveDirectory(req, res, root, segments, directoryPath, uploadLim
   res.writeHead(200);
   if (req.method === 'HEAD') return res.end();
   res.end(html);
+}
+
+function acceptsJson(req) {
+  return String(req.headers.accept || '')
+    .split(',')
+    .some(value => value.split(';')[0].trim().toLowerCase() === 'application/json');
 }
 
 function serveFile(req, res, filePath, fileName, stat) {

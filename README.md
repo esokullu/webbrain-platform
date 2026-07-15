@@ -189,6 +189,64 @@ file tray supports listing, downloads (including `HEAD` and byte ranges), and
 uploads up to 5 GB per file. Name collisions receive a numbered suffix; delete,
 rename, and folder creation are intentionally unavailable.
 
+For terminal use, keep the credential response in shell variables (the literal
+password is not written to shell history):
+
+```bash
+DOWNLOADS_ACCESS=$(curl --fail-with-body -sS -X POST \
+  "https://webbrain.cloud/api/browser-sessions/$WEBBRAIN_SESSION_ID/downloads-access" \
+  -H "Authorization: Bearer $WEBBRAIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}')
+DOWNLOADS_URL=$(jq -r '.url' <<<"$DOWNLOADS_ACCESS")
+DOWNLOADS_USER=$(jq -r '.username' <<<"$DOWNLOADS_ACCESS")
+DOWNLOADS_PASSWORD=$(jq -r '.password' <<<"$DOWNLOADS_ACCESS")
+```
+
+List files as JSON:
+
+```bash
+curl --fail-with-body -sS \
+  -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" \
+  -H 'Accept: application/json' \
+  "$DOWNLOADS_URL" | jq
+```
+
+Upload a local file. The JSON response reports the actual stored name, including
+an automatic ` (1)` suffix if the requested name already exists:
+
+```bash
+LOCAL_FILE='./report.pdf'
+REMOTE_NAME=$(jq -rn --arg name "$(basename -- "$LOCAL_FILE")" '$name | @uri')
+curl --fail-with-body -sS -X PUT \
+  -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" \
+  -H 'Content-Type: application/octet-stream' \
+  --upload-file "$LOCAL_FILE" \
+  "${DOWNLOADS_URL}${REMOTE_NAME}" | jq
+```
+
+Download a complete file or a byte range:
+
+```bash
+REMOTE_NAME=$(jq -rn --arg name 'report.pdf' '$name | @uri')
+curl --fail-with-body -sS \
+  -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" \
+  --output './report.pdf' \
+  "${DOWNLOADS_URL}${REMOTE_NAME}"
+
+curl --fail-with-body -sS \
+  -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" \
+  -H 'Range: bytes=0-1023' \
+  --output './report.first-1KiB' \
+  "${DOWNLOADS_URL}${REMOTE_NAME}"
+```
+
+The Node.js, Python, and PHP clients wrap these operations with streaming
+`listDownloads`/`list_downloads`, `uploadDownloadsFile`/`upload_downloads_file`,
+and `downloadDownloadsFile`/`download_downloads_file` helpers. Pass a previously
+returned access object to several calls to avoid requesting the same session
+credential repeatedly; clients do not cache it on their own.
+
 ### Change a running browser's proxy
 
 Read the active proxy and last verified exit IP:

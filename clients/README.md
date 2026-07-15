@@ -13,4 +13,7 @@ Each client supports browser-session creation and deletion, readiness polling,
 startup and live proxy assignment, run creation and polling, structured output,
 finished-run follow-up turns, aborting, signed noVNC links, and private
 Downloads access.
+All three clients also provide streaming Downloads listing, upload, full-file
+download, and byte-range download helpers, with collision-safe server naming
+and no-overwrite local saves by default.
 See the public API guide at `https://webbrain.cloud/docs` for complete examples.

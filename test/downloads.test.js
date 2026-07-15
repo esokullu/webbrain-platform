@@ -97,6 +97,49 @@ test('downloads service safely lists, downloads, ranges, and uploads files', asy
     assert.doesNotMatch(listing.body.toString(), /.private/);
     assert.doesNotMatch(listing.body.toString(), /leak\.txt/);
 
+    const jsonListing = await request(address.port, '/downloads/', {
+      headers: { accept: 'application/json' },
+    });
+    assert.equal(jsonListing.status, 200);
+    assert.equal(jsonListing.headers['cache-control'], 'private, no-store');
+    assert.match(jsonListing.headers['content-type'], /^application\/json/);
+    assert.deepEqual(JSON.parse(jsonListing.body), {
+      path: '',
+      entries: [
+        {
+          name: 'folder',
+          path: 'folder',
+          type: 'directory',
+          size: null,
+          modified_at: (await fs.stat(path.join(root, 'folder'))).mtime.toISOString(),
+          url: '/downloads/folder/',
+        },
+        {
+          name: 'less<than>.txt',
+          path: 'less<than>.txt',
+          type: 'file',
+          size: 7,
+          modified_at: (await fs.stat(path.join(root, 'less<than>.txt'))).mtime.toISOString(),
+          url: '/downloads/less%3Cthan%3E.txt',
+        },
+        {
+          name: 'report.txt',
+          path: 'report.txt',
+          type: 'file',
+          size: 10,
+          modified_at: (await fs.stat(path.join(root, 'report.txt'))).mtime.toISOString(),
+          url: '/downloads/report.txt',
+        },
+      ],
+      upload_limit_bytes: 16,
+    });
+    const jsonHead = await request(address.port, '/downloads/', {
+      method: 'HEAD',
+      headers: { accept: 'application/json' },
+    });
+    assert.equal(jsonHead.status, 200);
+    assert.equal(jsonHead.body.length, 0);
+
     const head = await request(address.port, '/downloads/report.txt', { method: 'HEAD' });
     assert.equal(head.status, 200);
     assert.equal(head.headers['content-length'], '10');

@@ -1010,6 +1010,12 @@ test('public API documentation provides accessible REST and client tabs', async 
     assert.match(res.text, /class="tok-function"/);
     assert.match(res.text, /\/api\/browser-sessions\/:sessionId\/runs/);
     assert.match(res.text, /\/api\/browser-sessions\/:sessionId\/downloads-access/);
+    assert.match(res.text, /id="downloads"/);
+    assert.match(res.text, /Accept: application\/json/);
+    assert.match(res.text, /--upload-file/);
+    assert.match(res.text, /Range: bytes=0-1023/);
+    assert.match(res.text, /uploadDownloadsFile/);
+    assert.match(res.text, /upload_downloads_file/);
     assert.match(res.text, /\/api\/browser-sessions\/:sessionId\/runs\/:runId\/responses/);
     assert.match(res.text, /\/api\/browser-sessions\/:sessionId\/runs\/:runId\/messages/);
     assert.match(res.text, /parent_run_id/);

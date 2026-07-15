@@ -215,6 +215,8 @@ export function docsPage() {
     .docs-section > p { max-width: 750px; color: var(--text-dim); }
     .inline-code, .docs-section code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .inline-code { padding: 2px 6px; border: 1px solid var(--border); border-radius: 5px; background: rgba(89,55,25,.05); font-size: .9em; }
+    .command-block { margin: 20px 0 0; padding: 20px; overflow-x: auto; border: 1px solid var(--code-border); border-radius: 12px; background: var(--code); color: #dfe5f5; font: 12px/1.75 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; }
+    .command-block code { font: inherit; }
     .endpoint-list { display: grid; gap: 8px; margin-top: 24px; }
     .endpoint { display: grid; grid-template-columns: 74px minmax(0,1fr) minmax(180px,.8fr); align-items: center; gap: 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: rgba(255,253,248,.65); }
     .method { width: max-content; padding: 4px 7px; border-radius: 5px; background: rgba(91,82,232,.10); color: var(--accent); font: 700 10px ui-monospace, monospace; }
@@ -309,6 +311,7 @@ export function docsPage() {
         <span class="toc-label">On this page</span>
         <a href="#authentication">Authentication</a>
         <a href="#sessions">Browser sessions</a>
+        <a href="#downloads">Downloads</a>
         <a href="#runs">Runs</a>
         <a href="#structured-output">Structured output</a>
         <a href="#statuses">Statuses</a>
@@ -337,6 +340,32 @@ export function docsPage() {
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/connect-token</code><span>Create a noVNC link.</span></div>
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/downloads-access</code><span>Create private Downloads credentials.</span></div>
           </div>
+        </section>
+
+        <section class="docs-section" id="downloads">
+          <p class="section-kicker">File transfer</p>
+          <h2>Upload and download files</h2>
+          <p>For a ready browser, request short-lived access metadata from <span class="inline-code">POST /api/browser-sessions/:sessionId/downloads-access</span>. The response contains an HTTPS <span class="inline-code">url</span>, <span class="inline-code">username</span>, <span class="inline-code">password</span>, <span class="inline-code">upload_limit_bytes</span>, and <span class="inline-code">expires_at</span>. It is returned with <span class="inline-code">Cache-Control: no-store</span>; do not log it.</p>
+          <pre class="command-block"><code># Obtain access and keep the secret out of the literal shell history
+DOWNLOADS_ACCESS=$(curl --fail-with-body -sS -X POST "https://webbrain.cloud/api/browser-sessions/$SESSION_ID/downloads-access" -H "Authorization: Bearer $WEBBRAIN_API_KEY" -H "Content-Type: application/json" -d '{}')
+DOWNLOADS_URL=$(printf '%s' "$DOWNLOADS_ACCESS" | jq -r '.url')
+DOWNLOADS_USER=$(printf '%s' "$DOWNLOADS_ACCESS" | jq -r '.username')
+DOWNLOADS_PASSWORD=$(printf '%s' "$DOWNLOADS_ACCESS" | jq -r '.password')
+
+# Machine-readable listing
+curl --fail-with-body -sS -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" -H 'Accept: application/json' "$DOWNLOADS_URL" | jq
+
+# Streaming upload; response.name is the final collision-safe name
+LOCAL_FILE='./report.pdf'
+REMOTE_NAME=$(jq -rn --arg name "$(basename -- "$LOCAL_FILE")" '$name | @uri')
+curl --fail-with-body -sS -X PUT -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" -H 'Content-Type: application/octet-stream' --upload-file "$LOCAL_FILE" "\${DOWNLOADS_URL}\${REMOTE_NAME}" | jq
+
+# Full download and a byte-range download
+curl --fail-with-body -sS -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" --output './report.pdf' "\${DOWNLOADS_URL}\${REMOTE_NAME}"
+curl --fail-with-body -sS -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" -H 'Range: bytes=0-1023' --output './report.first-1KiB' "\${DOWNLOADS_URL}\${REMOTE_NAME}"</code></pre>
+          <p>Directory requests return the browser file tray by default and JSON when sent <span class="inline-code">Accept: application/json</span>. Files support <span class="inline-code">GET</span>, <span class="inline-code">HEAD</span>, and one HTTP byte range; raw <span class="inline-code">PUT</span> uploads stream up to 5 GB. Existing names receive a numbered suffix. Delete, rename, and folder creation are not available.</p>
+          <h3>Client helpers</h3>
+          <p>Node.js and PHP expose <span class="inline-code">listDownloads</span>, <span class="inline-code">uploadDownloadsFile</span>, and <span class="inline-code">downloadDownloadsFile</span>. Python exposes <span class="inline-code">list_downloads</span>, <span class="inline-code">upload_downloads_file</span>, and <span class="inline-code">download_downloads_file</span>. All transfer file bodies as streams and protect existing local files unless overwrite is explicitly enabled.</p>
         </section>
 
         <section class="docs-section" id="runs">
@@ -381,7 +410,7 @@ export function docsPage() {
         <section class="docs-section" id="clients">
           <p class="section-kicker">No dependencies</p>
           <h2>Use your language</h2>
-          <p>The repository includes small clients with the same core operations: session lifecycle, readiness, runs, follow-up turns, polling, aborting, structured output, noVNC links, and private Downloads access.</p>
+          <p>The repository includes small clients with the same core operations: session lifecycle, readiness, runs, follow-up turns, polling, aborting, structured output, noVNC links, and streaming private Downloads transfers.</p>
           <div class="client-cards">
             <a class="client-card" href="https://github.com/esokullu/webbrain-platform/tree/main/clients/node"><strong>Node.js</strong><span>Node 18+ · native fetch</span></a>
             <a class="client-card" href="https://github.com/esokullu/webbrain-platform/tree/main/clients/python"><strong>Python</strong><span>Python 3.9+ · standard library</span></a>

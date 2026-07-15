@@ -59,6 +59,45 @@ print(client.wait_for_run(ready["id"], follow_up["run_id"])["result"])
 `continue_run` creates a child run with `parent_run_id` and reuses the same tab
 and WebBrain conversation. Append later turns to the newest child run.
 
+## Downloads transfers
+
+The transfer helpers stream file bodies instead of buffering them in memory.
+Reuse one access response for a batch of operations:
+
+```python
+access = client.create_downloads_access(ready["id"])
+
+uploaded = client.upload_downloads_file(
+    ready["id"],
+    "./report.pdf",
+    remote_path="report.pdf",
+    access=access,
+)
+print(uploaded["name"])  # May be "report (1).pdf" on a collision.
+
+listing = client.list_downloads(ready["id"], access=access)
+print(listing["entries"])
+
+client.download_downloads_file(
+    ready["id"],
+    uploaded["name"],
+    "./saved/report.pdf",
+    access=access,
+)
+client.download_downloads_file(
+    ready["id"],
+    uploaded["name"],
+    "./saved/report-first-1KiB",
+    access=access,
+    byte_range="bytes=0-1023",
+)
+```
+
+If `access` is omitted, each helper calls `create_downloads_access` itself. A
+download will not replace an existing local file unless `overwrite=True` is
+explicitly supplied. Remote paths reject traversal, dotfile, and control
+character segments.
+
 ## Structured output
 
 ```python
@@ -88,6 +127,9 @@ run = client.create_run(
 - `abort_run(session_id, run_id)`
 - `create_connect_token(session_id, **options)`
 - `create_downloads_access(session_id)`
+- `list_downloads(session_id, path="", access=...)`
+- `upload_downloads_file(session_id, local_path, remote_path=..., access=...)`
+- `download_downloads_file(session_id, remote_path, destination_path, access=...)`
 
 Failed HTTP requests raise `WebBrainApiError` with `status` and `body`
 attributes.

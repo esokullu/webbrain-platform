@@ -60,6 +60,44 @@ console.log((await client.waitForRun(ready.id, followUp.run_id)).result);
 `continueRun` creates a child run with `parent_run_id` and reuses the same tab
 and WebBrain conversation. Append later turns to the newest child run.
 
+## Downloads transfers
+
+The transfer helpers stream file bodies instead of buffering them in memory.
+Reuse one access response for a batch of operations:
+
+```js
+const access = await client.createDownloadsAccess(ready.id);
+
+const uploaded = await client.uploadDownloadsFile(
+  ready.id,
+  './report.pdf',
+  { remotePath: 'report.pdf', access },
+);
+console.log(uploaded.name); // May be "report (1).pdf" on a collision.
+
+const listing = await client.listDownloads(ready.id, { access });
+console.log(listing.entries);
+
+await client.downloadDownloadsFile(
+  ready.id,
+  uploaded.name,
+  './saved/report.pdf',
+  { access },
+);
+
+await client.downloadDownloadsFile(
+  ready.id,
+  uploaded.name,
+  './saved/report-first-1KiB',
+  { access, range: 'bytes=0-1023' },
+);
+```
+
+If `access` is omitted, each helper calls `createDownloadsAccess` itself. A
+download will not replace an existing local file unless `overwrite: true` is
+explicitly supplied. Remote paths reject traversal, dotfile, and control
+character segments.
+
 ## Structured output
 
 ```js
@@ -91,6 +129,9 @@ const run = await client.createRun(session.id, {
 - `abortRun(sessionId, runId)`
 - `createConnectToken(sessionId, options)`
 - `createDownloadsAccess(sessionId)`
+- `listDownloads(sessionId, options)`
+- `uploadDownloadsFile(sessionId, localPath, options)`
+- `downloadDownloadsFile(sessionId, remotePath, destinationPath, options)`
 
 Failed HTTP requests throw `WebBrainApiError` with `status` and `body`
 properties.
