@@ -633,7 +633,8 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /showDestroyed: false/);
     assert.match(res.text, /filter\(s => s\.status !== 'destroyed'\)/);
     assert.match(res.text, /Show ' \+ destroyedCount \+ ' destroyed/);
-    assert.match(res.text, /meta\.textContent = session\.id/);
+    assert.match(res.text, /meta\.textContent = session\.id;/);
+    assert.doesNotMatch(res.text, /session\.proxy\?\.enabled[^\n]+session\.proxy\.endpoint/);
     assert.doesNotMatch(res.text, /meta\.textContent = session\.public_ip/);
     assert.match(res.text, /webbrain\.sessionsCollapsed/);
     assert.match(res.text, /aria-controls="sessionPanelBody"/);

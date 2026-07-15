@@ -2037,7 +2037,7 @@ function dashboardPage(user) {
         title.textContent = browserName(session);
         const meta = document.createElement('div');
         meta.className = 'session-meta';
-        meta.textContent = session.id + (session.proxy?.enabled && session.proxy.endpoint ? ' · ' + session.proxy.endpoint : '');
+        meta.textContent = session.id;
         details.append(title, meta);
         const status = document.createElement('span');
         status.className = 'status';
