@@ -3483,6 +3483,12 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
         return jsonError(res, 503, 'Shared Downloads storage must be configured before browsers can be paused.');
       }
       if (!['ready', 'pausing'].includes(session.status)) return jsonError(res, 409, 'Only a ready browser can be paused');
+      if (controlChannel.isConnected(session.id)) {
+        const health = await controlChannel.send(session.id, 'health', {}, 2000).catch(() => null);
+        if (health?.downloads_sync_enabled !== true) {
+          return jsonError(res, 409, 'This Droplet was created without shared Downloads sync and cannot be paused safely');
+        }
+      }
       releaseLifecycle = claimBrowserLifecycleOperation(session.id);
       if (!releaseLifecycle) return jsonError(res, 409, 'A browser lifecycle change is already in progress');
       const retrying = session.status === 'pausing';

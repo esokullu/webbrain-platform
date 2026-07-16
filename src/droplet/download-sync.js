@@ -121,6 +121,21 @@ export class ChromeDownloadSync {
     this.uploading.add(guid);
     this.upload(guid).catch(error => {
       if (this.stopped) return;
+      if (error.terminal === true) {
+        const record = this.records.get(guid);
+        if (record) {
+          record.upload_error = {
+            status: Number(error.status || 0),
+            message: String(error.message || 'Shared storage rejected the download.').slice(0, 500),
+            failed_at: new Date().toISOString(),
+          };
+          this.persist(record).catch(persistError => {
+            console.error('[download-sync] could not save terminal upload error:', persistError.message || persistError);
+          });
+        }
+        console.error('[download-sync] upload rejected permanently; restart the browser service after correcting shared storage:', error.message || error);
+        return;
+      }
       const delay = this.retryDelaysMs[Math.min(attempt, this.retryDelaysMs.length - 1)] || 60_000;
       console.error(`[download-sync] upload failed; retrying in ${delay}ms:`, error.message || error);
       const timer = setTimeout(() => {
@@ -149,7 +164,12 @@ export class ChromeDownloadSync {
       body: createReadStream(filePath),
       duplex: 'half',
     });
-    if (!response.ok) throw new Error(`platform returned ${response.status}: ${await response.text()}`);
+    if (!response.ok) {
+      const error = new Error(`platform returned ${response.status}: ${await response.text()}`);
+      error.status = response.status;
+      error.terminal = isTerminalUploadStatus(response.status);
+      throw error;
+    }
     const responseText = await response.text();
     let uploaded = {};
     try { uploaded = responseText ? JSON.parse(responseText) : {}; } catch {}
@@ -217,4 +237,8 @@ function safeFilename(value) {
 
 function validGuid(value) {
   return typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
+}
+
+function isTerminalUploadStatus(status) {
+  return status === 507 || (status >= 400 && status < 500 && ![408, 425, 429].includes(status));
 }

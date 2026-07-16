@@ -106,3 +106,61 @@ test('download sync preserves nonempty crash leftovers, removes empty records, a
     await fs.rm(stagingDir, { recursive: true, force: true });
   }
 });
+
+test('download sync stops retrying terminal storage rejections and retries them after restart', async () => {
+  const stagingDir = await fs.mkdtemp(path.join(os.tmpdir(), 'webbrain-download-terminal-'));
+  const cdp = fakeCdp();
+  let rejectedUploads = 0;
+  const sync = new ChromeDownloadSync({
+    stagingDir,
+    ingestUrl: 'https://platform.example/droplet/downloads',
+    sessionToken: 'session-secret',
+    retryDelaysMs: [5],
+    fetchImpl: async () => {
+      rejectedUploads += 1;
+      return { ok: false, status: 507, async text() { return 'Downloads quota reached'; } };
+    },
+  });
+  let recovered = null;
+  try {
+    await sync.start(cdp);
+    await fs.writeFile(path.join(stagingDir, 'guid-quota'), 'important-download');
+    cdp.emit('Browser.downloadWillBegin', {
+      guid: 'guid-quota',
+      suggestedFilename: 'important.bin',
+      url: 'https://example.com/important.bin',
+    });
+    cdp.emit('Browser.downloadProgress', { guid: 'guid-quota', state: 'completed' });
+
+    await waitFor(async () => {
+      try {
+        const record = JSON.parse(await fs.readFile(path.join(stagingDir, 'guid-quota.json'), 'utf8'));
+        return record.upload_error?.status === 507;
+      } catch {
+        return false;
+      }
+    });
+    await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(rejectedUploads, 1);
+    assert.deepEqual((await fs.readdir(stagingDir)).sort(), ['guid-quota', 'guid-quota.json']);
+    sync.close();
+
+    let recoveredUploads = 0;
+    recovered = new ChromeDownloadSync({
+      stagingDir,
+      ingestUrl: 'https://platform.example/droplet/downloads',
+      sessionToken: 'session-secret',
+      fetchImpl: async () => {
+        recoveredUploads += 1;
+        return { ok: true, status: 201, async text() { return JSON.stringify({ path: 'important.bin' }); } };
+      },
+    });
+    await recovered.start(fakeCdp());
+    await waitFor(async () => (await fs.readdir(stagingDir)).length === 0);
+    assert.equal(recoveredUploads, 1);
+  } finally {
+    sync.close();
+    recovered?.close();
+    await fs.rm(stagingDir, { recursive: true, force: true });
+  }
+});

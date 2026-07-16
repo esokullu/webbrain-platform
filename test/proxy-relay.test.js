@@ -98,6 +98,15 @@ test('pause preparation refuses staged downloads and otherwise stops, flushes, a
   }), error => error.status === 409 && /finish syncing/.test(error.message));
   assert.deepEqual(commands, []);
 
+  await assert.rejects(() => prepareDropletForPause({
+    profileMount: '/mnt/webbrain-profile',
+    downloadsStagingDir: '/staging',
+    readdirImpl: async () => ['guid-quota.json', 'guid-quota'],
+    readFileImpl: async () => JSON.stringify({ upload_error: { status: 507 } }),
+    execFileImpl: async (...args) => commands.push(args),
+  }), error => error.status === 409 && /storage returned 507/.test(error.message));
+  assert.deepEqual(commands, []);
+
   let reads = 0;
   const ready = await prepareDropletForPause({
     profileMount: '/mnt/webbrain-profile',
@@ -151,6 +160,11 @@ test('pause cancellation remounts and verifies the profile before restarting Chr
 test('droplet control forwards run metadata and clarification responses', async () => {
   const received = [];
   const sidecar = http.createServer((req, res) => {
+    if (req.method === 'GET' && req.url === '/healthz') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, extension_connected: true }));
+      return;
+    }
     const chunks = [];
     req.on('data', chunk => chunks.push(chunk));
     req.on('end', () => {
@@ -168,6 +182,12 @@ test('droplet control forwards run metadata and clarification responses', async 
       controlUrl: 'ws://127.0.0.1/control',
       sessionToken: 'test',
       sidecarBase: `http://127.0.0.1:${address.port}`,
+      downloadsSyncEnabled: true,
+    });
+    assert.deepEqual(await client.handleCommand('health', {}), {
+      ok: true,
+      extension_connected: true,
+      downloads_sync_enabled: true,
     });
     const started = await client.handleCommand('run', {
       task: 'Open Google',

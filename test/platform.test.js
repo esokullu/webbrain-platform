@@ -234,7 +234,7 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
     const msg = JSON.parse(raw.toString('utf8'));
     if (msg.type === 'hello') return;
     if (msg.action === 'health') {
-      ws.send(JSON.stringify({ id: msg.id, ok: true, result: { ok: true, extension_connected: true } }));
+      ws.send(JSON.stringify({ id: msg.id, ok: true, result: { ok: true, extension_connected: true, downloads_sync_enabled: true } }));
       return;
     }
     if (msg.action === 'proxy.status') {
@@ -841,6 +841,56 @@ test('pause stays disabled until shared Downloads storage is configured', async 
   }
 });
 
+test('pause refuses a Droplet that was booted before shared Downloads sync was enabled', async () => {
+  const ctx = await startPlatform({
+    WEBBRAIN_SPACES_ENDPOINT: 'https://nyc3.digitaloceanspaces.com',
+    WEBBRAIN_SPACES_ACCESS_KEY: 'access',
+    WEBBRAIN_SPACES_SECRET_KEY: 'secret',
+    WEBBRAIN_SPACES_BUCKET: 'downloads',
+  }, { downloadsHandler: {} });
+  let ws = null;
+  try {
+    const cookie = await register(ctx.base, 'pause-old-droplet@example.com');
+    const created = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: '{}',
+    });
+    const sessionId = created.body.browser_session.id;
+    const storedSession = await ctx.store.getBrowserSession(sessionId);
+    let prepareCalls = 0;
+    ws = new WebSocket(`${ctx.wsBase}/droplet/control?session_token=${encodeURIComponent(storedSession.connect_secret)}`);
+    await new Promise(resolve => ws.once('open', resolve));
+    ws.on('message', raw => {
+      const msg = JSON.parse(raw.toString('utf8'));
+      if (msg.type === 'hello') return;
+      if (msg.action === 'health') {
+        ws.send(JSON.stringify({
+          id: msg.id,
+          ok: true,
+          result: { ok: true, extension_connected: true, downloads_sync_enabled: false },
+        }));
+      } else if (msg.action === 'pause.prepare') {
+        prepareCalls += 1;
+      }
+    });
+
+    const paused = await request(ctx.base, `/api/browser-sessions/${sessionId}/pause`, {
+      method: 'POST',
+      headers: { cookie },
+      body: '{}',
+    });
+    assert.equal(paused.status, 409);
+    assert.match(paused.body.error, /without shared Downloads sync/);
+    assert.equal(prepareCalls, 0);
+    assert.equal((await ctx.store.getBrowserSession(sessionId)).status, 'ready');
+    assert.deepEqual(ctx.provisioner.destroyed, []);
+  } finally {
+    ws?.close();
+    await ctx.platform.close();
+  }
+});
+
 test('always-on browser creation skips the profile volume and keeps local Downloads semantics', async () => {
   const ctx = await startPlatform({
     WEBBRAIN_SPACES_ENDPOINT: 'https://nyc3.digitaloceanspaces.com',
@@ -944,7 +994,7 @@ test('concurrent resume requests only provision one droplet for a paused browser
       const msg = JSON.parse(raw.toString('utf8'));
       if (msg.type === 'hello') return;
       if (msg.action === 'health') {
-        ws.send(JSON.stringify({ id: msg.id, ok: true, result: { ok: true, extension_connected: true } }));
+        ws.send(JSON.stringify({ id: msg.id, ok: true, result: { ok: true, extension_connected: true, downloads_sync_enabled: true } }));
         return;
       }
       if (msg.action === 'pause.prepare') {
@@ -1039,7 +1089,7 @@ test('concurrent pause and delete requests cannot overwrite a lifecycle transiti
       const msg = JSON.parse(raw.toString('utf8'));
       if (msg.type === 'hello') return;
       if (msg.action === 'health') {
-        ws.send(JSON.stringify({ id: msg.id, ok: true, result: { ok: true, extension_connected: true } }));
+        ws.send(JSON.stringify({ id: msg.id, ok: true, result: { ok: true, extension_connected: true, downloads_sync_enabled: true } }));
       } else if (msg.action === 'pause.prepare') {
         pausePrepareId = msg.id;
       }

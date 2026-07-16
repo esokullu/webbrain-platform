@@ -23,6 +23,7 @@ export class DropletControlClient {
     reconnectMaxMs = 10000,
     pausePrepare = prepareDropletForPause,
     pauseCancel = cancelDropletPause,
+    downloadsSyncEnabled = process.env.WEBBRAIN_DOWNLOADS_SYNC_ENABLED === 'true',
   }) {
     this.controlUrl = controlUrl;
     this.sessionToken = sessionToken;
@@ -33,6 +34,7 @@ export class DropletControlClient {
     this.reconnectMaxMs = reconnectMaxMs;
     this.pausePrepare = pausePrepare;
     this.pauseCancel = pauseCancel;
+    this.downloadsSyncEnabled = downloadsSyncEnabled;
     this.stopped = false;
     this.ws = null;
   }
@@ -133,7 +135,10 @@ export class DropletControlClient {
     if (action === 'health') {
       const res = await fetch(`${this.sidecarBase}/healthz`);
       if (!res.ok) throw new Error(`Sidecar health failed: ${res.status} ${await res.text()}`);
-      return await readJson(res);
+      return {
+        ...await readJson(res),
+        downloads_sync_enabled: this.downloadsSyncEnabled,
+      };
     }
     if (action === 'status') {
       const runId = payload.run_id || payload.runId;

@@ -278,7 +278,10 @@ credential repeatedly; clients do not cache it on their own.
 Chrome downloads first stream to the Droplet's ephemeral root disk. When Chrome
 reports completion, the launcher uploads the file to shared storage, verifies
 the platform response, and then removes the staged copy. A browser cannot be
-paused while a download or its upload is pending.
+paused while a download or its upload is pending. Permanent storage rejections
+such as an upload-limit or quota error retain the staged file, stop automatic
+retry timers, and surface the rejection when Pause is attempted. After the
+limit is corrected, restart the browser service to retry the retained file.
 
 ### Pause and resume a browser
 
@@ -289,6 +292,9 @@ restores the Chrome profile and saved proxy configuration. Downloads remain
 online throughout. Pause is
 enabled only after all four `WEBBRAIN_SPACES_*` storage values are configured,
 so destroying a Droplet can never discard local-only Downloads.
+The running Droplet must also report that sync was enabled when it booted.
+Turning on Spaces later does not migrate an existing Droplet's local Downloads
+or make that Droplet safe to pause.
 
 ```bash
 curl -sS -X POST \
