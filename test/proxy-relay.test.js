@@ -101,6 +101,14 @@ test('pause preparation refuses staged downloads and otherwise stops, flushes, a
   await assert.rejects(() => prepareDropletForPause({
     profileMount: '/mnt/webbrain-profile',
     downloadsStagingDir: '/staging',
+    readdirImpl: async () => ['orphan-guid'],
+    execFileImpl: async (...args) => commands.push(args),
+  }), error => error.status === 409 && /Unsynced browser download data/.test(error.message));
+  assert.deepEqual(commands, []);
+
+  await assert.rejects(() => prepareDropletForPause({
+    profileMount: '/mnt/webbrain-profile',
+    downloadsStagingDir: '/staging',
     readdirImpl: async () => ['guid-quota.json', 'guid-quota'],
     readFileImpl: async () => JSON.stringify({ upload_error: { status: 507 } }),
     execFileImpl: async (...args) => commands.push(args),

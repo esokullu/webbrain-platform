@@ -3,6 +3,7 @@ import { Readable, Transform } from 'node:stream';
 
 const ROUTE_PREFIX = '/downloads';
 const INTERNAL_PREFIX = '.webbrain-internal/';
+const UPLOAD_ID_METADATA_KEY = 'webbrain-upload-id';
 
 export function createObjectDownloadsHandler({
   objectStore,
@@ -54,18 +55,24 @@ export function createObjectDownloadsHandler({
       const normalizedIdempotencyKey = normalizeIdempotencyKey(idempotencyKey);
       const markerKey = normalizedIdempotencyKey ? `${prefix}${INTERNAL_PREFIX}${normalizedIdempotencyKey}.json` : '';
       const marker = markerKey ? await readUploadMarker(objectStore, markerKey) : null;
-      const committedMarker = marker?.committed === true
-          && marker.requested === requested
+      const validMarker = marker?.requested === requested
           && typeof marker.path === 'string'
           && parseRelativePath(marker.path)?.length
         ? marker
         : null;
-      if (committedMarker) {
-        const finalPath = committedMarker.path;
+      if (validMarker) {
+        const finalPath = validMarker.path;
         const existing = await objectStore.head(prefix + finalPath);
-        if (existing
-            && Number(existing.size || 0) === Number(committedMarker.size || 0)
-            && (!committedMarker.etag || !existing.etag || committedMarker.etag === existing.etag)) {
+        const committedMatch = validMarker.committed === true
+          && Number(existing?.size || 0) === Number(validMarker.size || 0)
+          && (!validMarker.etag || !existing?.etag || validMarker.etag === existing.etag);
+        const reservationSizeMatch = validMarker.expected_size == null
+          ? declared == null || Number(existing?.size || 0) === declared
+          : Number(existing?.size || 0) === Number(validMarker.expected_size);
+        const reservationMatch = validMarker.upload_id === normalizedIdempotencyKey
+          && existing?.metadata?.[UPLOAD_ID_METADATA_KEY] === normalizedIdempotencyKey
+          && reservationSizeMatch;
+        if (existing && (committedMatch || reservationMatch)) {
           stream.resume?.();
           return {
             name: path.posix.basename(finalPath),
@@ -77,14 +84,28 @@ export function createObjectDownloadsHandler({
           };
         }
       }
-      const finalPath = availableObjectName(requested, occupied);
+      const canReuseReservation = validMarker?.upload_id === normalizedIdempotencyKey
+        && !occupied.has(validMarker.path);
+      const finalPath = canReuseReservation ? validMarker.path : availableObjectName(requested, occupied);
       if (availableBytes <= 0 || (declared != null && declared > availableBytes)) {
         throw httpError(507, `Downloads quota of ${formatBytes(quota)} has been reached.`);
+      }
+      if (markerKey && (!validMarker
+          || validMarker.path !== finalPath
+          || validMarker.upload_id !== normalizedIdempotencyKey)) {
+        await writeUploadMarker(objectStore, markerKey, {
+          committed: false,
+          requested,
+          path: finalPath,
+          upload_id: normalizedIdempotencyKey,
+          expected_size: declared,
+        });
       }
       const limiter = limitStream(Math.min(uploadLimit, availableBytes));
       const upload = objectStore.put(prefix + finalPath, limiter, {
         contentLength: declared,
         contentType: contentType || contentTypeFor(finalPath),
+        metadata: normalizedIdempotencyKey ? { [UPLOAD_ID_METADATA_KEY]: normalizedIdempotencyKey } : {},
       });
       const abortUpload = error => limiter.destroy(error instanceof Error ? error : new Error('Downloads upload was interrupted.'));
       stream.once('error', abortUpload);
@@ -93,16 +114,16 @@ export function createObjectDownloadsHandler({
       try {
         const result = await upload;
         if (markerKey) {
-          const body = Buffer.from(JSON.stringify({
+          await writeUploadMarker(objectStore, markerKey, {
             committed: true,
             requested,
             path: finalPath,
+            upload_id: normalizedIdempotencyKey,
+            expected_size: declared,
             size: limiter.bytesRead,
             etag: result?.etag || null,
-          }));
-          await objectStore.put(markerKey, Readable.from(body), {
-            contentLength: body.length,
-            contentType: 'application/json',
+          }).catch(error => {
+            console.error('[downloads] object published but idempotency marker finalization failed:', error.message || error);
           });
         }
         return {
@@ -386,6 +407,14 @@ async function readUploadMarker(objectStore, key) {
   } catch {
     return null;
   }
+}
+
+async function writeUploadMarker(objectStore, key, marker) {
+  const body = Buffer.from(JSON.stringify(marker));
+  await objectStore.put(key, Readable.from(body), {
+    contentLength: body.length,
+    contentType: 'application/json',
+  });
 }
 
 function bodyToNodeReadable(body) {

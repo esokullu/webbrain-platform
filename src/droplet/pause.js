@@ -22,6 +22,9 @@ async function downloadsBlocker(directory, fallbackMessage, readdir = fs.readdir
       }
     } catch {}
   }
+  if (entries.some(entry => !entry.endsWith('.json'))) {
+    return 'Unsynced browser download data remains staged. Wait for it to finish syncing before pausing.';
+  }
   return fallbackMessage;
 }
 

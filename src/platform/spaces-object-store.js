@@ -50,6 +50,7 @@ export function createSpacesObjectStore(config, { client } = {}) {
           size: Number(item.ContentLength || 0),
           contentType: item.ContentType || 'application/octet-stream',
           etag: String(item.ETag || '').replace(/^"|"$/g, ''),
+          metadata: item.Metadata || {},
           modifiedAt: item.LastModified || null,
         };
       } catch (error) {
@@ -71,7 +72,7 @@ export function createSpacesObjectStore(config, { client } = {}) {
       };
     },
 
-    async put(key, body, { contentLength = null, contentType = 'application/octet-stream' } = {}) {
+    async put(key, body, { contentLength = null, contentType = 'application/octet-stream', metadata = {} } = {}) {
       const upload = new Upload({
         client: s3,
         params: {
@@ -80,6 +81,7 @@ export function createSpacesObjectStore(config, { client } = {}) {
           Body: body,
           ContentLength: contentLength == null ? undefined : Number(contentLength),
           ContentType: contentType,
+          Metadata: metadata,
         },
         queueSize: 2,
         partSize: 8 * 1024 * 1024,

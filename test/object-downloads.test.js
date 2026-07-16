@@ -15,7 +15,7 @@ function createMemoryObjectStore() {
     },
     async head(key) {
       const item = objects.get(key);
-      return item ? { key, size: item.body.length, contentType: item.contentType, modifiedAt: item.modifiedAt } : null;
+      return item ? { key, size: item.body.length, contentType: item.contentType, metadata: item.metadata || {}, modifiedAt: item.modifiedAt } : null;
     },
     async get(key, range) {
       const item = objects.get(key);
@@ -23,10 +23,10 @@ function createMemoryObjectStore() {
       const body = range ? item.body.subarray(range.start, range.end + 1) : item.body;
       return { body: Readable.from(body) };
     },
-    async put(key, stream, { contentType } = {}) {
+    async put(key, stream, { contentType, metadata = {} } = {}) {
       const chunks = [];
       for await (const chunk of stream) chunks.push(Buffer.from(chunk));
-      objects.set(key, { body: Buffer.concat(chunks), contentType, modifiedAt: new Date() });
+      objects.set(key, { body: Buffer.concat(chunks), contentType, metadata, modifiedAt: new Date() });
       return { etag: `etag-${key}` };
     },
   };
@@ -136,10 +136,46 @@ test('Chrome upload idempotency reuses the reserved final name after an uncertai
       committed: true,
       requested: 'report.pdf',
       path: 'report.pdf',
+      upload_id: 'chrome-guid-1',
+      expected_size: 10,
       size: 10,
       etag: 'etag-users/user-a/report.pdf',
     },
   );
+});
+
+test('idempotency survives a failed committed-marker write after object publication', async () => {
+  const objectStore = createMemoryObjectStore();
+  const originalPut = objectStore.put.bind(objectStore);
+  let markerWrites = 0;
+  objectStore.put = async (key, stream, options) => {
+    if (key.endsWith('/.webbrain-internal/chrome-guid-marker-failure.json')) {
+      markerWrites += 1;
+      if (markerWrites === 2) throw new Error('marker storage unavailable');
+    }
+    return await originalPut(key, stream, options);
+  };
+  const handler = createObjectDownloadsHandler({ objectStore, quotaBytes: 30, maxUploadBytes: 20 });
+  const first = await handler.uploadStream({
+    userId: 'user-a',
+    requestedPath: 'report.pdf',
+    stream: Readable.from('first-copy'),
+    contentLength: 10,
+    idempotencyKey: 'chrome-guid-marker-failure',
+  });
+  const second = await handler.uploadStream({
+    userId: 'user-a',
+    requestedPath: 'report.pdf',
+    stream: Readable.from('retry-copy'),
+    contentLength: 10,
+    idempotencyKey: 'chrome-guid-marker-failure',
+  });
+  assert.equal(first.path, 'report.pdf');
+  assert.equal(second.path, 'report.pdf');
+  assert.equal(second.idempotent, true);
+  assert.equal(objectStore.objects.get('users/user-a/report.pdf').body.toString(), 'first-copy');
+  const visible = await handler.listUserObjects('user-a');
+  assert.deepEqual(visible.map(item => item.relativeKey), ['report.pdf']);
 });
 
 test('uncommitted idempotency markers never claim a different visible file', async () => {
@@ -150,7 +186,13 @@ test('uncommitted idempotency markers never claim a different visible file', asy
     modifiedAt: new Date(),
   });
   objectStore.objects.set('users/user-a/.webbrain-internal/chrome-guid-1.json', {
-    body: Buffer.from(JSON.stringify({ requested: 'report.pdf', path: 'report.pdf' })),
+    body: Buffer.from(JSON.stringify({
+      committed: false,
+      requested: 'report.pdf',
+      path: 'report.pdf',
+      upload_id: 'chrome-guid-1',
+      expected_size: 10,
+    })),
     contentType: 'application/json',
     modifiedAt: new Date(),
   });
