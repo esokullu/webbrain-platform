@@ -341,6 +341,43 @@ export class MySqlStore {
     return await this.getBrowserSession(id);
   }
 
+  /**
+   * Atomically apply `patch` only when the session's current status matches
+   * `expectedStatus`. Returns null when the row exists but the status does not match.
+   */
+  async updateBrowserSessionIfStatus(id, expectedStatus, patch) {
+    const fields = Object.keys(patch).filter(k => patch[k] !== undefined);
+    if (!fields.length) {
+      const current = await this.getBrowserSession(id);
+      if (!current) {
+        const e = new Error('Browser session not found');
+        e.status = 404;
+        throw e;
+      }
+      return current.status === expectedStatus ? current : null;
+    }
+    const assignments = fields.map(k => `${k} = :${k}`).join(', ');
+    const values = { id, expectedStatus, ...patch };
+    if ('proxy_enabled' in values) values.proxy_enabled = values.proxy_enabled ? 1 : 0;
+    for (const key of ['proxy_updated_at', 'paused_at', 'expires_at', 'created_at', 'updated_at']) {
+      if (values[key]) values[key] = toMysqlDate(values[key]);
+    }
+    const [result] = await this.pool.execute(
+      `UPDATE browser_sessions SET ${assignments} WHERE id = :id AND status = :expectedStatus`,
+      values
+    );
+    if (!result.affectedRows) {
+      const current = await this.getBrowserSession(id);
+      if (!current) {
+        const e = new Error('Browser session not found');
+        e.status = 404;
+        throw e;
+      }
+      return null;
+    }
+    return await this.getBrowserSession(id);
+  }
+
   async getBrowserSessionBySecret(secret) {
     return normalizeBrowserSession(await this.queryOne('SELECT * FROM browser_sessions WHERE connect_secret = :secret', { secret }));
   }

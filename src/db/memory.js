@@ -136,6 +136,18 @@ export class MemoryStore {
     return clone(row);
   }
 
+  /**
+   * Atomically apply `patch` only when the session's current status matches
+   * `expectedStatus`. Returns null when the row exists but the status does not match.
+   */
+  async updateBrowserSessionIfStatus(id, expectedStatus, patch) {
+    const row = this.browserSessions.get(id);
+    if (!row) throw notFound('Browser session not found');
+    if (row.status !== expectedStatus) return null;
+    Object.assign(row, clone(patch), { updated_at: patch.updated_at || nowIso() });
+    return clone(row);
+  }
+
   async getBrowserSessionBySecret(secret) {
     return clone([...this.browserSessions.values()].find(s => s.connect_secret === secret) || null);
   }

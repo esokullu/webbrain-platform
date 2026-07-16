@@ -3244,7 +3244,16 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
           proxyUrl,
         });
       } catch (e) {
-        await store.updateBrowserSession(session.id, { status: 'failed', updated_at: nowIso() });
+        if (volume?.volume_id) {
+          await provisioner.destroyVolume(volume.volume_id).catch(() => {});
+        }
+        await store.updateBrowserSession(session.id, {
+          status: 'failed',
+          volume_id: null,
+          volume_name: null,
+          volume_size_gib: null,
+          updated_at: nowIso(),
+        }).catch(() => {});
         throw e;
       }
       let updated;
@@ -3257,8 +3266,17 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
         });
       } catch (error) {
         await provisioner.destroyDroplet(provisioned.droplet_id).catch(() => {});
-        await provisioner.waitForVolumeDetached(volume.volume_id).catch(() => {});
-        await store.updateBrowserSession(session.id, { status: 'failed', updated_at: nowIso() }).catch(() => {});
+        if (volume?.volume_id) {
+          await provisioner.waitForVolumeDetached(volume.volume_id).catch(() => {});
+          await provisioner.destroyVolume(volume.volume_id).catch(() => {});
+        }
+        await store.updateBrowserSession(session.id, {
+          status: 'failed',
+          volume_id: null,
+          volume_name: null,
+          volume_size_gib: null,
+          updated_at: nowIso(),
+        }).catch(() => {});
         throw error;
       }
       await audit(req, 'browser_session.create', 'browser_session', session.id, { droplet_id: updated.droplet_id });
@@ -3487,11 +3505,14 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       if (session.status !== 'paused') return jsonError(res, 409, 'Only a paused browser can be resumed');
       if (!session.volume_id) return jsonError(res, 409, 'Browser profile storage is missing');
 
-      const resuming = await store.updateBrowserSession(session.id, {
+      // Conditional claim so concurrent resume requests cannot both provision Droplets
+      // against the same volume, then race the failure path back to `paused`.
+      const resuming = await store.updateBrowserSessionIfStatus(session.id, 'paused', {
         status: 'resuming',
         paused_at: null,
         updated_at: nowIso(),
       });
+      if (!resuming) return jsonError(res, 409, 'Only a paused browser can be resumed');
       let provisioned;
       try {
         provisioned = await provisioner.createBrowserDroplet(resuming, {

@@ -841,6 +841,159 @@ test('pause stays disabled until shared Downloads storage is configured', async 
   }
 });
 
+test('browser create destroys the profile volume when droplet provisioning fails', async () => {
+  const ctx = await startPlatform();
+  try {
+    const cookie = await register(ctx.base, 'create-volume-cleanup@example.com');
+    const originalCreate = ctx.provisioner.createBrowserDroplet.bind(ctx.provisioner);
+    ctx.provisioner.createBrowserDroplet = async (...args) => {
+      await originalCreate(...args);
+      throw new Error('DigitalOcean droplet create failed');
+    };
+
+    const created = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: '{}',
+    });
+    assert.equal(created.status, 500);
+    assert.equal(ctx.provisioner.createdVolumes.length, 1);
+    assert.deepEqual(ctx.provisioner.destroyedVolumes, [ctx.provisioner.createdVolumes[0].volume_id]);
+
+    const sessions = await ctx.store.listBrowserSessions((await ctx.store.findUserByEmail('create-volume-cleanup@example.com')).id);
+    assert.equal(sessions.length, 1);
+    assert.equal(sessions[0].status, 'failed');
+    assert.equal(sessions[0].volume_id, null);
+    assert.equal(sessions[0].volume_name, null);
+    assert.equal(sessions[0].volume_size_gib, null);
+  } finally {
+    await ctx.platform.close();
+  }
+});
+
+test('concurrent resume requests only provision one droplet for a paused browser', async () => {
+  const ctx = await startPlatform({
+    WEBBRAIN_SPACES_ENDPOINT: 'https://nyc3.digitaloceanspaces.com',
+    WEBBRAIN_SPACES_ACCESS_KEY: 'access',
+    WEBBRAIN_SPACES_SECRET_KEY: 'secret',
+    WEBBRAIN_SPACES_BUCKET: 'downloads',
+  }, { downloadsHandler: {} });
+  let ws = null;
+  try {
+    const cookie = await register(ctx.base, 'resume-race@example.com');
+    const created = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: '{}',
+    });
+    assert.equal(created.status, 201);
+    const sessionId = created.body.browser_session.id;
+    const storedSession = await ctx.store.getBrowserSession(sessionId);
+
+    ws = new WebSocket(`${ctx.wsBase}/droplet/control?session_token=${encodeURIComponent(storedSession.connect_secret)}`);
+    await new Promise(resolve => ws.once('open', resolve));
+    ws.on('message', raw => {
+      const msg = JSON.parse(raw.toString('utf8'));
+      if (msg.type === 'hello') return;
+      if (msg.action === 'health') {
+        ws.send(JSON.stringify({ id: msg.id, ok: true, result: { ok: true, extension_connected: true } }));
+        return;
+      }
+      if (msg.action === 'pause.prepare') {
+        ws.send(JSON.stringify({ id: msg.id, ok: true, result: { prepared: true } }));
+        return;
+      }
+    });
+
+    // Wait until the control channel + runtime are ready so pause can proceed.
+    for (let i = 0; i < 50; i++) {
+      const ready = await request(ctx.base, `/api/browser-sessions/${sessionId}`, { headers: { cookie } });
+      if (ready.body.browser_session.status === 'ready' && ready.body.browser_session.runtime_ready !== false) break;
+      await new Promise(r => setTimeout(r, 20));
+    }
+
+    const paused = await request(ctx.base, `/api/browser-sessions/${sessionId}/pause`, {
+      method: 'POST',
+      headers: { cookie },
+      body: '{}',
+    });
+    assert.equal(paused.status, 200);
+    assert.equal(paused.body.browser_session.status, 'paused');
+
+    const createStarts = [];
+    const originalCreate = ctx.provisioner.createBrowserDroplet.bind(ctx.provisioner);
+    ctx.provisioner.createBrowserDroplet = async (...args) => {
+      let release;
+      createStarts.push(new Promise(resolve => { release = resolve; }));
+      // Hold the first (and only) claim long enough for the second request to race the status check.
+      await new Promise(resolve => setTimeout(resolve, 50));
+      release();
+      return originalCreate(...args);
+    };
+
+    const [first, second] = await Promise.all([
+      request(ctx.base, `/api/browser-sessions/${sessionId}/resume`, {
+        method: 'POST',
+        headers: { cookie },
+        body: '{}',
+      }),
+      request(ctx.base, `/api/browser-sessions/${sessionId}/resume`, {
+        method: 'POST',
+        headers: { cookie },
+        body: '{}',
+      }),
+    ]);
+
+    const statuses = [first.status, second.status].sort();
+    assert.deepEqual(statuses, [202, 409]);
+    assert.equal(ctx.provisioner.created.length, 2); // create + one resume
+    const winner = first.status === 202 ? first : second;
+    assert.equal(winner.body.browser_session.status, 'ready');
+    const after = await ctx.store.getBrowserSession(sessionId);
+    assert.equal(after.status, 'ready');
+    assert.equal(after.droplet_id, winner.body.browser_session.droplet_id || after.droplet_id);
+  } finally {
+    ws?.close();
+    await ctx.platform.close();
+  }
+});
+
+test('memory store updateBrowserSessionIfStatus is status-conditional', async () => {
+  const store = new MemoryStore();
+  const now = new Date().toISOString();
+  await store.createBrowserSession({
+    id: 'bs_ifstatus',
+    user_id: 'usr_1',
+    status: 'paused',
+    droplet_id: null,
+    public_ip: null,
+    volume_id: 'vol-1',
+    volume_name: 'wb-profile-bs-ifstatus',
+    volume_size_gib: 2,
+    connect_secret: 'secret',
+    paused_at: now,
+    expires_at: new Date(Date.now() + 60_000).toISOString(),
+    created_at: now,
+    updated_at: now,
+  });
+
+  const claimed = await store.updateBrowserSessionIfStatus('bs_ifstatus', 'paused', {
+    status: 'resuming',
+    paused_at: null,
+    updated_at: now,
+  });
+  assert.equal(claimed.status, 'resuming');
+  assert.equal(claimed.paused_at, null);
+
+  const raced = await store.updateBrowserSessionIfStatus('bs_ifstatus', 'paused', {
+    status: 'resuming',
+    paused_at: null,
+    updated_at: now,
+  });
+  assert.equal(raced, null);
+  assert.equal((await store.getBrowserSession('bs_ifstatus')).status, 'resuming');
+});
+
 test('model proxy replaces browser credentials and uses a stable platform-user identity', async () => {
   let captured = null;
   const upstream = http.createServer(async (req, res) => {
