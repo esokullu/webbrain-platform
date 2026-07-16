@@ -304,8 +304,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     .viewer-wrap { min-height: 680px; display: grid; grid-template-rows: auto 1fr; }
     .viewer-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--border); }
     .viewer-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; }
-    .viewer-title-button { min-width: 0; max-width: 52%; display: inline-flex; align-items: center; gap: 6px; padding-inline: 4px 7px; border-color: transparent; background: transparent; color: var(--text); box-shadow: none; }
-    .viewer-title-button:hover { background: var(--card-hover); }
+    .viewer-title-display { min-width: 0; max-width: 52%; display: inline-flex; align-items: center; padding-inline: 4px 7px; color: var(--text); }
     .viewer-frames { min-height: 640px; display: none; }
     iframe { width: 100%; height: 640px; display: none; border: 0; background: #0b0e17; border-radius: 0 0 16px 16px; }
     .empty { min-height: 640px; display: grid; place-items: center; color: var(--text-dim); text-align: center; padding: 20px; }
@@ -484,6 +483,24 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     .account-verification-copy { margin: 0 0 8px; color: var(--text-dim); font-size: 11px; line-height: 1.5; }
     .account-form .message { margin: 0; }
     .account-form .dialog-actions { margin-top: 0; }
+    .settings-dialog { width: min(640px, calc(100vw - 28px)); }
+    .settings-dialog .dialog-body { padding: 0; }
+    .settings-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 22px; border-bottom: 1px solid var(--border); }
+    .settings-dialog-head h2 { margin-bottom: 3px; }
+    .settings-dialog-head p { margin: 0; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+    .settings-dialog-close { width: 34px; min-height: 34px; flex: 0 0 34px; padding: 0; font-size: 18px; line-height: 1; }
+    .settings-sections { display: grid; grid-template-columns: minmax(0,.82fr) minmax(0,1.18fr); }
+    .settings-section { min-width: 0; margin: 0; padding: 20px 22px 22px; display: grid; align-content: start; gap: 12px; }
+    .settings-section + .settings-section { border-left: 1px solid var(--border); }
+    .settings-section-kicker { color: var(--accent); font-size: 10px; font-weight: 850; letter-spacing: .09em; text-transform: uppercase; }
+    .settings-section h3 { margin: -5px 0 0; font-size: 16px; letter-spacing: -.01em; }
+    .settings-section-copy { min-height: 38px; margin: -5px 0 0 !important; font-size: 11px !important; line-height: 1.55; }
+    .settings-section .dialog-actions { margin-top: 0; }
+    .settings-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+    .settings-fieldset[disabled] { opacity: .56; }
+    .settings-section .proxy-current { margin-top: 0; }
+    .settings-section .proxy-fields { padding: 0; }
+    .settings-section .message { margin: 0; }
     .downloads-dialog { width: min(560px, calc(100vw - 28px)); }
     .downloads-ticket { position: relative; display: grid; gap: 9px; margin-top: 16px; padding: 16px; overflow: hidden; border: 1px solid rgba(91,82,232,.22); border-radius: 12px; background: linear-gradient(135deg, rgba(91,82,232,.075), rgba(255,253,248,.9) 58%); }
     .downloads-ticket::after { content: ''; position: absolute; top: -34px; right: -27px; width: 92px; height: 72px; border: 10px solid rgba(91,82,232,.055); border-radius: 18px; transform: rotate(8deg); pointer-events: none; }
@@ -530,6 +547,8 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       .viewer-actions { align-items: flex-start; flex-direction: column; }
       .viewer-actions .toolbar { width: 100%; }
       .viewer-actions .toolbar > * { flex: 1; justify-content: center; }
+      .settings-sections { grid-template-columns: 1fr; }
+      .settings-section + .settings-section { border-top: 1px solid var(--border); border-left: 0; }
       .create-row { grid-template-columns: 1fr; }
       .create-row button { width: 100%; }
       .lifecycle-choice { grid-template-columns: 1fr; }
@@ -655,13 +674,13 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         <div class="workspace-column">
           <section class="panel viewer-wrap">
             <div class="viewer-actions">
-              <button class="viewer-title-button" id="renameSessionBtn" type="button" disabled title="Rename browser"><span class="viewer-title" id="viewerTitle">Browser preview</span><span aria-hidden="true">✎</span></button>
+              <div class="viewer-title-display"><span class="viewer-title" id="viewerTitle">Browser preview</span></div>
               <div class="toolbar">
                 <button class="secondary" id="connectBtn" type="button" disabled>Connect</button>
-                <button class="secondary" id="proxyBtn" type="button" disabled>Proxy</button>
                 <button class="secondary" id="downloadsBtn" type="button" disabled>Downloads</button>
                 <button class="secondary" id="lifecycleBtn" type="button" disabled>Pause</button>
                 <a class="button-link" id="externalLink" href="#" target="_blank" rel="noopener" style="display:none">Open separately</a>
+                <button class="secondary" id="browserSettingsBtn" type="button" disabled>Settings</button>
                 <button class="danger" id="deleteSessionBtn" type="button" disabled>Delete</button>
               </div>
             </div>
@@ -888,35 +907,50 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       </div>
     </form>
   </dialog>
-  <dialog id="renameDialog">
-    <form class="dialog-body" method="dialog" id="renameForm">
-      <h2>Name this browser</h2>
-      <p>Use a short name you will recognize later.</p>
-      <input id="renameInput" aria-label="Browser name" maxlength="120" placeholder="Research, Personal, Client work…">
-      <div class="dialog-actions">
-        <button class="secondary" type="button" id="cancelRenameBtn">Cancel</button>
-        <button type="submit" id="saveRenameBtn">Save name</button>
+  <dialog class="settings-dialog" id="browserSettingsDialog">
+    <div class="dialog-body">
+      <div class="settings-dialog-head">
+        <div>
+          <h2 id="browserSettingsTitle">Browser settings</h2>
+          <p id="browserSettingsMeta">Select a browser to manage it.</p>
+        </div>
+        <button class="secondary settings-dialog-close" type="button" id="closeBrowserSettingsBtn" aria-label="Close browser settings">×</button>
       </div>
-    </form>
-  </dialog>
-  <dialog id="proxyDialog">
-    <form class="dialog-body" id="proxyForm">
-      <h2>Browser proxy</h2>
-      <p>Replace the upstream without restarting Chrome. Existing connections will be closed and the new exit IP verified.</p>
-      <div class="proxy-current" id="proxyCurrent">Loading current proxy…</div>
-      <div class="proxy-fields" style="margin-top:14px;padding:0">
-        <input id="proxyDomain" aria-label="Webshare proxy domain" autocomplete="off" spellcheck="false" placeholder="Domain name">
-        <input id="proxyPort" aria-label="Webshare proxy port" inputmode="numeric" autocomplete="off" placeholder="Port">
-        <input id="proxyUsername" aria-label="Webshare proxy username" autocomplete="off" spellcheck="false" placeholder="Username">
-        <input id="proxyPassword" aria-label="Webshare proxy password" type="password" autocomplete="new-password" placeholder="Password">
+      <div class="settings-sections">
+        <form class="settings-section" id="browserNameForm">
+          <span class="settings-section-kicker">Identity</span>
+          <h3>Browser name</h3>
+          <p class="settings-section-copy">Use the name you recognize in the dashboard and destructive confirmations.</p>
+          <label class="form-field" for="browserNameInput">
+            <span class="form-label">Name</span>
+            <input id="browserNameInput" aria-label="Browser name" maxlength="120" placeholder="Research, Personal, Client work…">
+          </label>
+          <div class="message" id="browserNameMessage" aria-live="polite"></div>
+          <div class="dialog-actions">
+            <button type="submit" id="saveBrowserNameBtn">Save name</button>
+          </div>
+        </form>
+        <form class="settings-section" id="proxyForm">
+          <span class="settings-section-kicker">Network route</span>
+          <h3>Webshare proxy</h3>
+          <p class="settings-section-copy" id="proxyAvailability">Replace the upstream without restarting Chrome. Existing connections will be closed.</p>
+          <div class="proxy-current" id="proxyCurrent">Loading current proxy…</div>
+          <fieldset class="settings-fieldset" id="proxyFieldsGroup">
+            <div class="proxy-fields">
+              <input id="proxyDomain" aria-label="Webshare proxy domain" autocomplete="off" spellcheck="false" placeholder="Domain name">
+              <input id="proxyPort" aria-label="Webshare proxy port" inputmode="numeric" autocomplete="off" placeholder="Port">
+              <input id="proxyUsername" aria-label="Webshare proxy username" autocomplete="off" spellcheck="false" placeholder="Username">
+              <input id="proxyPassword" aria-label="Webshare proxy password" type="password" autocomplete="new-password" placeholder="Password">
+            </div>
+          </fieldset>
+          <span class="field-hint">Enter all four values. Leave all fields blank to switch to direct mode.</span>
+          <div class="message" id="proxyMessage" aria-live="polite"></div>
+          <div class="dialog-actions">
+            <button type="submit" id="saveProxyBtn">Verify and switch</button>
+          </div>
+        </form>
       </div>
-      <span class="field-hint">Enter all four Webshare values. Leave all fields blank to switch to direct mode.</span>
-      <div class="message" id="proxyMessage" aria-live="polite"></div>
-      <div class="dialog-actions">
-        <button class="secondary" type="button" id="cancelProxyBtn">Cancel</button>
-        <button type="submit" id="saveProxyBtn">Verify and switch</button>
-      </div>
-    </form>
+    </div>
   </dialog>
   <dialog class="downloads-dialog" id="downloadsDialog">
     <div class="dialog-body">
@@ -952,8 +986,8 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     <div class="dialog-body">
       <h2>Delete this browser?</h2>
       <p id="deleteDialogDescription">This permanently destroys the cloud browser and cannot be undone.</p>
-      <p>Type <span class="confirm-phrase">I confirm</span> to continue.</p>
-      <input id="deleteConfirmInput" aria-label="Type I confirm to delete" autocomplete="off" placeholder="I confirm">
+      <p>Type <span class="confirm-phrase" id="deleteConfirmName">the browser name</span> to continue.</p>
+      <input id="deleteConfirmInput" aria-label="Type the browser name to delete" autocomplete="off" placeholder="Browser name">
       <div class="dialog-actions">
         <button class="secondary" type="button" id="cancelDeleteBtn">Cancel</button>
         <button class="danger" type="button" id="confirmDeleteBtn" disabled>Delete browser</button>
@@ -984,13 +1018,12 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const editAccountBtn = document.getElementById('editAccountBtn');
     const refreshBtn = document.getElementById('refreshBtn');
     const connectBtn = document.getElementById('connectBtn');
-    const proxyBtn = document.getElementById('proxyBtn');
+    const browserSettingsBtn = document.getElementById('browserSettingsBtn');
     const downloadsBtn = document.getElementById('downloadsBtn');
     const downloadsDialogDescription = document.getElementById('downloadsDialogDescription');
     const downloadsDialogNote = document.getElementById('downloadsDialogNote');
     const lifecycleBtn = document.getElementById('lifecycleBtn');
     const deleteSessionBtn = document.getElementById('deleteSessionBtn');
-    const renameSessionBtn = document.getElementById('renameSessionBtn');
     const viewerTitle = document.getElementById('viewerTitle');
     const viewerEmpty = document.getElementById('viewerEmpty');
     const viewerStateVisual = document.getElementById('viewerStateVisual');
@@ -1040,19 +1073,23 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const accountMessage = document.getElementById('accountMessage');
     const cancelAccountBtn = document.getElementById('cancelAccountBtn');
     const saveAccountBtn = document.getElementById('saveAccountBtn');
-    const renameDialog = document.getElementById('renameDialog');
-    const renameForm = document.getElementById('renameForm');
-    const renameInput = document.getElementById('renameInput');
-    const cancelRenameBtn = document.getElementById('cancelRenameBtn');
-    const proxyDialog = document.getElementById('proxyDialog');
+    const browserSettingsDialog = document.getElementById('browserSettingsDialog');
+    const browserSettingsTitle = document.getElementById('browserSettingsTitle');
+    const browserSettingsMeta = document.getElementById('browserSettingsMeta');
+    const closeBrowserSettingsBtn = document.getElementById('closeBrowserSettingsBtn');
+    const browserNameForm = document.getElementById('browserNameForm');
+    const browserNameInput = document.getElementById('browserNameInput');
+    const browserNameMessage = document.getElementById('browserNameMessage');
+    const saveBrowserNameBtn = document.getElementById('saveBrowserNameBtn');
     const proxyForm = document.getElementById('proxyForm');
     const proxyCurrent = document.getElementById('proxyCurrent');
+    const proxyAvailability = document.getElementById('proxyAvailability');
+    const proxyFieldsGroup = document.getElementById('proxyFieldsGroup');
     const proxyDomain = document.getElementById('proxyDomain');
     const proxyPort = document.getElementById('proxyPort');
     const proxyUsername = document.getElementById('proxyUsername');
     const proxyPassword = document.getElementById('proxyPassword');
     const proxyMessage = document.getElementById('proxyMessage');
-    const cancelProxyBtn = document.getElementById('cancelProxyBtn');
     const saveProxyBtn = document.getElementById('saveProxyBtn');
     const downloadsDialog = document.getElementById('downloadsDialog');
     const downloadsTicket = document.getElementById('downloadsTicket');
@@ -1067,6 +1104,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const openDownloadsLink = document.getElementById('openDownloadsLink');
     const deleteDialog = document.getElementById('deleteDialog');
     const deleteDialogDescription = document.getElementById('deleteDialogDescription');
+    const deleteConfirmName = document.getElementById('deleteConfirmName');
     const deleteConfirmInput = document.getElementById('deleteConfirmInput');
     const cancelDeleteBtn = document.getElementById('cancelDeleteBtn');
     const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
@@ -1091,7 +1129,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       logsStatusFilter: 'all',
       showDestroyed: false,
       deleteTargetId: null,
-      proxyTargetId: null,
+      settingsTargetId: null,
       downloadsTargetId: null,
       codeClient: 'rest',
     };
@@ -2245,7 +2283,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
 
       connectBtn.textContent = isConnected ? 'Disconnect' : (isConnecting ? 'Connecting…' : 'Connect');
       connectBtn.disabled = isConnecting || (!isConnected && !canConnect);
-      proxyBtn.disabled = !session || session.status === 'destroyed' || session.droplet_connected !== true;
+      browserSettingsBtn.disabled = !session || session.status === 'destroyed';
       downloadsBtn.disabled = !session
         || !['ready', 'paused'].includes(session.status)
         || (session.status === 'paused' && !sharedDownloadsEnabled);
@@ -2258,7 +2296,6 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
             : 'Pause';
       lifecycleBtn.disabled = !canPause && !canResume;
       deleteSessionBtn.disabled = !session || session.status === 'destroyed';
-      renameSessionBtn.disabled = !session || session.status === 'destroyed';
       viewerTitle.textContent = session ? browserName(session) + ' · ' + session.status : 'Browser preview';
 
       viewerConnectBtn.style.display = 'none';
@@ -2332,34 +2369,69 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       return next;
     }
 
-    function openRenameDialog() {
+    function settingsTarget() {
+      return state.sessions.find(item => item.id === state.settingsTargetId) || null;
+    }
+
+    function clearProxyInputs() {
+      proxyDomain.value = '';
+      proxyPort.value = '';
+      proxyUsername.value = '';
+      proxyPassword.value = '';
+    }
+
+    async function openBrowserSettings() {
       const session = selectedSession();
       if (!session || session.status === 'destroyed') return;
-      renameInput.value = session.display_name || '';
-      renameDialog.showModal();
-      renameInput.focus();
-      renameInput.select();
+      const proxyAvailable = session.droplet_connected === true;
+      state.settingsTargetId = session.id;
+      browserSettingsTitle.textContent = browserName(session) + ' settings';
+      browserSettingsMeta.textContent = session.id + ' · ' + session.status;
+      browserNameInput.value = session.display_name || '';
+      clearProxyInputs();
+      proxyFieldsGroup.disabled = !proxyAvailable;
+      saveProxyBtn.disabled = !proxyAvailable;
+      proxyAvailability.textContent = proxyAvailable
+        ? 'Replace the upstream without restarting Chrome. Existing connections will be closed.'
+        : 'Network routing becomes available when this browser is running and connected.';
+      proxyCurrent.textContent = proxyAvailable ? proxyStatusText(session.proxy) : 'Browser connection unavailable';
+      showMessage(browserNameMessage, '');
+      showMessage(proxyMessage, '');
+      browserSettingsDialog.showModal();
+      browserNameInput.focus();
+      browserNameInput.select();
+      if (!proxyAvailable) return;
+      try {
+        const body = await api('/api/browser-sessions/' + encodeURIComponent(session.id) + '/proxy');
+        if (state.settingsTargetId === session.id && browserSettingsDialog.open) {
+          proxyCurrent.textContent = proxyStatusText(body.proxy);
+        }
+      } catch (error) {
+        if (state.settingsTargetId === session.id && browserSettingsDialog.open) {
+          showMessage(proxyMessage, error.message, true);
+        }
+      }
     }
 
     async function saveBrowserName(event) {
       event.preventDefault();
-      const session = selectedSession();
+      const session = settingsTarget();
       if (!session) return;
-      const saveButton = document.getElementById('saveRenameBtn');
-      saveButton.disabled = true;
+      saveBrowserNameBtn.disabled = true;
       try {
         const body = await api('/api/browser-sessions/' + encodeURIComponent(session.id), {
           method: 'PATCH',
-          body: { display_name: renameInput.value.trim() || null },
+          body: { display_name: browserNameInput.value.trim() || null },
         });
         state.sessions = state.sessions.map(item => item.id === body.browser_session.id ? body.browser_session : item);
-        renameDialog.close();
+        browserSettingsTitle.textContent = browserName(body.browser_session) + ' settings';
         renderSessions();
+        showMessage(browserNameMessage, 'Name saved.');
         showMessage(sessionMessage, 'Browser name saved.');
       } catch (e) {
-        showMessage(sessionMessage, e.message, true);
+        showMessage(browserNameMessage, e.message, true);
       } finally {
-        saveButton.disabled = false;
+        saveBrowserNameBtn.disabled = false;
       }
     }
 
@@ -2397,30 +2469,11 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       return route + (proxy?.exit_ip ? ' · exit ' + proxy.exit_ip : '');
     }
 
-    async function openProxyDialog() {
-      const session = selectedSession();
-      if (!session || session.status === 'destroyed' || !session.droplet_connected) return;
-      state.proxyTargetId = session.id;
-      proxyDomain.value = '';
-      proxyPort.value = '';
-      proxyUsername.value = '';
-      proxyPassword.value = '';
-      proxyCurrent.textContent = proxyStatusText(session.proxy);
-      showMessage(proxyMessage, '');
-      proxyDialog.showModal();
-      proxyDomain.focus();
-      try {
-        const body = await api('/api/browser-sessions/' + encodeURIComponent(session.id) + '/proxy');
-        if (state.proxyTargetId === session.id && proxyDialog.open) proxyCurrent.textContent = proxyStatusText(body.proxy);
-      } catch (error) {
-        if (state.proxyTargetId === session.id && proxyDialog.open) showMessage(proxyMessage, error.message, true);
-      }
-    }
-
     async function saveBrowserProxy(event) {
       event.preventDefault();
-      const sessionId = state.proxyTargetId;
-      if (!sessionId) return;
+      const session = settingsTarget();
+      if (!session || session.droplet_connected !== true) return;
+      const sessionId = session.id;
       saveProxyBtn.disabled = true;
       showMessage(proxyMessage, 'Closing old connections and verifying the new exit…');
       try {
@@ -2438,8 +2491,10 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
             updated_at: body.proxy.updated_at || null,
           },
         } : session);
-        proxyDialog.close();
+        proxyCurrent.textContent = proxyStatusText(body.proxy);
+        clearProxyInputs();
         renderSessions();
+        showMessage(proxyMessage, 'Network route updated.');
         showMessage(sessionMessage, 'Network route updated: ' + proxyStatusText(body.proxy) + '.');
       } catch (error) {
         showMessage(proxyMessage, error.message, true);
@@ -2579,20 +2634,29 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     function openDeleteDialog() {
       const session = selectedSession();
       if (!session || session.status === 'destroyed') return;
+      const confirmationName = browserName(session);
       state.deleteTargetId = session.id;
       deleteDialogDescription.textContent = session.volume
-        ? 'This permanently destroys “' + browserName(session) + '” and its private 2 GB Chrome session disk.'
+        ? 'This permanently destroys “' + confirmationName + '” and its private 2 GB Chrome session disk.'
           + (sharedDownloadsEnabled ? ' Shared Downloads remain in your account.' : ' Local Downloads will also be lost.')
-        : 'This permanently destroys “' + browserName(session) + '” and its always-on Droplet, including its Chrome state and local Downloads.';
+        : 'This permanently destroys “' + confirmationName + '” and its always-on Droplet, including its Chrome state and local Downloads.';
+      deleteConfirmName.textContent = confirmationName;
+      deleteConfirmInput.placeholder = confirmationName;
+      deleteConfirmInput.setAttribute('aria-label', 'Type ' + confirmationName + ' to delete');
       deleteConfirmInput.value = '';
       confirmDeleteBtn.disabled = true;
       deleteDialog.showModal();
       deleteConfirmInput.focus();
     }
 
+    function deleteConfirmationMatches() {
+      const session = state.sessions.find(item => item.id === state.deleteTargetId);
+      return !!session && deleteConfirmInput.value === browserName(session);
+    }
+
     async function deleteSession() {
       const session = state.sessions.find(item => item.id === state.deleteTargetId);
-      if (!session || deleteConfirmInput.value !== 'I confirm') return;
+      if (!session || !deleteConfirmationMatches()) return;
       deleteSessionBtn.disabled = true;
       confirmDeleteBtn.disabled = true;
       showMessage(sessionMessage, 'Deleting session...');
@@ -2611,7 +2675,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         showMessage(sessionMessage, e.message, true);
       } finally {
         deleteSessionBtn.disabled = false;
-        confirmDeleteBtn.disabled = deleteConfirmInput.value !== 'I confirm';
+        confirmDeleteBtn.disabled = !deleteConfirmationMatches();
       }
     }
 
@@ -2753,15 +2817,16 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       if (session && viewerConnections.has(session.id)) disconnectNoVnc();
       else openNoVnc();
     });
-    proxyBtn.addEventListener('click', openProxyDialog);
+    browserSettingsBtn.addEventListener('click', openBrowserSettings);
+    browserNameForm.addEventListener('submit', saveBrowserName);
     proxyForm.addEventListener('submit', saveBrowserProxy);
-    cancelProxyBtn.addEventListener('click', () => proxyDialog.close());
-    proxyDialog.addEventListener('close', () => {
-      state.proxyTargetId = null;
-      proxyDomain.value = '';
-      proxyPort.value = '';
-      proxyUsername.value = '';
-      proxyPassword.value = '';
+    closeBrowserSettingsBtn.addEventListener('click', () => browserSettingsDialog.close());
+    browserSettingsDialog.addEventListener('close', () => {
+      state.settingsTargetId = null;
+      browserNameInput.value = '';
+      clearProxyInputs();
+      proxyFieldsGroup.disabled = false;
+      showMessage(browserNameMessage, '');
       showMessage(proxyMessage, '');
     });
     downloadsBtn.addEventListener('click', openDownloadsDialog);
@@ -2780,18 +2845,18 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       downloadsTicket.setAttribute('aria-busy', 'false');
     });
     viewerConnectBtn.addEventListener('click', openNoVnc);
-    renameSessionBtn.addEventListener('click', openRenameDialog);
-    renameForm.addEventListener('submit', saveBrowserName);
-    cancelRenameBtn.addEventListener('click', () => renameDialog.close());
     deleteSessionBtn.addEventListener('click', openDeleteDialog);
     deleteConfirmInput.addEventListener('input', () => {
-      confirmDeleteBtn.disabled = deleteConfirmInput.value !== 'I confirm';
+      confirmDeleteBtn.disabled = !deleteConfirmationMatches();
     });
     cancelDeleteBtn.addEventListener('click', () => deleteDialog.close());
     confirmDeleteBtn.addEventListener('click', deleteSession);
     deleteDialog.addEventListener('close', () => {
       state.deleteTargetId = null;
       deleteConfirmInput.value = '';
+      deleteConfirmName.textContent = 'the browser name';
+      deleteConfirmInput.placeholder = 'Browser name';
+      deleteConfirmInput.setAttribute('aria-label', 'Type the browser name to delete');
       confirmDeleteBtn.disabled = true;
     });
     createApiKeyBtn.addEventListener('click', createApiKey);
