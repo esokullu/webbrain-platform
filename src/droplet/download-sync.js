@@ -39,13 +39,24 @@ export class ChromeDownloadSync {
 
   async recover() {
     const entries = await fs.readdir(this.stagingDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isFile() && entry.name.endsWith('.tmp')) {
+        await fs.rm(path.join(this.stagingDir, entry.name), { force: true });
+      }
+    }
     const metadataFiles = new Set(entries.filter(entry => entry.isFile() && entry.name.endsWith('.json')).map(entry => entry.name));
     for (const metadataFile of metadataFiles) {
       const metadataPath = path.join(this.stagingDir, metadataFile);
       try {
         const record = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
-        if (!validGuid(record.guid) || !record.completed) {
-          await this.removeRecordFiles(record.guid, metadataPath);
+        if (!validGuid(record.guid)) {
+          await fs.rm(metadataPath, { force: true });
+          continue;
+        }
+        if (!record.completed) {
+          if (!await this.hasNonEmptyData(record.guid)) {
+            await this.removeRecordFiles(record.guid, metadataPath);
+          }
           continue;
         }
         const filePath = this.dataPath(record.guid);
@@ -54,14 +65,18 @@ export class ChromeDownloadSync {
         this.queueUpload(record.guid, 0);
       } catch {
         const guid = metadataFile.slice(0, -'.json'.length);
-        if (validGuid(guid)) await fs.rm(this.dataPath(guid), { force: true });
-        await fs.rm(metadataPath, { force: true });
+        if (!validGuid(guid) || !await this.hasNonEmptyData(guid)) {
+          if (validGuid(guid)) await fs.rm(this.dataPath(guid), { force: true });
+          await fs.rm(metadataPath, { force: true });
+        }
       }
     }
 
     for (const entry of entries) {
-      if (!entry.isFile() || entry.name.endsWith('.json') || metadataFiles.has(`${entry.name}.json`)) continue;
-      if (validGuid(entry.name)) await fs.rm(path.join(this.stagingDir, entry.name), { force: true });
+      if (!entry.isFile() || entry.name.endsWith('.json') || entry.name.endsWith('.tmp') || metadataFiles.has(`${entry.name}.json`)) continue;
+      if (validGuid(entry.name) && !await this.hasNonEmptyData(entry.name)) {
+        await fs.rm(path.join(this.stagingDir, entry.name), { force: true });
+      }
     }
   }
 
@@ -149,8 +164,12 @@ export class ChromeDownloadSync {
     const contents = JSON.stringify(record);
     const previous = this.persisting.get(record.guid) || Promise.resolve();
     const current = previous.catch(() => {}).then(async () => {
-      await fs.writeFile(temporary, contents, { mode: 0o600 });
-      await fs.rename(temporary, target);
+      try {
+        await fs.writeFile(temporary, contents, { mode: 0o600 });
+        await fs.rename(temporary, target);
+      } finally {
+        await fs.rm(temporary, { force: true });
+      }
     });
     this.persisting.set(record.guid, current);
     try {
@@ -166,6 +185,15 @@ export class ChromeDownloadSync {
 
   metadataPath(guid) {
     return path.join(this.stagingDir, `${guid}.json`);
+  }
+
+  async hasNonEmptyData(guid) {
+    try {
+      return (await fs.stat(this.dataPath(guid))).size > 0;
+    } catch (error) {
+      if (error.code === 'ENOENT') return false;
+      throw error;
+    }
   }
 
   async removeRecordFiles(guid, knownMetadataPath = '') {

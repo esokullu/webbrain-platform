@@ -50,6 +50,10 @@ The platform authenticates browser model traffic with the per-session secret,
 then replaces that credential before forwarding and assigns a stable,
 non-email WebBrain Cloud identity derived from the platform user id.
 
+Shared Downloads currently require a single platform writer. Per-user quota
+checks and collision-safe filename allocation are serialized in-process; run
+one platform process or replica until a distributed lock is added.
+
 Droplet cloud-init passes:
 
 - `WEBBRAIN_SESSION_ID`
@@ -112,8 +116,14 @@ curl -sS -X POST \
   https://webbrain.cloud/api/browser-sessions \
   -H "Authorization: Bearer $WEBBRAIN_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"display_name":"Research"}'
+  -d '{"display_name":"Research","lifecycle":"resumable"}'
 ```
+
+`lifecycle` accepts `resumable` (the default) or `always_on`. Resumable
+browsers receive a fixed 2 GiB profile volume and can be paused once shared
+Downloads storage is configured. Always-on browsers use the classic single
+Droplet layout: Chrome state and Downloads stay on that Droplet, and Pause is
+unavailable.
 
 The response is `201 Created`:
 
@@ -148,7 +158,8 @@ Save the returned `id`:
 export WEBBRAIN_SESSION_ID='bs_0123456789abcdef'
 ```
 
-To assign a Webshare upstream while the Droplet is created, include its four
+To create an always-on browser, set `lifecycle` to `always_on`. You can also
+assign a Webshare upstream while the Droplet is created by including its four
 connection values in `proxy`:
 
 ```bash
@@ -157,6 +168,7 @@ curl -sS -X POST https://webbrain.cloud/api/browser-sessions \
   -H "Content-Type: application/json" \
   -d '{
     "display_name": "Research",
+    "lifecycle": "always_on",
     "proxy": {
       "domain": "p.webshare.io",
       "port": 80,
@@ -270,10 +282,11 @@ paused while a download or its upload is pending.
 
 ### Pause and resume a browser
 
-Pausing cleanly stops Chrome, flushes and unmounts its fixed 2 GiB profile
-volume, and destroys the billable Droplet while retaining the volume. Resuming
-creates a new Droplet, attaches the same volume, and restores the Chrome profile
-and saved proxy configuration. Downloads remain online throughout. Pause is
+For resumable browsers, pausing cleanly stops Chrome, flushes and unmounts its
+fixed 2 GiB profile volume, and destroys the billable Droplet while retaining
+the volume. Resuming creates a new Droplet, attaches the same volume, and
+restores the Chrome profile and saved proxy configuration. Downloads remain
+online throughout. Pause is
 enabled only after all four `WEBBRAIN_SPACES_*` storage values are configured,
 so destroying a Droplet can never discard local-only Downloads.
 
@@ -537,7 +550,7 @@ Abort is cooperative. A run can briefly report `aborting` before becoming
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/browser-sessions` | Create a browser using the configured production defaults. |
+| `POST` | `/api/browser-sessions` | Create a resumable browser by default, or an always-on browser with `lifecycle: "always_on"`. |
 | `GET` | `/api/browser-sessions` | List the authenticated user's browser sessions. |
 | `GET` | `/api/browser-sessions/:sessionId` | Read provisioning and runtime readiness. |
 | `PATCH` | `/api/browser-sessions/:sessionId` | Set or clear the browser's `display_name`. |

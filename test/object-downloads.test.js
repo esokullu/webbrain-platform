@@ -130,6 +130,42 @@ test('Chrome upload idempotency reuses the reserved final name after an uncertai
   const visible = await handler.listUserObjects('user-a');
   assert.deepEqual(visible.map(item => item.relativeKey), ['report.pdf']);
   assert.equal(objectStore.objects.get('users/user-a/report.pdf').body.toString(), 'first-copy');
+  assert.deepEqual(
+    JSON.parse(objectStore.objects.get('users/user-a/.webbrain-internal/chrome-guid-1.json').body.toString()),
+    {
+      committed: true,
+      requested: 'report.pdf',
+      path: 'report.pdf',
+      size: 10,
+      etag: 'etag-users/user-a/report.pdf',
+    },
+  );
+});
+
+test('uncommitted idempotency markers never claim a different visible file', async () => {
+  const objectStore = createMemoryObjectStore();
+  objectStore.objects.set('users/user-a/report.pdf', {
+    body: Buffer.from('other-file'),
+    contentType: 'application/pdf',
+    modifiedAt: new Date(),
+  });
+  objectStore.objects.set('users/user-a/.webbrain-internal/chrome-guid-1.json', {
+    body: Buffer.from(JSON.stringify({ requested: 'report.pdf', path: 'report.pdf' })),
+    contentType: 'application/json',
+    modifiedAt: new Date(),
+  });
+  const handler = createObjectDownloadsHandler({ objectStore, quotaBytes: 30, maxUploadBytes: 10 });
+  const uploaded = await handler.uploadStream({
+    userId: 'user-a',
+    requestedPath: 'report.pdf',
+    stream: Readable.from('retry-copy'),
+    contentLength: 10,
+    idempotencyKey: 'chrome-guid-1',
+  });
+  assert.equal(uploaded.path, 'report (1).pdf');
+  assert.equal(uploaded.idempotent, undefined);
+  assert.equal(objectStore.objects.get('users/user-a/report.pdf').body.toString(), 'other-file');
+  assert.equal(objectStore.objects.get('users/user-a/report (1).pdf').body.toString(), 'retry-copy');
 });
 
 test('interrupted shared uploads abort without publishing a partial object', async () => {

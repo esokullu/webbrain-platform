@@ -19,7 +19,10 @@ import os
 from webbrain_client import WebBrainClient
 
 client = WebBrainClient(os.environ["WEBBRAIN_API_KEY"])
-session = client.create_browser_session(display_name="Research")
+session = client.create_browser_session(
+    display_name="Research",
+    lifecycle="resumable",  # or "always_on" for a classic single-Droplet browser
+)
 ready = client.wait_for_browser_session(session["id"])
 downloads = client.create_downloads_access(ready["id"])
 # downloads contains the private URL, username, password, limit, and expiry.

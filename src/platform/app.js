@@ -32,6 +32,14 @@ function normalizeBrowserDisplayName(value) {
   return name || null;
 }
 
+function normalizeBrowserLifecycle(value) {
+  const lifecycle = String(value ?? 'resumable').trim().toLowerCase();
+  if (!['resumable', 'always_on'].includes(lifecycle)) {
+    throw Object.assign(new Error('Browser lifecycle must be `resumable` or `always_on`'), { status: 400 });
+  }
+  return lifecycle;
+}
+
 function normalizeAccountEmail(value) {
   const email = String(value ?? '').trim().toLowerCase();
   if (email.length > 255 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -274,6 +282,11 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     .session-panel.is-collapsed .collapse-sessions span { transform: rotate(180deg); }
     .panel-body { padding: 16px; }
     .create-row { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: start; gap: 8px; margin-bottom: 14px; }
+    .lifecycle-choice { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0,1fr) 138px; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px; background: rgba(89,55,25,.025); }
+    .lifecycle-choice-copy { min-width: 0; display: grid; gap: 2px; }
+    .lifecycle-choice-title { color: var(--text); font-size: 11px; font-weight: 800; }
+    .lifecycle-choice-hint { color: var(--text-dim); font-size: 10px; line-height: 1.35; }
+    .lifecycle-choice select { min-width: 0; height: 34px; min-height: 34px; padding-block: 5px; font-size: 11px; font-weight: 700; }
     .proxy-setup { grid-column: 1 / -1; border: 1px solid var(--border); border-radius: 8px; background: rgba(89,55,25,.025); }
     .proxy-setup summary { padding: 7px 10px; color: var(--text-dim); cursor: pointer; font-size: 11px; font-weight: 700; }
     .proxy-fields { display: grid; grid-template-columns: minmax(0,1.35fr) minmax(80px,.65fr); gap: 8px; padding: 2px 9px 9px; }
@@ -519,6 +532,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       .viewer-actions .toolbar > * { flex: 1; justify-content: center; }
       .create-row { grid-template-columns: 1fr; }
       .create-row button { width: 100%; }
+      .lifecycle-choice { grid-template-columns: 1fr; }
       .api-key-row { grid-template-columns: 1fr; }
       .api-key-item { grid-template-columns: 1fr; }
       .api-key-actions { justify-content: space-between; }
@@ -614,6 +628,16 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
             <div class="create-row">
               <input id="newSessionName" aria-label="Browser name" maxlength="120" placeholder="Name this browser (optional)">
               <button id="createSessionBtn" type="button">+ New browser</button>
+              <label class="lifecycle-choice" for="newSessionLifecycle">
+                <span class="lifecycle-choice-copy">
+                  <span class="lifecycle-choice-title">Browser type</span>
+                  <span class="lifecycle-choice-hint" id="newSessionLifecycleHint">Private 2 GB session disk · pause when shared Downloads are enabled.</span>
+                </span>
+                <select id="newSessionLifecycle" aria-describedby="newSessionLifecycleHint">
+                  <option value="resumable">Resumable</option>
+                  <option value="always_on">Always on</option>
+                </select>
+              </label>
               <details class="proxy-setup">
                 <summary>Webshare proxy (optional)</summary>
                 <div class="proxy-fields">
@@ -897,9 +921,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
   <dialog class="downloads-dialog" id="downloadsDialog">
     <div class="dialog-body">
       <h2>Downloads access</h2>
-      <p>${sharedDownloadsEnabled
-        ? 'Downloads use your private shared storage and remain available while browsers are paused.'
-        : 'Files stay on this running browser Droplet until shared storage is configured.'} Use the credentials below when asked to sign in.</p>
+      <p id="downloadsDialogDescription">Use the credentials below when asked to sign in.</p>
       <div class="downloads-ticket" aria-busy="false" id="downloadsTicket">
         <span class="downloads-ticket-kicker">Private file tray</span>
         <div class="downloads-credential">
@@ -918,9 +940,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           <button class="secondary downloads-copy" id="copyDownloadsPasswordBtn" type="button">Copy</button>
         </div>
       </div>
-      <p class="downloads-note">${sharedDownloadsEnabled
-        ? 'Your account has a 25 GiB fair-use allowance.'
-        : 'Uploads are limited to 5 GB per file.'} Existing names receive an automatic numbered suffix.</p>
+      <p class="downloads-note" id="downloadsDialogNote">Existing names receive an automatic numbered suffix.</p>
       <div class="message" id="downloadsMessage" aria-live="polite"></div>
       <div class="dialog-actions">
         <button class="secondary" type="button" id="closeDownloadsBtn">Close</button>
@@ -951,6 +971,8 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const sessionCount = document.getElementById('sessionCount');
     const createSessionBtn = document.getElementById('createSessionBtn');
     const newSessionName = document.getElementById('newSessionName');
+    const newSessionLifecycle = document.getElementById('newSessionLifecycle');
+    const newSessionLifecycleHint = document.getElementById('newSessionLifecycleHint');
     const newProxyDomain = document.getElementById('newProxyDomain');
     const newProxyPort = document.getElementById('newProxyPort');
     const newProxyUsername = document.getElementById('newProxyUsername');
@@ -964,6 +986,8 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const connectBtn = document.getElementById('connectBtn');
     const proxyBtn = document.getElementById('proxyBtn');
     const downloadsBtn = document.getElementById('downloadsBtn');
+    const downloadsDialogDescription = document.getElementById('downloadsDialogDescription');
+    const downloadsDialogNote = document.getElementById('downloadsDialogNote');
     const lifecycleBtn = document.getElementById('lifecycleBtn');
     const deleteSessionBtn = document.getElementById('deleteSessionBtn');
     const renameSessionBtn = document.getElementById('renameSessionBtn');
@@ -2349,6 +2373,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           method: 'POST',
           body: {
             display_name: newSessionName.value.trim() || null,
+            lifecycle: newSessionLifecycle.value,
             ...(hasStartupProxy ? { proxy: startupProxy } : {}),
           },
         });
@@ -2434,6 +2459,13 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     async function openDownloadsDialog() {
       const session = selectedSession();
       if (!session || !['ready', 'paused'].includes(session.status)) return;
+      const usesSharedDownloads = sharedDownloadsEnabled && !!session.volume;
+      downloadsDialogDescription.textContent = usesSharedDownloads
+        ? 'Files use your private shared storage and remain available while this browser is paused. Use the credentials below when asked to sign in.'
+        : 'Files stay on this running browser Droplet. Use the credentials below when asked to sign in.';
+      downloadsDialogNote.textContent = (usesSharedDownloads
+        ? 'Your account has a 25 GiB fair-use allowance.'
+        : 'Uploads are limited to 5 GB per file.') + ' Existing names receive an automatic numbered suffix.';
       state.downloadsTargetId = session.id;
       setDownloadsAccess(null);
       showMessage(downloadsMessage, 'Creating private access…');
@@ -2548,7 +2580,10 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       const session = selectedSession();
       if (!session || session.status === 'destroyed') return;
       state.deleteTargetId = session.id;
-      deleteDialogDescription.textContent = 'This permanently destroys “' + browserName(session) + '” and its private 2 GB Chrome session disk. Shared Downloads remain in your account.';
+      deleteDialogDescription.textContent = session.volume
+        ? 'This permanently destroys “' + browserName(session) + '” and its private 2 GB Chrome session disk.'
+          + (sharedDownloadsEnabled ? ' Shared Downloads remain in your account.' : ' Local Downloads will also be lost.')
+        : 'This permanently destroys “' + browserName(session) + '” and its always-on Droplet, including its Chrome state and local Downloads.';
       deleteConfirmInput.value = '';
       confirmDeleteBtn.disabled = true;
       deleteDialog.showModal();
@@ -2654,6 +2689,11 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     }
 
     createSessionBtn.addEventListener('click', createSession);
+    newSessionLifecycle.addEventListener('change', () => {
+      newSessionLifecycleHint.textContent = newSessionLifecycle.value === 'always_on'
+        ? 'Classic Droplet · local Downloads · no Pause.'
+        : 'Private 2 GB session disk · pause when shared Downloads are enabled.';
+    });
     newSessionName.addEventListener('keydown', event => {
       if (event.key === 'Enter') createSession();
     });
@@ -2850,6 +2890,7 @@ function normalizeRunSnapshot(snapshot, existing = {}) {
 
 export function createPlatformApp({ store, provisioner, controlChannel, config, downloadsHandler = null }) {
   const app = express();
+  const browserLifecycleOperations = new Set();
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: false }));
 
@@ -2909,6 +2950,12 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       return null;
     }
     return session;
+  }
+
+  function claimBrowserLifecycleOperation(sessionId) {
+    if (browserLifecycleOperations.has(sessionId)) return null;
+    browserLifecycleOperations.add(sessionId);
+    return () => browserLifecycleOperations.delete(sessionId);
   }
 
   async function startStoredCloudRun(req, session, task, parentRun = null) {
@@ -3192,6 +3239,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
   app.post('/api/browser-sessions', requireAuth, async (req, res, next) => {
     try {
       const now = nowIso();
+      const lifecycle = normalizeBrowserLifecycle(req.body.lifecycle);
       const requestedProxyUrl = Object.prototype.hasOwnProperty.call(req.body, 'proxy_url')
         ? req.body.proxy_url
         : config.browserProxy.url;
@@ -3223,23 +3271,25 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       let provisioned;
       let volume;
       try {
-        volume = await provisioner.createBrowserVolume(session, {
-          sizeGiB: config.digitalOcean.volumeSizeGiB,
-          region: session.region,
-        });
-        let sessionWithVolume;
-        try {
-          sessionWithVolume = await store.updateBrowserSession(session.id, {
-            volume_id: volume.volume_id,
-            volume_name: volume.volume_name,
-            volume_size_gib: volume.volume_size_gib,
-            updated_at: nowIso(),
+        let sessionForDroplet = session;
+        if (lifecycle === 'resumable') {
+          volume = await provisioner.createBrowserVolume(session, {
+            sizeGiB: config.digitalOcean.volumeSizeGiB,
+            region: session.region,
           });
-        } catch (error) {
-          await provisioner.destroyVolume(volume.volume_id).catch(() => {});
-          throw error;
+          try {
+            sessionForDroplet = await store.updateBrowserSession(session.id, {
+              volume_id: volume.volume_id,
+              volume_name: volume.volume_name,
+              volume_size_gib: volume.volume_size_gib,
+              updated_at: nowIso(),
+            });
+          } catch (error) {
+            await provisioner.destroyVolume(volume.volume_id).catch(() => {});
+            throw error;
+          }
         }
-        provisioned = await provisioner.createBrowserDroplet(sessionWithVolume, {
+        provisioned = await provisioner.createBrowserDroplet(sessionForDroplet, {
           providerApiKey: req.body.provider_api_key || session.connect_secret,
           proxyUrl,
         });
@@ -3279,7 +3329,10 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
         }).catch(() => {});
         throw error;
       }
-      await audit(req, 'browser_session.create', 'browser_session', session.id, { droplet_id: updated.droplet_id });
+      await audit(req, 'browser_session.create', 'browser_session', session.id, {
+        droplet_id: updated.droplet_id,
+        lifecycle,
+      });
       res.status(201).json({ browser_session: publicBrowserSession(updated) });
     } catch (e) {
       next(e);
@@ -3421,21 +3474,31 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
   app.post('/api/browser-sessions/:sessionId/pause', requireAuth, async (req, res, next) => {
     let reserved = false;
     let destroyConfirmed = false;
+    let releaseLifecycle = null;
     try {
       const session = await ownedBrowserSession(req, res);
       if (!session) return;
+      if (!session.volume_id) return jsonError(res, 409, 'This browser does not have persistent session storage');
       if (!config.downloads?.spaces?.enabled) {
         return jsonError(res, 503, 'Shared Downloads storage must be configured before browsers can be paused.');
       }
-      if (!session.volume_id) return jsonError(res, 409, 'This browser does not have persistent session storage');
       if (!['ready', 'pausing'].includes(session.status)) return jsonError(res, 409, 'Only a ready browser can be paused');
+      releaseLifecycle = claimBrowserLifecycleOperation(session.id);
+      if (!releaseLifecycle) return jsonError(res, 409, 'A browser lifecycle change is already in progress');
       const retrying = session.status === 'pausing';
       if (!retrying) {
-        await store.updateBrowserSession(session.id, { status: 'pausing', updated_at: nowIso() });
+        const claimed = await store.updateBrowserSessionIfStatus(session.id, 'ready', {
+          status: 'pausing',
+          updated_at: nowIso(),
+        });
+        if (!claimed) return jsonError(res, 409, 'Only a ready browser can be paused');
         reserved = true;
         const activeRuns = await activeRunsForSession(session);
         if (activeRuns.length) {
-          await store.updateBrowserSession(session.id, { status: 'ready', updated_at: nowIso() });
+          await store.updateBrowserSessionIfStatus(session.id, 'pausing', {
+            status: 'ready',
+            updated_at: nowIso(),
+          });
           reserved = false;
           return jsonError(res, 409, 'Abort the active browser run before pausing.', {
             active_run_ids: activeRuns.map(run => run.id),
@@ -3450,13 +3513,14 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
             .then(() => true)
             .catch(() => false);
           if (detached) {
-            const updated = await store.updateBrowserSession(session.id, {
+            const updated = await store.updateBrowserSessionIfStatus(session.id, 'pausing', {
               status: 'paused',
               droplet_id: null,
               public_ip: null,
               paused_at: nowIso(),
               updated_at: nowIso(),
             });
+            if (!updated) return jsonError(res, 409, 'The browser lifecycle changed while pausing');
             reserved = false;
             await audit(req, 'browser_session.pause', 'browser_session', session.id, {
               volume_id: session.volume_id,
@@ -3466,7 +3530,10 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
           }
         }
         if (!retrying) {
-          await store.updateBrowserSession(session.id, { status: 'ready', updated_at: nowIso() });
+          await store.updateBrowserSessionIfStatus(session.id, 'pausing', {
+            status: 'ready',
+            updated_at: nowIso(),
+          });
           reserved = false;
         }
         return jsonError(res, 409, 'Browser control is not connected; wait for it to become ready before pausing.');
@@ -3476,13 +3543,14 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       await provisioner.destroyDroplet(session.droplet_id);
       destroyConfirmed = true;
       await provisioner.waitForVolumeDetached(session.volume_id);
-      const updated = await store.updateBrowserSession(session.id, {
+      const updated = await store.updateBrowserSessionIfStatus(session.id, 'pausing', {
         status: 'paused',
         droplet_id: null,
         public_ip: null,
         paused_at: nowIso(),
         updated_at: nowIso(),
       });
+      if (!updated) throw Object.assign(new Error('The browser lifecycle changed while pausing'), { status: 409 });
       reserved = false;
       await audit(req, 'browser_session.pause', 'browser_session', session.id, { volume_id: session.volume_id });
       res.json({ browser_session: publicBrowserSession(updated) });
@@ -3492,18 +3560,28 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
         const recovered = await controlChannel.send(sessionId, 'pause.cancel', {}, 15_000)
           .then(() => true)
           .catch(() => false);
-        if (recovered) await store.updateBrowserSession(sessionId, { status: 'ready', updated_at: nowIso() }).catch(() => {});
+        if (recovered) {
+          await store.updateBrowserSessionIfStatus(sessionId, 'pausing', {
+            status: 'ready',
+            updated_at: nowIso(),
+          }).catch(() => {});
+        }
       }
       next(error);
+    } finally {
+      releaseLifecycle?.();
     }
   });
 
   app.post('/api/browser-sessions/:sessionId/resume', requireAuth, async (req, res, next) => {
+    let releaseLifecycle = null;
     try {
       const session = await ownedBrowserSession(req, res);
       if (!session) return;
       if (session.status !== 'paused') return jsonError(res, 409, 'Only a paused browser can be resumed');
       if (!session.volume_id) return jsonError(res, 409, 'Browser profile storage is missing');
+      releaseLifecycle = claimBrowserLifecycleOperation(session.id);
+      if (!releaseLifecycle) return jsonError(res, 409, 'A browser lifecycle change is already in progress');
 
       // Conditional claim so concurrent resume requests cannot both provision Droplets
       // against the same volume, then race the failure path back to `paused`.
@@ -3517,44 +3595,69 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       try {
         provisioned = await provisioner.createBrowserDroplet(resuming, {
           providerApiKey: session.connect_secret,
+          // The volume-backed proxy.json is authoritative after a resume.
           proxyUrl: '',
         });
       } catch (error) {
-        await store.updateBrowserSession(session.id, { status: 'paused', paused_at: nowIso(), updated_at: nowIso() });
+        await store.updateBrowserSessionIfStatus(session.id, 'resuming', {
+          status: 'paused',
+          paused_at: nowIso(),
+          updated_at: nowIso(),
+        });
         throw error;
       }
       let updated;
       try {
-        updated = await store.updateBrowserSession(session.id, {
+        updated = await store.updateBrowserSessionIfStatus(session.id, 'resuming', {
           status: provisioned.status || 'provisioning',
           droplet_id: provisioned.droplet_id || null,
           public_ip: provisioned.public_ip || null,
           updated_at: nowIso(),
         });
+        if (!updated) throw Object.assign(new Error('The browser lifecycle changed while resuming'), { status: 409 });
       } catch (error) {
         await provisioner.destroyDroplet(provisioned.droplet_id).catch(() => {});
         await provisioner.waitForVolumeDetached(session.volume_id).catch(() => {});
-        await store.updateBrowserSession(session.id, { status: 'paused', paused_at: nowIso(), updated_at: nowIso() });
+        await store.updateBrowserSessionIfStatus(session.id, 'resuming', {
+          status: 'paused',
+          paused_at: nowIso(),
+          updated_at: nowIso(),
+        }).catch(() => {});
         throw error;
       }
       await audit(req, 'browser_session.resume', 'browser_session', session.id, { droplet_id: updated.droplet_id });
       res.status(202).json({ browser_session: publicBrowserSession(updated) });
     } catch (error) {
       next(error);
+    } finally {
+      releaseLifecycle?.();
     }
   });
 
   app.delete('/api/browser-sessions/:sessionId', requireAuth, async (req, res, next) => {
+    let releaseLifecycle = null;
     try {
       const session = await ownedBrowserSession(req, res);
       if (!session) return;
-      await store.updateBrowserSession(session.id, { status: 'stopping', updated_at: nowIso() });
-      await provisioner.destroyDroplet(session.droplet_id);
-      if (session.volume_id) {
-        await provisioner.waitForVolumeDetached(session.volume_id);
-        await provisioner.destroyVolume(session.volume_id);
+      if (session.status === 'destroyed') return res.json({ browser_session: publicBrowserSession(session) });
+      if (['pausing', 'resuming'].includes(session.status)) {
+        return jsonError(res, 409, 'Wait for the current browser lifecycle change to finish before deleting');
       }
-      const updated = await store.updateBrowserSession(session.id, {
+      releaseLifecycle = claimBrowserLifecycleOperation(session.id);
+      if (!releaseLifecycle) return jsonError(res, 409, 'A browser lifecycle change is already in progress');
+      const deleting = session.status === 'stopping'
+        ? session
+        : await store.updateBrowserSessionIfStatus(session.id, session.status, {
+          status: 'stopping',
+          updated_at: nowIso(),
+        });
+      if (!deleting) return jsonError(res, 409, 'The browser lifecycle changed before deletion started');
+      await provisioner.destroyDroplet(deleting.droplet_id);
+      if (deleting.volume_id) {
+        await provisioner.waitForVolumeDetached(deleting.volume_id);
+        await provisioner.destroyVolume(deleting.volume_id);
+      }
+      const updated = await store.updateBrowserSessionIfStatus(session.id, 'stopping', {
         status: 'destroyed',
         droplet_id: null,
         public_ip: null,
@@ -3564,10 +3667,13 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
         paused_at: null,
         updated_at: nowIso(),
       });
+      if (!updated) throw Object.assign(new Error('The browser lifecycle changed while deleting'), { status: 409 });
       await audit(req, 'browser_session.destroy', 'browser_session', session.id);
       res.json({ browser_session: publicBrowserSession(updated) });
     } catch (e) {
       next(e);
+    } finally {
+      releaseLifecycle?.();
     }
   });
 
@@ -3600,10 +3706,11 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
     let session = await ownedBrowserSession(req, res);
     if (!session) return;
     session = await refreshProvisioningSession(session);
-    if (!config.downloads?.spaces?.enabled && (session.status !== 'ready' || !session.public_ip)) {
+    const usesSharedDownloads = config.downloads?.spaces?.enabled === true && Boolean(session.volume_id);
+    if (!usesSharedDownloads && (session.status !== 'ready' || !session.public_ip)) {
       return jsonError(res, 409, 'Browser session is not ready');
     }
-    if (config.downloads?.spaces?.enabled && !['ready', 'paused'].includes(session.status)) {
+    if (usesSharedDownloads && !['ready', 'paused'].includes(session.status)) {
       return jsonError(res, 409, 'Browser session is not ready');
     }
     if (['stopping', 'destroyed', 'failed'].includes(session.status)) return jsonError(res, 409, 'Browser session is not available');
@@ -3617,7 +3724,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       url: `https://${instanceHostname(session.id, config.instanceDomain)}/downloads/`,
       username: credentials.username,
       password: credentials.password,
-      upload_limit_bytes: config.downloads?.spaces?.enabled
+      upload_limit_bytes: usesSharedDownloads
         ? config.downloads.maxUploadBytes
         : DEFAULT_DOWNLOADS_UPLOAD_LIMIT_BYTES,
       expires_at: session.expires_at,
@@ -3841,13 +3948,18 @@ export async function cleanupExpiredBrowserSessions({ store, provisioner }) {
   const expired = await store.listExpiredBrowserSessions(nowIso());
   const cleaned = [];
   for (const session of expired) {
-    await store.updateBrowserSession(session.id, { status: 'stopping', updated_at: nowIso() });
-    await provisioner.destroyDroplet(session.droplet_id);
-    if (session.volume_id) {
-      await provisioner.waitForVolumeDetached(session.volume_id);
-      await provisioner.destroyVolume(session.volume_id);
+    if (['pausing', 'resuming'].includes(session.status)) continue;
+    const deleting = await store.updateBrowserSessionIfStatus(session.id, session.status, {
+      status: 'stopping',
+      updated_at: nowIso(),
+    });
+    if (!deleting) continue;
+    await provisioner.destroyDroplet(deleting.droplet_id);
+    if (deleting.volume_id) {
+      await provisioner.waitForVolumeDetached(deleting.volume_id);
+      await provisioner.destroyVolume(deleting.volume_id);
     }
-    cleaned.push(await store.updateBrowserSession(session.id, {
+    const destroyed = await store.updateBrowserSessionIfStatus(session.id, 'stopping', {
       status: 'destroyed',
       droplet_id: null,
       public_ip: null,
@@ -3856,7 +3968,8 @@ export async function cleanupExpiredBrowserSessions({ store, provisioner }) {
       volume_size_gib: null,
       paused_at: null,
       updated_at: nowIso(),
-    }));
+    });
+    if (destroyed) cleaned.push(destroyed);
   }
   return cleaned;
 }

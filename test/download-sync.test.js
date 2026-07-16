@@ -70,7 +70,7 @@ test('Chrome download sync uploads completed files and only then clears staging'
   }
 });
 
-test('download sync discards incomplete crash leftovers instead of uploading partial files', async () => {
+test('download sync preserves nonempty crash leftovers, removes empty records, and clears temp metadata', async () => {
   const stagingDir = await fs.mkdtemp(path.join(os.tmpdir(), 'webbrain-download-recover-'));
   await fs.writeFile(path.join(stagingDir, 'guid-incomplete'), 'partial');
   await fs.writeFile(path.join(stagingDir, 'guid-incomplete.json'), JSON.stringify({
@@ -78,6 +78,14 @@ test('download sync discards incomplete crash leftovers instead of uploading par
     filename: 'partial.bin',
     completed: false,
   }));
+  await fs.writeFile(path.join(stagingDir, 'guid-orphan'), 'orphan-data');
+  await fs.writeFile(path.join(stagingDir, 'guid-empty'), '');
+  await fs.writeFile(path.join(stagingDir, 'guid-empty.json'), JSON.stringify({
+    guid: 'guid-empty',
+    filename: 'empty.bin',
+    completed: false,
+  }));
+  await fs.writeFile(path.join(stagingDir, 'guid-incomplete.json.123.tmp'), 'stale metadata');
   let uploaded = false;
   const sync = new ChromeDownloadSync({
     stagingDir,
@@ -87,7 +95,11 @@ test('download sync discards incomplete crash leftovers instead of uploading par
   });
   try {
     await sync.start(fakeCdp());
-    assert.deepEqual(await fs.readdir(stagingDir), []);
+    assert.deepEqual((await fs.readdir(stagingDir)).sort(), [
+      'guid-incomplete',
+      'guid-incomplete.json',
+      'guid-orphan',
+    ]);
     assert.equal(uploaded, false);
   } finally {
     sync.close();

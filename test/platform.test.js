@@ -841,6 +841,54 @@ test('pause stays disabled until shared Downloads storage is configured', async 
   }
 });
 
+test('always-on browser creation skips the profile volume and keeps local Downloads semantics', async () => {
+  const ctx = await startPlatform({
+    WEBBRAIN_SPACES_ENDPOINT: 'https://nyc3.digitaloceanspaces.com',
+    WEBBRAIN_SPACES_ACCESS_KEY: 'access',
+    WEBBRAIN_SPACES_SECRET_KEY: 'secret',
+    WEBBRAIN_SPACES_BUCKET: 'downloads',
+  }, { downloadsHandler: {} });
+  try {
+    const cookie = await register(ctx.base, 'always-on@example.com');
+    const invalid = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ lifecycle: 'sometimes' }),
+    });
+    assert.equal(invalid.status, 400);
+    assert.match(invalid.body.error, /resumable.*always_on/);
+
+    const created = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ display_name: 'Classic', lifecycle: 'always_on' }),
+    });
+    assert.equal(created.status, 201);
+    assert.equal(created.body.browser_session.volume, null);
+    assert.equal(ctx.provisioner.createdVolumes.length, 0);
+    assert.equal(ctx.provisioner.created.length, 1);
+    assert.equal(ctx.provisioner.created[0].volume_id, null);
+
+    const access = await request(ctx.base, `/api/browser-sessions/${created.body.browser_session.id}/downloads-access`, {
+      method: 'POST',
+      headers: { cookie },
+      body: '{}',
+    });
+    assert.equal(access.status, 200);
+    assert.equal(access.body.upload_limit_bytes, 5 * 1024 * 1024 * 1024);
+
+    const paused = await request(ctx.base, `/api/browser-sessions/${created.body.browser_session.id}/pause`, {
+      method: 'POST',
+      headers: { cookie },
+      body: '{}',
+    });
+    assert.equal(paused.status, 409);
+    assert.match(paused.body.error, /does not have persistent session storage/);
+  } finally {
+    await ctx.platform.close();
+  }
+});
+
 test('browser create destroys the profile volume when droplet provisioning fails', async () => {
   const ctx = await startPlatform();
   try {
@@ -920,38 +968,119 @@ test('concurrent resume requests only provision one droplet for a paused browser
     assert.equal(paused.status, 200);
     assert.equal(paused.body.browser_session.status, 'paused');
 
-    const createStarts = [];
+    let signalCreateStarted;
+    let releaseCreate;
+    const createStarted = new Promise(resolve => { signalCreateStarted = resolve; });
+    const createGate = new Promise(resolve => { releaseCreate = resolve; });
     const originalCreate = ctx.provisioner.createBrowserDroplet.bind(ctx.provisioner);
     ctx.provisioner.createBrowserDroplet = async (...args) => {
-      let release;
-      createStarts.push(new Promise(resolve => { release = resolve; }));
-      // Hold the first (and only) claim long enough for the second request to race the status check.
-      await new Promise(resolve => setTimeout(resolve, 50));
-      release();
+      signalCreateStarted();
+      await createGate;
       return originalCreate(...args);
     };
 
-    const [first, second] = await Promise.all([
+    const firstPromise = request(ctx.base, `/api/browser-sessions/${sessionId}/resume`, {
+      method: 'POST',
+      headers: { cookie },
+      body: '{}',
+    });
+    await createStarted;
+    const [second, deleting] = await Promise.all([
       request(ctx.base, `/api/browser-sessions/${sessionId}/resume`, {
         method: 'POST',
         headers: { cookie },
         body: '{}',
       }),
-      request(ctx.base, `/api/browser-sessions/${sessionId}/resume`, {
-        method: 'POST',
+      request(ctx.base, `/api/browser-sessions/${sessionId}`, {
+        method: 'DELETE',
         headers: { cookie },
-        body: '{}',
       }),
     ]);
+    assert.equal(second.status, 409);
+    assert.equal(deleting.status, 409);
+    assert.equal((await ctx.store.getBrowserSession(sessionId)).status, 'resuming');
+    releaseCreate();
+    const first = await firstPromise;
 
-    const statuses = [first.status, second.status].sort();
-    assert.deepEqual(statuses, [202, 409]);
+    assert.equal(first.status, 202);
     assert.equal(ctx.provisioner.created.length, 2); // create + one resume
-    const winner = first.status === 202 ? first : second;
-    assert.equal(winner.body.browser_session.status, 'ready');
+    assert.equal(first.body.browser_session.status, 'ready');
     const after = await ctx.store.getBrowserSession(sessionId);
     assert.equal(after.status, 'ready');
-    assert.equal(after.droplet_id, winner.body.browser_session.droplet_id || after.droplet_id);
+    assert.equal(after.droplet_id, first.body.browser_session.droplet_id || after.droplet_id);
+  } finally {
+    ws?.close();
+    await ctx.platform.close();
+  }
+});
+
+test('concurrent pause and delete requests cannot overwrite a lifecycle transition', async () => {
+  const ctx = await startPlatform({
+    WEBBRAIN_SPACES_ENDPOINT: 'https://nyc3.digitaloceanspaces.com',
+    WEBBRAIN_SPACES_ACCESS_KEY: 'access',
+    WEBBRAIN_SPACES_SECRET_KEY: 'secret',
+    WEBBRAIN_SPACES_BUCKET: 'downloads',
+  }, { downloadsHandler: {} });
+  let ws = null;
+  try {
+    const cookie = await register(ctx.base, 'pause-race@example.com');
+    const created = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: '{}',
+    });
+    const sessionId = created.body.browser_session.id;
+    const storedSession = await ctx.store.getBrowserSession(sessionId);
+    let pausePrepareId = '';
+
+    ws = new WebSocket(`${ctx.wsBase}/droplet/control?session_token=${encodeURIComponent(storedSession.connect_secret)}`);
+    await new Promise(resolve => ws.once('open', resolve));
+    ws.on('message', raw => {
+      const msg = JSON.parse(raw.toString('utf8'));
+      if (msg.type === 'hello') return;
+      if (msg.action === 'health') {
+        ws.send(JSON.stringify({ id: msg.id, ok: true, result: { ok: true, extension_connected: true } }));
+      } else if (msg.action === 'pause.prepare') {
+        pausePrepareId = msg.id;
+      }
+    });
+
+    for (let i = 0; i < 50; i += 1) {
+      const ready = await request(ctx.base, `/api/browser-sessions/${sessionId}`, { headers: { cookie } });
+      if (ready.body.browser_session.status === 'ready' && ready.body.browser_session.runtime_ready !== false) break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+
+    const firstPause = request(ctx.base, `/api/browser-sessions/${sessionId}/pause`, {
+      method: 'POST',
+      headers: { cookie },
+      body: '{}',
+    });
+    for (let i = 0; i < 50 && !pausePrepareId; i += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.notEqual(pausePrepareId, '');
+
+    const [secondPause, deleting] = await Promise.all([
+      request(ctx.base, `/api/browser-sessions/${sessionId}/pause`, {
+        method: 'POST',
+        headers: { cookie },
+        body: '{}',
+      }),
+      request(ctx.base, `/api/browser-sessions/${sessionId}`, {
+        method: 'DELETE',
+        headers: { cookie },
+      }),
+    ]);
+    assert.equal(secondPause.status, 409);
+    assert.equal(deleting.status, 409);
+    assert.equal((await ctx.store.getBrowserSession(sessionId)).status, 'pausing');
+
+    ws.send(JSON.stringify({ id: pausePrepareId, ok: true, result: { prepared: true } }));
+    const paused = await firstPause;
+    assert.equal(paused.status, 200);
+    assert.equal(paused.body.browser_session.status, 'paused');
+    assert.equal((await ctx.store.getBrowserSession(sessionId)).status, 'paused');
   } finally {
     ws?.close();
     await ctx.platform.close();
@@ -1062,6 +1191,10 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /browser-boot 1\.25s/);
     assert.match(res.text, /id="viewerFrames"/);
     assert.match(res.text, /id="newSessionName"/);
+    assert.match(res.text, /id="newSessionLifecycle"/);
+    assert.match(res.text, /value="resumable">Resumable/);
+    assert.match(res.text, /value="always_on">Always on/);
+    assert.match(res.text, /lifecycle: newSessionLifecycle\.value/);
     assert.match(res.text, /id="newProxyDomain"/);
     assert.match(res.text, /id="newProxyPort"/);
     assert.match(res.text, /id="newProxyUsername"/);
@@ -1079,6 +1212,7 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /method: 'PATCH'/);
     assert.match(res.text, /display_name/);
     assert.match(res.text, /Type I confirm to delete/);
+    assert.match(res.text, /always-on Droplet, including its Chrome state and local Downloads/);
     assert.match(res.text, /deleteConfirmInput\.value !== 'I confirm'/);
     assert.doesNotMatch(res.text, /confirm\('Delete browser session/);
     assert.match(res.text, /collapseSessionsBtn/);
@@ -1278,6 +1412,7 @@ test('instance hostnames round-trip browser session ids', () => {
 
 test('instance subdomains proxy HTTP and WebSocket traffic to the session droplet', async () => {
   const upstreamRequests = [];
+  let sharedDownloadsRequests = 0;
   const upstream = http.createServer((req, res) => {
     upstreamRequests.push({
       method: req.method,
@@ -1310,7 +1445,18 @@ test('instance subdomains proxy HTTP and WebSocket traffic to the session drople
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   });
-  const platform = createPlatformServer({ store, provisioner: new NullProvisioner(), config });
+  const platform = createPlatformServer({
+    store,
+    provisioner: new NullProvisioner(),
+    config,
+    downloadsHandler: {
+      async handleRequest(req, res) {
+        sharedDownloadsRequests += 1;
+        res.writeHead(500);
+        res.end('legacy Downloads must stay on the Droplet');
+      },
+    },
+  });
   const address = await platform.listen(0, '127.0.0.1');
 
   try {
@@ -1393,6 +1539,7 @@ test('instance subdomains proxy HTTP and WebSocket traffic to the session drople
     });
     assert.equal(authorizedDownloads.status, 200);
     assert.equal(authorizedDownloads.body, 'proxied');
+    assert.equal(sharedDownloadsRequests, 0);
     const proxiedDownloads = upstreamRequests.at(-1);
     assert.equal(proxiedDownloads.authorization, undefined);
     assert.equal(verifyDownloadsProxyRequest('secret', {
@@ -1568,6 +1715,13 @@ test('volume-backed cloud-init mounts the fixed profile disk and stages Download
     },
     config,
   });
+  const alwaysOnCloudInit = renderCloudInit({
+    session: {
+      id: 'bs_alwayson',
+      connect_secret: 'connect-secret',
+    },
+    config,
+  });
 
   assert.match(cloudInit, /scsi-0DO_Volume_wb-profile-bs-volume/);
   assert.match(cloudInit, /WEBBRAIN_PROFILE_DIR='\/mnt\/webbrain-profile\/chrome'/);
@@ -1576,6 +1730,7 @@ test('volume-backed cloud-init mounts the fixed profile disk and stages Download
   assert.match(cloudInit, /WEBBRAIN_BROWSER_DISK_CACHE_DIR='\/var\/cache\/webbrain-chrome'/);
   assert.match(cloudInit, /WEBBRAIN_DOWNLOADS_STAGING_DIR='\/var\/lib\/webbrain\/download-staging'/);
   assert.match(cloudInit, /WEBBRAIN_DOWNLOADS_SYNC_ENABLED='true'/);
+  assert.match(alwaysOnCloudInit, /WEBBRAIN_DOWNLOADS_SYNC_ENABLED='false'/);
   assert.match(cloudInit, /RequiresMountsFor=\/mnt\/webbrain-profile/);
   assert.match(cloudInit, /\/usr\/local\/sbin\/webbrain-mount-profile/);
   assert.doesNotMatch(cloudInit, /mkfs/);

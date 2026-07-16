@@ -20,7 +20,7 @@ export function renderCloudInit({ session, config, providerApiKey = '', proxyUrl
   const profileMount = config.droplet.profileMount || '/mnt/webbrain-profile';
   const profileDir = hasProfileVolume ? `${profileMount}/chrome` : `${appDir}/.webbrain-sessions/${session.id}`;
   const proxyStatePath = hasProfileVolume ? `${profileMount}/proxy.json` : config.browserProxy.statePath;
-  const downloadsSyncEnabled = config.downloads?.spaces?.enabled === true;
+  const downloadsSyncEnabled = hasProfileVolume && config.downloads?.spaces?.enabled === true;
   const downloadsStagingDir = '/var/lib/webbrain/download-staging';
   const profileMountScript = hasProfileVolume ? `#!/usr/bin/env bash
 set -euo pipefail

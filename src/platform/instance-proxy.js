@@ -70,7 +70,10 @@ export function createInstanceProxy({ store, domain, targetPort = 6081, download
       return true;
     }
 
-    if (isDownloads && downloadsHandler) {
+    // Legacy and explicitly always-on browsers have no profile volume. Keep
+    // their Downloads on the running Droplet even when shared storage is
+    // configured for resumable browsers.
+    if (isDownloads && downloadsHandler && session.volume_id) {
       await downloadsHandler.handleRequest(req, res, { userId: session.user_id });
       return true;
     }

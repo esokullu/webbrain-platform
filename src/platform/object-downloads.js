@@ -53,15 +53,19 @@ export function createObjectDownloadsHandler({
       const occupied = new Set(objects.map(item => item.relativeKey));
       const normalizedIdempotencyKey = normalizeIdempotencyKey(idempotencyKey);
       const markerKey = normalizedIdempotencyKey ? `${prefix}${INTERNAL_PREFIX}${normalizedIdempotencyKey}.json` : '';
-      let marker = markerKey ? await readUploadMarker(objectStore, markerKey) : null;
-      let finalPath = marker?.requested === requested
+      const marker = markerKey ? await readUploadMarker(objectStore, markerKey) : null;
+      const committedMarker = marker?.committed === true
+          && marker.requested === requested
           && typeof marker.path === 'string'
           && parseRelativePath(marker.path)?.length
-        ? marker.path
-        : availableObjectName(requested, occupied);
-      if (markerKey && marker?.requested === requested && marker.path === finalPath) {
+        ? marker
+        : null;
+      if (committedMarker) {
+        const finalPath = committedMarker.path;
         const existing = await objectStore.head(prefix + finalPath);
-        if (existing) {
+        if (existing
+            && Number(existing.size || 0) === Number(committedMarker.size || 0)
+            && (!committedMarker.etag || !existing.etag || committedMarker.etag === existing.etag)) {
           stream.resume?.();
           return {
             name: path.posix.basename(finalPath),
@@ -73,16 +77,9 @@ export function createObjectDownloadsHandler({
           };
         }
       }
+      const finalPath = availableObjectName(requested, occupied);
       if (availableBytes <= 0 || (declared != null && declared > availableBytes)) {
         throw httpError(507, `Downloads quota of ${formatBytes(quota)} has been reached.`);
-      }
-      if (markerKey && (!marker || marker.path !== finalPath || marker.requested !== requested)) {
-        marker = { requested, path: finalPath };
-        const body = Buffer.from(JSON.stringify(marker));
-        await objectStore.put(markerKey, Readable.from(body), {
-          contentLength: body.length,
-          contentType: 'application/json',
-        });
       }
       const limiter = limitStream(Math.min(uploadLimit, availableBytes));
       const upload = objectStore.put(prefix + finalPath, limiter, {
@@ -95,6 +92,19 @@ export function createObjectDownloadsHandler({
       stream.pipe(limiter);
       try {
         const result = await upload;
+        if (markerKey) {
+          const body = Buffer.from(JSON.stringify({
+            committed: true,
+            requested,
+            path: finalPath,
+            size: limiter.bytesRead,
+            etag: result?.etag || null,
+          }));
+          await objectStore.put(markerKey, Readable.from(body), {
+            contentLength: body.length,
+            contentType: 'application/json',
+          });
+        }
         return {
           name: path.posix.basename(finalPath),
           path: finalPath,

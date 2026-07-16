@@ -22,6 +22,7 @@ require_once __DIR__ . '/WebBrainClient.php';
 $client = new WebBrainClient(getenv('WEBBRAIN_API_KEY') ?: '');
 $session = $client->createBrowserSession([
     'display_name' => 'Research',
+    'lifecycle' => 'resumable', // or 'always_on' for a classic single-Droplet browser
 ]);
 $ready = $client->waitForBrowserSession($session['id']);
 $downloads = $client->createDownloadsAccess($ready['id']);

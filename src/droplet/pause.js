@@ -43,7 +43,17 @@ export async function prepareDropletForPause({
   return { ready_to_detach: true };
 }
 
-export async function cancelDropletPause({ execFileImpl = execFile } = {}) {
+export async function cancelDropletPause({
+  profileMount = process.env.WEBBRAIN_PROFILE_MOUNT || '',
+  execFileImpl = execFile,
+} = {}) {
+  if (!profileMount) {
+    throw Object.assign(new Error('This browser does not have a persistent profile volume.'), { status: 409 });
+  }
+  const mounted = await execFileImpl('mountpoint', ['-q', profileMount]).then(() => true, () => false);
+  if (!mounted) await execFileImpl('mount', [profileMount]);
+  await execFileImpl('mountpoint', ['-q', profileMount]);
   await execFileImpl('systemctl', ['start', 'webbrain-browser.service']);
+  await execFileImpl('systemctl', ['is-active', '--quiet', 'webbrain-browser.service']);
   return { resumed: true };
 }

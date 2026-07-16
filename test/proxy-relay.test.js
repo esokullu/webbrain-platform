@@ -7,7 +7,7 @@ import path from 'node:path';
 import { Server as ProxyChainServer } from 'proxy-chain';
 import { BrowserProxyRelay } from '../src/droplet/proxy-relay.js';
 import { DropletControlClient } from '../src/droplet/control-client.js';
-import { prepareDropletForPause } from '../src/droplet/pause.js';
+import { cancelDropletPause, prepareDropletForPause } from '../src/droplet/pause.js';
 import { normalizeProxyUrl, proxyUrlFromParts, publicProxyEndpoint } from '../src/shared/proxy.js';
 
 async function proxyRequest(port, url = 'http://exit.test/ip') {
@@ -123,6 +123,29 @@ test('pause preparation refuses staged downloads and otherwise stops, flushes, a
     payload: { test: 1 },
     prepared: true,
   });
+});
+
+test('pause cancellation remounts and verifies the profile before restarting Chrome', async () => {
+  const commands = [];
+  let mountChecks = 0;
+  const resumed = await cancelDropletPause({
+    profileMount: '/mnt/webbrain-profile',
+    execFileImpl: async (command, args) => {
+      commands.push([command, args]);
+      if (command === 'mountpoint') {
+        mountChecks += 1;
+        if (mountChecks === 1) throw new Error('not mounted');
+      }
+    },
+  });
+  assert.deepEqual(resumed, { resumed: true });
+  assert.deepEqual(commands, [
+    ['mountpoint', ['-q', '/mnt/webbrain-profile']],
+    ['mount', ['/mnt/webbrain-profile']],
+    ['mountpoint', ['-q', '/mnt/webbrain-profile']],
+    ['systemctl', ['start', 'webbrain-browser.service']],
+    ['systemctl', ['is-active', '--quiet', 'webbrain-browser.service']],
+  ]);
 });
 
 test('droplet control forwards run metadata and clarification responses', async () => {

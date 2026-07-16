@@ -23,6 +23,7 @@ const client = new WebBrainClient({
 
 const session = await client.createBrowserSession({
   display_name: 'Research',
+  lifecycle: 'resumable', // or 'always_on' for a classic single-Droplet browser
 });
 const ready = await client.waitForBrowserSession(session.id);
 const downloads = await client.createDownloadsAccess(ready.id);

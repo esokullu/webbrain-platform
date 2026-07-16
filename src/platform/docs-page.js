@@ -5,7 +5,7 @@ const EXAMPLES = {
 SESSION_ID=$(curl -sS -X POST https://webbrain.cloud/api/browser-sessions \\
   -H "Authorization: Bearer $WEBBRAIN_API_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{}' | jq -r '.browser_session.id')
+  -d '{"lifecycle":"resumable"}' | jq -r '.browser_session.id')
 
 # 2. Wait for the extension bridge
 until [ "$(curl -sS \\
@@ -345,9 +345,9 @@ export function docsPage() {
         <section class="docs-section" id="sessions">
           <p class="section-kicker">Lifecycle</p>
           <h2>Browser sessions</h2>
-          <p>A session keeps its Chrome profile on a fixed private 2 GiB volume attached to its cloud machine. Create it, poll until <span class="inline-code">runtime_ready</span> is true, then start runs. After shared Downloads storage is configured, pause it to destroy the billable Droplet while retaining the profile; resume it to attach that volume to a new Droplet. There is no automatic disk expansion.</p>
+          <p>Resumable sessions keep Chrome on a fixed private 2 GiB volume and can be paused after shared Downloads storage is configured. Always-on sessions keep Chrome and Downloads on one running Droplet and cannot be paused. Create either type, poll until <span class="inline-code">runtime_ready</span> is true, then start runs. There is no automatic disk expansion.</p>
           <div class="endpoint-list">
-            <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions</code><span>Create a browser.</span></div>
+            <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions</code><span>Create a resumable browser by default, or pass <code>lifecycle: "always_on"</code>.</span></div>
             <div class="endpoint"><span class="method">GET</span><code>/api/browser-sessions</code><span>List your sessions.</span></div>
             <div class="endpoint"><span class="method">GET</span><code>/api/browser-sessions/:sessionId</code><span>Read readiness.</span></div>
             <div class="endpoint"><span class="method">PATCH</span><code>/api/browser-sessions/:sessionId</code><span>Set its display name.</span></div>
