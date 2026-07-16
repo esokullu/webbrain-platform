@@ -22,6 +22,7 @@ require_once __DIR__ . '/WebBrainClient.php';
 $client = new WebBrainClient(getenv('WEBBRAIN_API_KEY') ?: '');
 $session = $client->createBrowserSession([
     'display_name' => 'Research',
+    'lifecycle' => 'resumable', // or 'always_on' for a classic single-Droplet browser
 ]);
 $ready = $client->waitForBrowserSession($session['id']);
 $downloads = $client->createDownloadsAccess($ready['id']);
@@ -59,6 +60,16 @@ print_r($client->waitForRun($ready['id'], $followUp['run_id'])['result']);
 
 `continueRun` creates a child run with `parent_run_id` and reuses the same tab
 and WebBrain conversation. Append later turns to the newest child run.
+
+Pause destroys the Droplet but retains the fixed 2 GiB Chrome profile volume;
+resume attaches it to a new Droplet. Shared Downloads stay available:
+
+```php
+$client->pauseBrowserSession($ready['id']);
+$client->listDownloads($ready['id']);
+$client->resumeBrowserSession($ready['id']);
+$client->waitForBrowserSession($ready['id']);
+```
 
 ## Downloads transfers
 
@@ -121,6 +132,8 @@ $run = $client->createRun($session['id'], 'Return the title and visible links', 
 - `deleteBrowserProxy($sessionId)`
 - `waitForBrowserSession($sessionId, ...)`
 - `deleteBrowserSession($sessionId)`
+- `pauseBrowserSession($sessionId)`
+- `resumeBrowserSession($sessionId)`
 - `createRun($sessionId, $task, $options)`
 - `getRun($sessionId, $runId)`
 - `continueRun($sessionId, $runId, $task, $options)`

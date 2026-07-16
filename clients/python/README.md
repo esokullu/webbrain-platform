@@ -19,7 +19,10 @@ import os
 from webbrain_client import WebBrainClient
 
 client = WebBrainClient(os.environ["WEBBRAIN_API_KEY"])
-session = client.create_browser_session(display_name="Research")
+session = client.create_browser_session(
+    display_name="Research",
+    lifecycle="resumable",  # or "always_on" for a classic single-Droplet browser
+)
 ready = client.wait_for_browser_session(session["id"])
 downloads = client.create_downloads_access(ready["id"])
 # downloads contains the private URL, username, password, limit, and expiry.
@@ -58,6 +61,16 @@ print(client.wait_for_run(ready["id"], follow_up["run_id"])["result"])
 
 `continue_run` creates a child run with `parent_run_id` and reuses the same tab
 and WebBrain conversation. Append later turns to the newest child run.
+
+Pause destroys the Droplet but retains the fixed 2 GiB Chrome profile volume;
+resume attaches it to a new Droplet. Shared Downloads stay available:
+
+```python
+client.pause_browser_session(ready["id"])
+client.list_downloads(ready["id"])
+client.resume_browser_session(ready["id"])
+client.wait_for_browser_session(ready["id"])
+```
 
 ## Downloads transfers
 
@@ -119,6 +132,8 @@ run = client.create_run(
 - `delete_browser_proxy(session_id)`
 - `wait_for_browser_session(session_id, ...)`
 - `delete_browser_session(session_id)`
+- `pause_browser_session(session_id)`
+- `resume_browser_session(session_id)`
 - `create_run(session_id, task, ...)`
 - `get_run(session_id, run_id)`
 - `continue_run(session_id, run_id, task, ...)`

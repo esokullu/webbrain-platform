@@ -9,10 +9,10 @@ Small, dependency-free clients for the browser automation API at
 | Python | [`python/README.md`](python/README.md) | Python 3.9+ |
 | PHP | [`php/README.md`](php/README.md) | PHP 8.1+ with cURL |
 
-Each client supports browser-session creation and deletion, readiness polling,
+Each client supports browser-session creation, pause, resume, and deletion, readiness polling,
 startup and live proxy assignment, run creation and polling, structured output,
 finished-run follow-up turns, aborting, signed noVNC links, and private
-Downloads access.
+Downloads access that remains available while browsers are paused.
 All three clients also provide streaming Downloads listing, upload, full-file
 download, and byte-range download helpers, with collision-safe server naming
 and no-overwrite local saves by default.

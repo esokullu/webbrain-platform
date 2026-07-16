@@ -28,6 +28,7 @@ function normalizeBrowserSession(row) {
     ...row,
     proxy_enabled: Boolean(row.proxy_enabled),
     proxy_updated_at: fromMysqlDate(row.proxy_updated_at),
+    paused_at: fromMysqlDate(row.paused_at),
     expires_at: fromMysqlDate(row.expires_at),
     created_at: fromMysqlDate(row.created_at),
     updated_at: fromMysqlDate(row.updated_at),
@@ -88,6 +89,24 @@ export class MySqlStore {
       ['proxy_updated_at', 'ALTER TABLE browser_sessions ADD COLUMN proxy_updated_at DATETIME NULL AFTER proxy_endpoint'],
     ];
     for (const [column, alter] of browserProxyColumns) {
+      const [rows] = await this.pool.execute(
+        `SELECT 1
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'browser_sessions'
+           AND COLUMN_NAME = :column
+         LIMIT 1`,
+        { column }
+      );
+      if (!rows.length) await this.pool.query(alter);
+    }
+    const browserVolumeColumns = [
+      ['volume_id', 'ALTER TABLE browser_sessions ADD COLUMN volume_id VARCHAR(64) NULL AFTER size'],
+      ['volume_name', 'ALTER TABLE browser_sessions ADD COLUMN volume_name VARCHAR(128) NULL AFTER volume_id'],
+      ['volume_size_gib', 'ALTER TABLE browser_sessions ADD COLUMN volume_size_gib INT NULL AFTER volume_name'],
+      ['paused_at', 'ALTER TABLE browser_sessions ADD COLUMN paused_at DATETIME NULL AFTER proxy_updated_at'],
+    ];
+    for (const [column, alter] of browserVolumeColumns) {
       const [rows] = await this.pool.execute(
         `SELECT 1
          FROM information_schema.COLUMNS
@@ -277,14 +296,18 @@ export class MySqlStore {
   async createBrowserSession(row) {
     await this.pool.execute(
       `INSERT INTO browser_sessions
-       (id,user_id,display_name,status,droplet_id,public_ip,region,size,connect_secret,proxy_enabled,proxy_endpoint,proxy_updated_at,expires_at,created_at,updated_at)
-       VALUES (:id,:user_id,:display_name,:status,:droplet_id,:public_ip,:region,:size,:connect_secret,:proxy_enabled,:proxy_endpoint,:proxy_updated_at,:expires_at,:created_at,:updated_at)`,
+       (id,user_id,display_name,status,droplet_id,public_ip,region,size,volume_id,volume_name,volume_size_gib,connect_secret,proxy_enabled,proxy_endpoint,proxy_updated_at,paused_at,expires_at,created_at,updated_at)
+       VALUES (:id,:user_id,:display_name,:status,:droplet_id,:public_ip,:region,:size,:volume_id,:volume_name,:volume_size_gib,:connect_secret,:proxy_enabled,:proxy_endpoint,:proxy_updated_at,:paused_at,:expires_at,:created_at,:updated_at)`,
       {
         ...row,
         display_name: row.display_name || null,
         proxy_enabled: row.proxy_enabled ? 1 : 0,
         proxy_endpoint: row.proxy_endpoint || null,
         proxy_updated_at: toMysqlDate(row.proxy_updated_at),
+        volume_id: row.volume_id || null,
+        volume_name: row.volume_name || null,
+        volume_size_gib: row.volume_size_gib || null,
+        paused_at: toMysqlDate(row.paused_at),
         expires_at: toMysqlDate(row.expires_at),
         created_at: toMysqlDate(row.created_at),
         updated_at: toMysqlDate(row.updated_at),
@@ -311,10 +334,47 @@ export class MySqlStore {
     const assignments = fields.map(k => `${k} = :${k}`).join(', ');
     const values = { id, ...patch };
     if ('proxy_enabled' in values) values.proxy_enabled = values.proxy_enabled ? 1 : 0;
-    for (const key of ['proxy_updated_at', 'expires_at', 'created_at', 'updated_at']) {
+    for (const key of ['proxy_updated_at', 'paused_at', 'expires_at', 'created_at', 'updated_at']) {
       if (values[key]) values[key] = toMysqlDate(values[key]);
     }
     await this.pool.execute(`UPDATE browser_sessions SET ${assignments} WHERE id = :id`, values);
+    return await this.getBrowserSession(id);
+  }
+
+  /**
+   * Atomically apply `patch` only when the session's current status matches
+   * `expectedStatus`. Returns null when the row exists but the status does not match.
+   */
+  async updateBrowserSessionIfStatus(id, expectedStatus, patch) {
+    const fields = Object.keys(patch).filter(k => patch[k] !== undefined);
+    if (!fields.length) {
+      const current = await this.getBrowserSession(id);
+      if (!current) {
+        const e = new Error('Browser session not found');
+        e.status = 404;
+        throw e;
+      }
+      return current.status === expectedStatus ? current : null;
+    }
+    const assignments = fields.map(k => `${k} = :${k}`).join(', ');
+    const values = { id, expectedStatus, ...patch };
+    if ('proxy_enabled' in values) values.proxy_enabled = values.proxy_enabled ? 1 : 0;
+    for (const key of ['proxy_updated_at', 'paused_at', 'expires_at', 'created_at', 'updated_at']) {
+      if (values[key]) values[key] = toMysqlDate(values[key]);
+    }
+    const [result] = await this.pool.execute(
+      `UPDATE browser_sessions SET ${assignments} WHERE id = :id AND status = :expectedStatus`,
+      values
+    );
+    if (!result.affectedRows) {
+      const current = await this.getBrowserSession(id);
+      if (!current) {
+        const e = new Error('Browser session not found');
+        e.status = 404;
+        throw e;
+      }
+      return null;
+    }
     return await this.getBrowserSession(id);
   }
 

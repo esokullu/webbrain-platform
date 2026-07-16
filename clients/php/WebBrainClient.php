@@ -108,6 +108,16 @@ final class WebBrainClient
         return $this->request('DELETE', '/api/browser-sessions/' . self::id($sessionId))['browser_session'];
     }
 
+    public function pauseBrowserSession(string $sessionId): array
+    {
+        return $this->request('POST', '/api/browser-sessions/' . self::id($sessionId) . '/pause', [])['browser_session'];
+    }
+
+    public function resumeBrowserSession(string $sessionId): array
+    {
+        return $this->request('POST', '/api/browser-sessions/' . self::id($sessionId) . '/resume', [])['browser_session'];
+    }
+
     public function createConnectToken(string $sessionId, array $options = []): array
     {
         return $this->request('POST', '/api/browser-sessions/' . self::id($sessionId) . '/connect-token', $options);

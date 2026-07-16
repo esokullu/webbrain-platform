@@ -16,6 +16,13 @@ test('dashboard columns are present in fresh schema and existing-database migrat
   assert.match(storeSource, /ALTER TABLE browser_sessions ADD COLUMN proxy_enabled TINYINT\(1\) NOT NULL DEFAULT 0/);
   assert.match(storeSource, /ALTER TABLE browser_sessions ADD COLUMN proxy_endpoint VARCHAR\(512\) NULL/);
   assert.match(storeSource, /ALTER TABLE browser_sessions ADD COLUMN proxy_updated_at DATETIME NULL/);
+  assert.match(schema, /volume_id VARCHAR\(64\) NULL/);
+  assert.match(schema, /volume_name VARCHAR\(128\) NULL/);
+  assert.match(schema, /volume_size_gib INT NULL/);
+  assert.match(schema, /paused_at DATETIME NULL/);
+  assert.match(storeSource, /ALTER TABLE browser_sessions ADD COLUMN volume_id VARCHAR\(64\) NULL/);
+  assert.match(storeSource, /ALTER TABLE browser_sessions ADD COLUMN volume_size_gib INT NULL/);
+  assert.match(storeSource, /ALTER TABLE browser_sessions ADD COLUMN paused_at DATETIME NULL/);
   assert.match(schema, /updates JSON NULL/);
   assert.match(storeSource, /ALTER TABLE cloud_runs ADD COLUMN updates JSON NULL AFTER error/);
   assert.match(schema, /parent_run_id VARCHAR\(40\) NULL/);

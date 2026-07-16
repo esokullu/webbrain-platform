@@ -7,6 +7,7 @@ import path from 'node:path';
 import { Server as ProxyChainServer } from 'proxy-chain';
 import { BrowserProxyRelay } from '../src/droplet/proxy-relay.js';
 import { DropletControlClient } from '../src/droplet/control-client.js';
+import { cancelDropletPause, prepareDropletForPause } from '../src/droplet/pause.js';
 import { normalizeProxyUrl, proxyUrlFromParts, publicProxyEndpoint } from '../src/shared/proxy.js';
 
 async function proxyRequest(port, url = 'http://exit.test/ip') {
@@ -87,9 +88,91 @@ test('droplet control exposes proxy status and verified live updates', async () 
   }]);
 });
 
+test('pause preparation refuses staged downloads and otherwise stops, flushes, and unmounts in order', async () => {
+  const commands = [];
+  await assert.rejects(() => prepareDropletForPause({
+    profileMount: '/mnt/webbrain-profile',
+    downloadsStagingDir: '/staging',
+    readdirImpl: async () => ['pending-download'],
+    execFileImpl: async (...args) => commands.push(args),
+  }), error => error.status === 409 && /finish syncing/.test(error.message));
+  assert.deepEqual(commands, []);
+
+  await assert.rejects(() => prepareDropletForPause({
+    profileMount: '/mnt/webbrain-profile',
+    downloadsStagingDir: '/staging',
+    readdirImpl: async () => ['orphan-guid'],
+    execFileImpl: async (...args) => commands.push(args),
+  }), error => error.status === 409 && /Unsynced browser download data/.test(error.message));
+  assert.deepEqual(commands, []);
+
+  await assert.rejects(() => prepareDropletForPause({
+    profileMount: '/mnt/webbrain-profile',
+    downloadsStagingDir: '/staging',
+    readdirImpl: async () => ['guid-quota.json', 'guid-quota'],
+    readFileImpl: async () => JSON.stringify({ upload_error: { status: 507 } }),
+    execFileImpl: async (...args) => commands.push(args),
+  }), error => error.status === 409 && /storage returned 507/.test(error.message));
+  assert.deepEqual(commands, []);
+
+  let reads = 0;
+  const ready = await prepareDropletForPause({
+    profileMount: '/mnt/webbrain-profile',
+    downloadsStagingDir: '/staging',
+    readdirImpl: async () => { reads += 1; return []; },
+    execFileImpl: async (command, args) => { commands.push([command, args]); },
+  });
+  assert.deepEqual(ready, { ready_to_detach: true });
+  assert.equal(reads, 2);
+  assert.deepEqual(commands, [
+    ['systemctl', ['stop', 'webbrain-browser.service']],
+    ['sync', []],
+    ['mountpoint', ['-q', '/mnt/webbrain-profile']],
+    ['umount', ['/mnt/webbrain-profile']],
+  ]);
+
+  const control = new DropletControlClient({
+    controlUrl: 'ws://127.0.0.1/control',
+    sessionToken: 'test',
+    pausePrepare: async payload => ({ payload, prepared: true }),
+  });
+  assert.deepEqual(await control.handleCommand('pause.prepare', { test: 1 }), {
+    payload: { test: 1 },
+    prepared: true,
+  });
+});
+
+test('pause cancellation remounts and verifies the profile before restarting Chrome', async () => {
+  const commands = [];
+  let mountChecks = 0;
+  const resumed = await cancelDropletPause({
+    profileMount: '/mnt/webbrain-profile',
+    execFileImpl: async (command, args) => {
+      commands.push([command, args]);
+      if (command === 'mountpoint') {
+        mountChecks += 1;
+        if (mountChecks === 1) throw new Error('not mounted');
+      }
+    },
+  });
+  assert.deepEqual(resumed, { resumed: true });
+  assert.deepEqual(commands, [
+    ['mountpoint', ['-q', '/mnt/webbrain-profile']],
+    ['mount', ['/mnt/webbrain-profile']],
+    ['mountpoint', ['-q', '/mnt/webbrain-profile']],
+    ['systemctl', ['start', 'webbrain-browser.service']],
+    ['systemctl', ['is-active', '--quiet', 'webbrain-browser.service']],
+  ]);
+});
+
 test('droplet control forwards run metadata and clarification responses', async () => {
   const received = [];
   const sidecar = http.createServer((req, res) => {
+    if (req.method === 'GET' && req.url === '/healthz') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, extension_connected: true }));
+      return;
+    }
     const chunks = [];
     req.on('data', chunk => chunks.push(chunk));
     req.on('end', () => {
@@ -107,6 +190,12 @@ test('droplet control forwards run metadata and clarification responses', async 
       controlUrl: 'ws://127.0.0.1/control',
       sessionToken: 'test',
       sidecarBase: `http://127.0.0.1:${address.port}`,
+      downloadsSyncEnabled: true,
+    });
+    assert.deepEqual(await client.handleCommand('health', {}), {
+      ok: true,
+      extension_connected: true,
+      downloads_sync_enabled: true,
     });
     const started = await client.handleCommand('run', {
       task: 'Open Google',

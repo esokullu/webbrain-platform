@@ -1,4 +1,5 @@
 import { WebSocket } from 'ws';
+import { cancelDropletPause, prepareDropletForPause } from './pause.js';
 
 const DEFAULT_SIDECAR_BASE = 'http://127.0.0.1:17373';
 
@@ -20,6 +21,9 @@ export class DropletControlClient {
     proxyVerifyUrl = '',
     reconnectMinMs = 500,
     reconnectMaxMs = 10000,
+    pausePrepare = prepareDropletForPause,
+    pauseCancel = cancelDropletPause,
+    downloadsSyncEnabled = process.env.WEBBRAIN_DOWNLOADS_SYNC_ENABLED === 'true',
   }) {
     this.controlUrl = controlUrl;
     this.sessionToken = sessionToken;
@@ -28,6 +32,9 @@ export class DropletControlClient {
     this.proxyVerifyUrl = proxyVerifyUrl;
     this.reconnectMinMs = reconnectMinMs;
     this.reconnectMaxMs = reconnectMaxMs;
+    this.pausePrepare = pausePrepare;
+    this.pauseCancel = pauseCancel;
+    this.downloadsSyncEnabled = downloadsSyncEnabled;
     this.stopped = false;
     this.ws = null;
   }
@@ -91,6 +98,12 @@ export class DropletControlClient {
   }
 
   async handleCommand(action, payload) {
+    if (action === 'pause.prepare') {
+      return await this.pausePrepare(payload);
+    }
+    if (action === 'pause.cancel') {
+      return await this.pauseCancel(payload);
+    }
     if (action === 'proxy.status') {
       if (!this.proxyRelay) throw Object.assign(new Error('Browser proxy relay is unavailable'), { status: 503 });
       return this.proxyRelay.status();
@@ -122,7 +135,10 @@ export class DropletControlClient {
     if (action === 'health') {
       const res = await fetch(`${this.sidecarBase}/healthz`);
       if (!res.ok) throw new Error(`Sidecar health failed: ${res.status} ${await res.text()}`);
-      return await readJson(res);
+      return {
+        ...await readJson(res),
+        downloads_sync_enabled: this.downloadsSyncEnabled,
+      };
     }
     if (action === 'status') {
       const runId = payload.run_id || payload.runId;

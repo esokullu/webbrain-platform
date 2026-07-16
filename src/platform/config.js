@@ -37,7 +37,25 @@ export function loadConfig(env = process.env) {
       region: env.DO_REGION || 'nyc3',
       size: env.DO_SIZE || 's-2vcpu-4gb',
       image: env.DO_IMAGE || 'ubuntu-24-04-x64',
+      volumeSizeGiB: Number(env.DO_BROWSER_VOLUME_SIZE_GIB || 2),
       sshKeys: (env.DO_SSH_KEYS || '').split(',').map(s => s.trim()).filter(Boolean),
+    },
+    downloads: {
+      quotaBytes: Number(env.WEBBRAIN_DOWNLOADS_USER_QUOTA_BYTES || 25 * 1024 * 1024 * 1024),
+      maxUploadBytes: Number(env.WEBBRAIN_DOWNLOADS_MAX_UPLOAD_BYTES || 25 * 1024 * 1024 * 1024),
+      spaces: {
+        enabled: Boolean(
+          env.WEBBRAIN_SPACES_ENDPOINT
+          && env.WEBBRAIN_SPACES_ACCESS_KEY
+          && env.WEBBRAIN_SPACES_SECRET_KEY
+          && env.WEBBRAIN_SPACES_BUCKET
+        ),
+        endpoint: env.WEBBRAIN_SPACES_ENDPOINT || '',
+        region: env.WEBBRAIN_SPACES_S3_REGION || 'us-east-1',
+        accessKey: env.WEBBRAIN_SPACES_ACCESS_KEY || '',
+        secretKey: env.WEBBRAIN_SPACES_SECRET_KEY || '',
+        bucket: env.WEBBRAIN_SPACES_BUCKET || '',
+      },
     },
     modelProxy: {
       baseUrl: env.WEBBRAIN_MODEL_PROXY_BASE_URL || '',
@@ -60,6 +78,7 @@ export function loadConfig(env = process.env) {
       providerModel: env.WEBBRAIN_PROVIDER_MODEL || 'webbrain-cloud 1.0',
       noVncGatePort: Number(env.WEBBRAIN_NOVNC_GATE_PORT || 6081),
       readyTimeoutMs: Number(env.WEBBRAIN_DROPLET_READY_TIMEOUT_MS || 1000),
+      profileMount: env.WEBBRAIN_PROFILE_MOUNT || '/mnt/webbrain-profile',
     },
   };
 }

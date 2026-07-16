@@ -31,7 +31,7 @@ export function sessionIdFromInstanceHost(host, domain) {
   return `${SESSION_PREFIX}${label.slice(HOST_PREFIX.length)}`;
 }
 
-export function createInstanceProxy({ store, domain, targetPort = 6081 }) {
+export function createInstanceProxy({ store, domain, targetPort = 6081, downloadsHandler = null }) {
   const normalizedDomain = normalizeDomain(domain);
   const wss = new WebSocketServer({ noServer: true });
 
@@ -45,13 +45,13 @@ export function createInstanceProxy({ store, domain, targetPort = 6081 }) {
   async function handleRequest(req, res) {
     const { handled, session } = await sessionForRequest(req);
     if (!handled) return false;
-    if (!session || !session.public_ip || ['stopping', 'stopped', 'destroyed', 'failed'].includes(session.status)) {
+    const isDownloads = isDownloadsRequestPath(req.url);
+    if (!session || ['stopping', 'stopped', 'destroyed', 'failed'].includes(session.status)) {
       res.writeHead(404, { 'content-type': 'text/plain' });
       res.end('Browser instance not found');
       return true;
     }
 
-    const isDownloads = isDownloadsRequestPath(req.url);
     if (isDownloads && !isHttpsRequest(req)) {
       res.writeHead(400, {
         'cache-control': 'private, no-store',
@@ -70,6 +70,19 @@ export function createInstanceProxy({ store, domain, targetPort = 6081 }) {
       return true;
     }
 
+    // Legacy and explicitly always-on browsers have no profile volume. Keep
+    // their Downloads on the running Droplet even when shared storage is
+    // configured for resumable browsers.
+    if (isDownloads && downloadsHandler && session.volume_id) {
+      await downloadsHandler.handleRequest(req, res, { userId: session.user_id });
+      return true;
+    }
+
+    if (!session.public_ip) {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end('Browser instance not found');
+      return true;
+    }
     const headers = upstreamHeaders(req, session.public_ip, targetPort);
     if (isDownloads) {
       delete headers.authorization;

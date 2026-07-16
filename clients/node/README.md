@@ -23,6 +23,7 @@ const client = new WebBrainClient({
 
 const session = await client.createBrowserSession({
   display_name: 'Research',
+  lifecycle: 'resumable', // or 'always_on' for a classic single-Droplet browser
 });
 const ready = await client.waitForBrowserSession(session.id);
 const downloads = await client.createDownloadsAccess(ready.id);
@@ -59,6 +60,16 @@ console.log((await client.waitForRun(ready.id, followUp.run_id)).result);
 
 `continueRun` creates a child run with `parent_run_id` and reuses the same tab
 and WebBrain conversation. Append later turns to the newest child run.
+
+Pause destroys the Droplet but retains the fixed 2 GiB Chrome profile volume;
+resume attaches it to a new Droplet. Shared Downloads stay available:
+
+```js
+await client.pauseBrowserSession(ready.id);
+await client.listDownloads(ready.id);
+await client.resumeBrowserSession(ready.id);
+await client.waitForBrowserSession(ready.id);
+```
 
 ## Downloads transfers
 
@@ -121,6 +132,8 @@ const run = await client.createRun(session.id, {
 - `deleteBrowserProxy(sessionId)`
 - `waitForBrowserSession(sessionId, options)`
 - `deleteBrowserSession(sessionId)`
+- `pauseBrowserSession(sessionId)`
+- `resumeBrowserSession(sessionId)`
 - `createRun(sessionId, options)`
 - `getRun(sessionId, runId)`
 - `continueRun(sessionId, runId, options)`
