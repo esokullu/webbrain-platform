@@ -137,6 +137,41 @@ export class DigitalOceanProvisioner {
     };
   }
 
+  async getAction(actionId) {
+    if (!actionId) throw Object.assign(new Error('A DigitalOcean action id is required.'), { status: 409 });
+    if (!this.config.digitalOcean.token) {
+      throw Object.assign(new Error('DO_API_TOKEN is required to inspect Droplet actions.'), { status: 503 });
+    }
+    const res = await this.fetch(`https://api.digitalocean.com/v2/actions/${actionId}`, {
+      headers: { authorization: `Bearer ${this.config.digitalOcean.token}` },
+    });
+    if (!res.ok) throw new Error(`DigitalOcean action lookup failed: ${res.status} ${await res.text()}`);
+    const parsed = await res.json();
+    if (!parsed.action?.id) throw new Error('DigitalOcean action response did not include an action.');
+    return {
+      action_id: String(parsed.action.id),
+      status: parsed.action.status || null,
+    };
+  }
+
+  async waitForAction(actionId, { timeoutMs = 120_000, pollIntervalMs = 1000 } = {}) {
+    const deadline = Date.now() + timeoutMs;
+    let latest = null;
+    while (Date.now() < deadline) {
+      latest = await this.getAction(actionId);
+      if (latest.status === 'completed') return latest;
+      if (latest.status === 'errored') {
+        const error = Object.assign(new Error('DigitalOcean Droplet power cycle failed.'), {
+          status: 502,
+          code: 'DIGITALOCEAN_ACTION_ERRORED',
+        });
+        throw error;
+      }
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+    }
+    throw Object.assign(new Error('Timed out waiting for the DigitalOcean Droplet power cycle.'), { status: 504 });
+  }
+
   async getVolume(volumeId) {
     if (!volumeId || !this.config.digitalOcean.token) return null;
     const res = await this.fetch(`https://api.digitalocean.com/v2/volumes/${volumeId}`, {
@@ -178,6 +213,7 @@ export class NullProvisioner {
     this.createdVolumes = [];
     this.destroyedVolumes = [];
     this.powerCycled = [];
+    this.waitedActions = [];
   }
 
   async createBrowserVolume(session, opts = {}) {
@@ -214,6 +250,11 @@ export class NullProvisioner {
   async powerCycleDroplet(dropletId) {
     this.powerCycled.push(dropletId);
     return { ok: true, action_id: `mock-reset-${dropletId}`, status: 'in-progress' };
+  }
+
+  async waitForAction(actionId) {
+    this.waitedActions.push(actionId);
+    return { action_id: actionId, status: 'completed' };
   }
 
   async waitForVolumeDetached() {

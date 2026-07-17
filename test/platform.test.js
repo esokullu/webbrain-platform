@@ -843,6 +843,7 @@ test('pause stays disabled until shared Downloads storage is configured', async 
 
 test('browser reset power-cycles the Droplet and fails interrupted runs', async () => {
   const ctx = await startPlatform();
+  let ws = null;
   try {
     const cookie = await register(ctx.base, 'reset@example.com');
     const otherCookie = await register(ctx.base, 'reset-other@example.com');
@@ -885,11 +886,13 @@ test('browser reset power-cycles the Droplet and fails interrupted runs', async 
       body: '{}',
     });
     assert.equal(reset.status, 202);
-    assert.equal(reset.body.browser_session.status, 'provisioning');
+    assert.equal(reset.body.browser_session.status, 'restarting');
     assert.equal(reset.body.browser_session.droplet_id, storedSession.droplet_id);
     assert.equal(reset.body.reset.type, 'power_cycle');
+    assert.equal(reset.body.reset.status, 'completed');
     assert.deepEqual(reset.body.reset.interrupted_run_ids, ['run_reset_interrupted']);
     assert.deepEqual(ctx.provisioner.powerCycled, [storedSession.droplet_id]);
+    assert.deepEqual(ctx.provisioner.waitedActions, [`mock-reset-${storedSession.droplet_id}`]);
     const interrupted = await ctx.store.getCloudRun('run_reset_interrupted');
     assert.equal(interrupted.status, 'failed');
     assert.equal(interrupted.error, 'Browser Droplet was force-restarted.');
@@ -899,6 +902,34 @@ test('browser reset power-cycles the Droplet and fails interrupted runs', async 
       && entry.target_id === sessionId
       && entry.metadata.droplet_id === storedSession.droplet_id
     )), true);
+
+    const stillRestarting = await request(ctx.base, `/api/browser-sessions/${sessionId}`, {
+      headers: { cookie },
+    });
+    assert.equal(stillRestarting.body.browser_session.status, 'restarting');
+
+    ws = new WebSocket(`${ctx.wsBase}/droplet/control?session_token=${encodeURIComponent(storedSession.connect_secret)}`);
+    await new Promise(resolve => ws.once('open', resolve));
+    ws.on('message', raw => {
+      const msg = JSON.parse(raw.toString('utf8'));
+      if (msg.type === 'hello') return;
+      if (msg.action === 'health') {
+        ws.send(JSON.stringify({
+          id: msg.id,
+          ok: true,
+          result: { ok: true, extension_connected: true },
+        }));
+      }
+    });
+    let readyAfterReset = null;
+    for (let i = 0; i < 50; i += 1) {
+      readyAfterReset = await request(ctx.base, `/api/browser-sessions/${sessionId}`, {
+        headers: { cookie },
+      });
+      if (readyAfterReset.body.browser_session.status === 'ready') break;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.equal(readyAfterReset.body.browser_session.status, 'ready');
 
     await ctx.store.updateBrowserSession(sessionId, {
       status: 'paused',
@@ -914,6 +945,7 @@ test('browser reset power-cycles the Droplet and fails interrupted runs', async 
     assert.equal(pausedReset.status, 409);
     assert.match(pausedReset.body.error, /running browser Droplet/);
   } finally {
+    ws?.close();
     await ctx.platform.close();
   }
 });
@@ -2047,7 +2079,17 @@ test('digitalocean provisioner resets a Droplet with a hard power cycle', async 
     WEBBRAIN_PLATFORM_URL: 'https://webbrain.cloud',
   });
   let resetRequest = null;
+  let actionPolls = 0;
   const provisioner = new DigitalOceanProvisioner(config, async (url, options = {}) => {
+    if (url === 'https://api.digitalocean.com/v2/actions/456') {
+      actionPolls += 1;
+      return {
+        ok: true,
+        async json() {
+          return { action: { id: 456, status: actionPolls === 1 ? 'in-progress' : 'completed' } };
+        },
+      };
+    }
     resetRequest = {
       url,
       method: options.method,
@@ -2070,4 +2112,9 @@ test('digitalocean provisioner resets a Droplet with a hard power cycle', async 
     body: { type: 'power_cycle' },
   });
   assert.deepEqual(action, { ok: true, action_id: '456', status: 'in-progress' });
+  assert.deepEqual(
+    await provisioner.waitForAction(action.action_id, { timeoutMs: 100, pollIntervalMs: 0 }),
+    { action_id: '456', status: 'completed' },
+  );
+  assert.equal(actionPolls, 2);
 });

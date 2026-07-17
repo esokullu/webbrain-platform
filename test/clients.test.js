@@ -146,7 +146,7 @@ test('Node.js client sends authenticated session and run requests', async () => 
     }
     if (req.method === 'POST' && req.url === '/api/browser-sessions/bs_test/reset') {
       res.statusCode = 202;
-      res.end(JSON.stringify({ browser_session: { id: 'bs_test', status: 'provisioning' } }));
+      res.end(JSON.stringify({ browser_session: { id: 'bs_test', status: 'restarting' } }));
       return;
     }
     if (req.method === 'POST' && req.url === '/api/browser-sessions/bs_test/downloads-access') {
@@ -209,7 +209,7 @@ test('Node.js client sends authenticated session and run requests', async () => 
     assert.equal(clearedProxy.enabled, false);
     assert.equal((await client.pauseBrowserSession(ready.id)).status, 'paused');
     assert.equal((await client.resumeBrowserSession(ready.id)).status, 'provisioning');
-    assert.equal((await client.resetBrowserSession(ready.id)).status, 'provisioning');
+    assert.equal((await client.resetBrowserSession(ready.id)).status, 'restarting');
     const downloads = await client.createDownloadsAccess(ready.id);
     assert.equal(downloads.url, 'https://bs-test.webbrain.cloud/downloads/');
     assert.equal(downloads.username, 'webbrain');
