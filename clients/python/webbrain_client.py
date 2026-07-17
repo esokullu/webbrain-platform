@@ -106,6 +106,9 @@ class WebBrainClient:
     def resume_browser_session(self, session_id: str):
         return self._request("POST", f"/api/browser-sessions/{self._id(session_id)}/resume", {})["browser_session"]
 
+    def reset_browser_session(self, session_id: str):
+        return self._request("POST", f"/api/browser-sessions/{self._id(session_id)}/reset", {})["browser_session"]
+
     def create_connect_token(self, session_id: str, **options):
         return self._request("POST", f"/api/browser-sessions/{self._id(session_id)}/connect-token", options)
 

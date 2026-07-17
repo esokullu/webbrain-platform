@@ -72,6 +72,14 @@ client.resume_browser_session(ready["id"])
 client.wait_for_browser_session(ready["id"])
 ```
 
+Use `reset_browser_session` to hard power-cycle the current Droplet without
+deleting the browser session or profile. Any active run is marked failed:
+
+```python
+client.reset_browser_session(ready["id"])
+client.wait_for_browser_session(ready["id"])
+```
+
 ## Downloads transfers
 
 The transfer helpers stream file bodies instead of buffering them in memory.
@@ -132,6 +140,7 @@ run = client.create_run(
 - `delete_browser_proxy(session_id)`
 - `wait_for_browser_session(session_id, ...)`
 - `delete_browser_session(session_id)`
+- `reset_browser_session(session_id)`
 - `pause_browser_session(session_id)`
 - `resume_browser_session(session_id)`
 - `create_run(session_id, task, ...)`

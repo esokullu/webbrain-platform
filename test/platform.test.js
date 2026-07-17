@@ -841,6 +841,129 @@ test('pause stays disabled until shared Downloads storage is configured', async 
   }
 });
 
+test('browser reset power-cycles the Droplet and fails interrupted runs', async () => {
+  const ctx = await startPlatform();
+  try {
+    const cookie = await register(ctx.base, 'reset@example.com');
+    const otherCookie = await register(ctx.base, 'reset-other@example.com');
+    const created = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ display_name: 'Recovery browser' }),
+    });
+    assert.equal(created.status, 201);
+    const sessionId = created.body.browser_session.id;
+    const storedSession = await ctx.store.getBrowserSession(sessionId);
+    const owner = await ctx.store.findUserByEmail('reset@example.com');
+    await ctx.store.createCloudRun({
+      id: 'run_reset_interrupted',
+      browser_session_id: sessionId,
+      user_id: owner.id,
+      task: 'A stuck task',
+      status: 'running',
+      result: null,
+      summary: '',
+      final_url: '',
+      error: '',
+      updates: [],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      completed_at: null,
+    });
+
+    const forbidden = await request(ctx.base, `/api/browser-sessions/${sessionId}/reset`, {
+      method: 'POST',
+      headers: { cookie: otherCookie },
+      body: '{}',
+    });
+    assert.equal(forbidden.status, 404);
+    assert.deepEqual(ctx.provisioner.powerCycled, []);
+
+    const reset = await request(ctx.base, `/api/browser-sessions/${sessionId}/reset`, {
+      method: 'POST',
+      headers: { cookie },
+      body: '{}',
+    });
+    assert.equal(reset.status, 202);
+    assert.equal(reset.body.browser_session.status, 'provisioning');
+    assert.equal(reset.body.browser_session.droplet_id, storedSession.droplet_id);
+    assert.equal(reset.body.reset.type, 'power_cycle');
+    assert.deepEqual(reset.body.reset.interrupted_run_ids, ['run_reset_interrupted']);
+    assert.deepEqual(ctx.provisioner.powerCycled, [storedSession.droplet_id]);
+    const interrupted = await ctx.store.getCloudRun('run_reset_interrupted');
+    assert.equal(interrupted.status, 'failed');
+    assert.equal(interrupted.error, 'Browser Droplet was force-restarted.');
+    assert.equal(interrupted.completed_at !== null, true);
+    assert.equal(ctx.store.auditLogs.some(entry => (
+      entry.action === 'browser_session.reset'
+      && entry.target_id === sessionId
+      && entry.metadata.droplet_id === storedSession.droplet_id
+    )), true);
+
+    await ctx.store.updateBrowserSession(sessionId, {
+      status: 'paused',
+      droplet_id: null,
+      public_ip: null,
+      paused_at: new Date().toISOString(),
+    });
+    const pausedReset = await request(ctx.base, `/api/browser-sessions/${sessionId}/reset`, {
+      method: 'POST',
+      headers: { cookie },
+      body: '{}',
+    });
+    assert.equal(pausedReset.status, 409);
+    assert.match(pausedReset.body.error, /running browser Droplet/);
+  } finally {
+    await ctx.platform.close();
+  }
+});
+
+test('browser reset restores the prior status when the power cycle is rejected', async () => {
+  const ctx = await startPlatform();
+  try {
+    const cookie = await register(ctx.base, 'reset-failure@example.com');
+    const created = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: '{}',
+    });
+    const sessionId = created.body.browser_session.id;
+    let signalResetStarted;
+    let releaseReset;
+    const resetStarted = new Promise(resolve => { signalResetStarted = resolve; });
+    const resetGate = new Promise(resolve => { releaseReset = resolve; });
+    ctx.provisioner.powerCycleDroplet = async () => {
+      assert.equal((await ctx.store.getBrowserSession(sessionId)).status, 'resetting');
+      signalResetStarted();
+      await resetGate;
+      throw new Error('DigitalOcean reset unavailable');
+    };
+
+    const resetPromise = request(ctx.base, `/api/browser-sessions/${sessionId}/reset`, {
+      method: 'POST',
+      headers: { cookie },
+      body: '{}',
+    });
+    await resetStarted;
+    const [duringReset, deleting] = await Promise.all([
+      request(ctx.base, `/api/browser-sessions/${sessionId}`, { headers: { cookie } }),
+      request(ctx.base, `/api/browser-sessions/${sessionId}`, {
+        method: 'DELETE',
+        headers: { cookie },
+      }),
+    ]);
+    assert.equal(duringReset.body.browser_session.status, 'resetting');
+    assert.equal(deleting.status, 409);
+    releaseReset();
+    const reset = await resetPromise;
+    assert.equal(reset.status, 500);
+    assert.equal(reset.body.error, 'DigitalOcean reset unavailable');
+    assert.equal((await ctx.store.getBrowserSession(sessionId)).status, 'ready');
+  } finally {
+    await ctx.platform.close();
+  }
+});
+
 test('pause refuses a Droplet that was booted before shared Downloads sync was enabled', async () => {
   const ctx = await startPlatform({
     WEBBRAIN_SPACES_ENDPOINT: 'https://nyc3.digitaloceanspaces.com',
@@ -1250,6 +1373,11 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /id="newProxyUsername"/);
     assert.match(res.text, /id="newProxyPassword"/);
     assert.match(res.text, /id="browserSettingsBtn"/);
+    assert.match(res.text, /id="resetSessionBtn"/);
+    assert.match(res.text, /function resetSession\(\)/);
+    assert.match(res.text, /\/reset'/);
+    assert.match(res.text, /power-cycles its Droplet/);
+    assert.match(res.text, /Restarting your browser/);
     assert.match(res.text, /id="browserSettingsDialog"/);
     assert.match(res.text, /id="browserNameForm"/);
     assert.match(res.text, /id="proxyForm"/);
@@ -1435,6 +1563,7 @@ test('public API documentation provides accessible REST and client tabs', async 
     assert.match(res.text, /class="tok-function"/);
     assert.match(res.text, /\/api\/browser-sessions\/:sessionId\/runs/);
     assert.match(res.text, /\/api\/browser-sessions\/:sessionId\/downloads-access/);
+    assert.match(res.text, /\/api\/browser-sessions\/:sessionId\/reset/);
     assert.match(res.text, /id="downloads"/);
     assert.match(res.text, /Accept: application\/json/);
     assert.match(res.text, /--upload-file/);
@@ -1910,4 +2039,35 @@ test('digitalocean provisioner creates, attaches, and deletes a fixed 2 GiB prof
   assert.deepEqual(dropletRequest.body.volumes, ['vol-1']);
   await provisioner.destroyVolume('vol-1');
   assert.equal(requests.at(-1).options.method, 'DELETE');
+});
+
+test('digitalocean provisioner resets a Droplet with a hard power cycle', async () => {
+  const config = loadConfig({
+    DO_API_TOKEN: 'do-token',
+    WEBBRAIN_PLATFORM_URL: 'https://webbrain.cloud',
+  });
+  let resetRequest = null;
+  const provisioner = new DigitalOceanProvisioner(config, async (url, options = {}) => {
+    resetRequest = {
+      url,
+      method: options.method,
+      authorization: options.headers?.authorization,
+      body: JSON.parse(options.body),
+    };
+    return {
+      ok: true,
+      async json() {
+        return { action: { id: 456, status: 'in-progress' } };
+      },
+    };
+  });
+
+  const action = await provisioner.powerCycleDroplet('123');
+  assert.deepEqual(resetRequest, {
+    url: 'https://api.digitalocean.com/v2/droplets/123/actions',
+    method: 'POST',
+    authorization: 'Bearer do-token',
+    body: { type: 'power_cycle' },
+  });
+  assert.deepEqual(action, { ok: true, action_id: '456', status: 'in-progress' });
 });

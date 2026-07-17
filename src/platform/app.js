@@ -681,6 +681,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
                 <button class="secondary" id="lifecycleBtn" type="button" disabled>Pause</button>
                 <a class="button-link" id="externalLink" href="#" target="_blank" rel="noopener" style="display:none">Open separately</a>
                 <button class="secondary" id="browserSettingsBtn" type="button" disabled>Settings</button>
+                <button class="secondary" id="resetSessionBtn" type="button" disabled title="Force-restart this browser's Droplet">Reset</button>
                 <button class="danger" id="deleteSessionBtn" type="button" disabled>Delete</button>
               </div>
             </div>
@@ -1023,6 +1024,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const downloadsDialogDescription = document.getElementById('downloadsDialogDescription');
     const downloadsDialogNote = document.getElementById('downloadsDialogNote');
     const lifecycleBtn = document.getElementById('lifecycleBtn');
+    const resetSessionBtn = document.getElementById('resetSessionBtn');
     const deleteSessionBtn = document.getElementById('deleteSessionBtn');
     const viewerTitle = document.getElementById('viewerTitle');
     const viewerEmpty = document.getElementById('viewerEmpty');
@@ -1032,6 +1034,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const viewerConnectBtn = document.getElementById('viewerConnectBtn');
     const viewerFrames = document.getElementById('viewerFrames');
     const externalLink = document.getElementById('externalLink');
+    const resettingSessionIds = new Set();
     const createApiKeyBtn = document.getElementById('createApiKeyBtn');
     const apiKeyName = document.getElementById('apiKeyName');
     const newApiKey = document.getElementById('newApiKey');
@@ -2291,10 +2294,17 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         ? 'Resume'
         : session?.status === 'pausing'
           ? 'Finish pause'
-          : ['resuming', 'provisioning'].includes(session?.status)
-            ? 'Starting…'
-            : 'Pause';
+          : session?.status === 'resetting'
+            ? 'Restarting…'
+            : ['resuming', 'provisioning'].includes(session?.status)
+              ? 'Starting…'
+              : 'Pause';
       lifecycleBtn.disabled = !canPause && !canResume;
+      const canReset = !!session
+        && !!session.droplet_id
+        && ['ready', 'provisioning', 'failed'].includes(session.status);
+      resetSessionBtn.textContent = session && resettingSessionIds.has(session.id) ? 'Resetting…' : 'Reset';
+      resetSessionBtn.disabled = !canReset || resettingSessionIds.has(session?.id);
       deleteSessionBtn.disabled = !session || session.status === 'destroyed';
       viewerTitle.textContent = session ? browserName(session) + ' · ' + session.status : 'Browser preview';
 
@@ -2319,12 +2329,14 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         if (!session) {
           viewerStateTitle.textContent = 'Select a browser';
           viewerStateDescription.textContent = 'Choose a browser session to preview it here.';
-        } else if (['provisioning', 'resuming'].includes(session.status) || (session.status === 'ready' && !session.public_ip)) {
+        } else if (['provisioning', 'resuming', 'resetting'].includes(session.status) || (session.status === 'ready' && !session.public_ip)) {
           viewerEmpty.classList.add('is-provisioning');
           viewerEmpty.setAttribute('aria-busy', 'true');
           viewerStateVisual.style.display = '';
-          viewerStateTitle.textContent = 'Preparing your browser';
-          viewerStateDescription.textContent = 'Starting the cloud machine and WebBrain. This usually takes a few minutes.';
+          viewerStateTitle.textContent = session.status === 'resetting' ? 'Restarting your browser' : 'Preparing your browser';
+          viewerStateDescription.textContent = session.status === 'resetting'
+            ? 'Power-cycling the cloud machine. Any browser task in progress will stop.'
+            : 'Starting the cloud machine and WebBrain. This usually takes a few minutes.';
         } else if (session.status === 'pausing') {
           viewerStateTitle.textContent = 'Pausing your browser';
           viewerStateDescription.textContent = 'Saving the Chrome profile and detaching its private 2 GB session disk.';
@@ -2565,6 +2577,38 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       } catch (error) {
         showMessage(sessionMessage, error.message, true);
         await refreshOne(session.id).catch(() => {});
+      }
+    }
+
+    async function resetSession() {
+      const session = selectedSession();
+      if (!session
+          || !session.droplet_id
+          || !['ready', 'provisioning', 'failed'].includes(session.status)
+          || resettingSessionIds.has(session.id)) return;
+      const confirmed = window.confirm(
+        'Force-restart “' + browserName(session) + '”? This power-cycles its Droplet and any browser task in progress will fail.'
+      );
+      if (!confirmed) return;
+      resettingSessionIds.add(session.id);
+      connectingSessionIds.delete(session.id);
+      removeViewerConnection(session.id);
+      renderViewer();
+      showMessage(sessionMessage, 'Force-restarting the Droplet…');
+      try {
+        const body = await api('/api/browser-sessions/' + encodeURIComponent(session.id) + '/reset', {
+          method: 'POST',
+          body: {},
+        });
+        state.sessions = state.sessions.map(item => item.id === session.id ? body.browser_session : item);
+        renderSessions();
+        showMessage(sessionMessage, 'Droplet force-restarted. The browser is starting again.');
+      } catch (error) {
+        showMessage(sessionMessage, error.message, true);
+        await refreshOne(session.id).catch(() => {});
+      } finally {
+        resettingSessionIds.delete(session.id);
+        renderViewer();
       }
     }
 
@@ -2831,6 +2875,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     });
     downloadsBtn.addEventListener('click', openDownloadsDialog);
     lifecycleBtn.addEventListener('click', toggleBrowserLifecycle);
+    resetSessionBtn.addEventListener('click', resetSession);
     closeDownloadsBtn.addEventListener('click', () => downloadsDialog.close());
     copyDownloadsUrlBtn.addEventListener('click', () => copyDownloadsValue(downloadsUrl, copyDownloadsUrlBtn));
     copyDownloadsUsernameBtn.addEventListener('click', () => copyDownloadsValue(downloadsUsername, copyDownloadsUsernameBtn));
@@ -3519,7 +3564,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
 
   async function refreshProvisioningSession(session) {
     const runtime = await browserRuntimeState(session);
-    if (!session.droplet_id || ['failed', 'pausing', 'paused', 'stopping', 'destroyed'].includes(session.status)) {
+    if (!session.droplet_id || ['failed', 'pausing', 'paused', 'resetting', 'stopping', 'destroyed'].includes(session.status)) {
       return { ...session, ...runtime };
     }
     const refreshed = await provisioner.getDroplet(session.droplet_id).catch(() => null);
@@ -3535,6 +3580,74 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
     });
     return { ...updated, ...runtime };
   }
+
+  app.post('/api/browser-sessions/:sessionId/reset', requireAuth, async (req, res, next) => {
+    let releaseLifecycle = null;
+    let reservedStatus = null;
+    let resetAccepted = false;
+    try {
+      const session = await ownedBrowserSession(req, res);
+      if (!session) return;
+      if (!session.droplet_id || !['ready', 'provisioning', 'failed'].includes(session.status)) {
+        return jsonError(res, 409, 'Only a running browser Droplet can be reset');
+      }
+      releaseLifecycle = claimBrowserLifecycleOperation(session.id);
+      if (!releaseLifecycle) return jsonError(res, 409, 'A browser lifecycle change is already in progress');
+
+      const latest = await store.getBrowserSession(session.id);
+      if (!latest?.droplet_id || !['ready', 'provisioning', 'failed'].includes(latest.status)) {
+        return jsonError(res, 409, 'The browser lifecycle changed before reset started');
+      }
+      const reserved = await store.updateBrowserSessionIfStatus(latest.id, latest.status, {
+        status: 'resetting',
+        updated_at: nowIso(),
+      });
+      if (!reserved) return jsonError(res, 409, 'The browser lifecycle changed before reset started');
+      reservedStatus = latest.status;
+      const activeRuns = await activeRunsForSession(latest);
+      const action = await provisioner.powerCycleDroplet(latest.droplet_id);
+      resetAccepted = true;
+      const resetAt = nowIso();
+      const updated = await store.updateBrowserSessionIfStatus(latest.id, 'resetting', {
+        status: 'provisioning',
+        updated_at: resetAt,
+      });
+      if (!updated) throw Object.assign(new Error('The browser lifecycle changed while resetting'), { status: 409 });
+      reservedStatus = null;
+      for (const run of activeRuns) {
+        await store.updateCloudRun(run.id, {
+          status: 'failed',
+          error: 'Browser Droplet was force-restarted.',
+          completed_at: resetAt,
+          updated_at: resetAt,
+        });
+      }
+      await audit(req, 'browser_session.reset', 'browser_session', latest.id, {
+        droplet_id: latest.droplet_id,
+        action_id: action.action_id || null,
+        interrupted_run_ids: activeRuns.map(run => run.id),
+      });
+      res.status(202).json({
+        browser_session: publicBrowserSession(updated),
+        reset: {
+          type: 'power_cycle',
+          action_id: action.action_id || null,
+          status: action.status || null,
+          interrupted_run_ids: activeRuns.map(run => run.id),
+        },
+      });
+    } catch (error) {
+      if (reservedStatus && !resetAccepted) {
+        await store.updateBrowserSessionIfStatus(req.params.sessionId, 'resetting', {
+          status: reservedStatus,
+          updated_at: nowIso(),
+        }).catch(() => {});
+      }
+      next(error);
+    } finally {
+      releaseLifecycle?.();
+    }
+  });
 
   app.post('/api/browser-sessions/:sessionId/pause', requireAuth, async (req, res, next) => {
     let reserved = false;
@@ -3711,7 +3824,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       const session = await ownedBrowserSession(req, res);
       if (!session) return;
       if (session.status === 'destroyed') return res.json({ browser_session: publicBrowserSession(session) });
-      if (['pausing', 'resuming'].includes(session.status)) {
+      if (['pausing', 'resuming', 'resetting'].includes(session.status)) {
         return jsonError(res, 409, 'Wait for the current browser lifecycle change to finish before deleting');
       }
       releaseLifecycle = claimBrowserLifecycleOperation(session.id);
@@ -4019,7 +4132,7 @@ export async function cleanupExpiredBrowserSessions({ store, provisioner }) {
   const expired = await store.listExpiredBrowserSessions(nowIso());
   const cleaned = [];
   for (const session of expired) {
-    if (['pausing', 'resuming'].includes(session.status)) continue;
+    if (['pausing', 'resuming', 'resetting'].includes(session.status)) continue;
     const deleting = await store.updateBrowserSessionIfStatus(session.id, session.status, {
       status: 'stopping',
       updated_at: nowIso(),

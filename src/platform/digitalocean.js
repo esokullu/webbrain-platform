@@ -115,6 +115,28 @@ export class DigitalOceanProvisioner {
     return { ok: true };
   }
 
+  async powerCycleDroplet(dropletId) {
+    if (!dropletId) throw Object.assign(new Error('A Droplet id is required to reset a browser.'), { status: 409 });
+    if (!this.config.digitalOcean.token) {
+      throw Object.assign(new Error('DO_API_TOKEN is required to reset droplets.'), { status: 503 });
+    }
+    const res = await this.fetch(`https://api.digitalocean.com/v2/droplets/${dropletId}/actions`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${this.config.digitalOcean.token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ type: 'power_cycle' }),
+    });
+    if (!res.ok) throw new Error(`DigitalOcean power cycle failed: ${res.status} ${await res.text()}`);
+    const parsed = await res.json();
+    return {
+      ok: true,
+      action_id: parsed.action?.id ? String(parsed.action.id) : null,
+      status: parsed.action?.status || null,
+    };
+  }
+
   async getVolume(volumeId) {
     if (!volumeId || !this.config.digitalOcean.token) return null;
     const res = await this.fetch(`https://api.digitalocean.com/v2/volumes/${volumeId}`, {
@@ -155,6 +177,7 @@ export class NullProvisioner {
     this.destroyed = [];
     this.createdVolumes = [];
     this.destroyedVolumes = [];
+    this.powerCycled = [];
   }
 
   async createBrowserVolume(session, opts = {}) {
@@ -186,6 +209,11 @@ export class NullProvisioner {
   async destroyDroplet(dropletId) {
     this.destroyed.push(dropletId);
     return { ok: true };
+  }
+
+  async powerCycleDroplet(dropletId) {
+    this.powerCycled.push(dropletId);
+    return { ok: true, action_id: `mock-reset-${dropletId}`, status: 'in-progress' };
   }
 
   async waitForVolumeDetached() {

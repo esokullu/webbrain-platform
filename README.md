@@ -560,6 +560,7 @@ Abort is cooperative. A run can briefly report `aborting` before becoming
 | `GET` | `/api/browser-sessions` | List the authenticated user's browser sessions. |
 | `GET` | `/api/browser-sessions/:sessionId` | Read provisioning and runtime readiness. |
 | `PATCH` | `/api/browser-sessions/:sessionId` | Set or clear the browser's `display_name`. |
+| `POST` | `/api/browser-sessions/:sessionId/reset` | Force-restart the current Droplet with a hard power cycle. Any active run is marked failed. |
 | `POST` | `/api/browser-sessions/:sessionId/pause` | Safely stop Chrome, retain its 2 GiB profile volume, and destroy the Droplet. |
 | `POST` | `/api/browser-sessions/:sessionId/resume` | Create a new Droplet and attach the saved profile volume. |
 | `DELETE` | `/api/browser-sessions/:sessionId` | Destroy the browser session, Droplet, and profile volume. |

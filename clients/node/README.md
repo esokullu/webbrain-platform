@@ -71,6 +71,14 @@ await client.resumeBrowserSession(ready.id);
 await client.waitForBrowserSession(ready.id);
 ```
 
+Use `resetBrowserSession` to hard power-cycle the current Droplet without
+deleting the browser session or profile. Any active run is marked failed:
+
+```js
+await client.resetBrowserSession(ready.id);
+await client.waitForBrowserSession(ready.id);
+```
+
 ## Downloads transfers
 
 The transfer helpers stream file bodies instead of buffering them in memory.
@@ -132,6 +140,7 @@ const run = await client.createRun(session.id, {
 - `deleteBrowserProxy(sessionId)`
 - `waitForBrowserSession(sessionId, options)`
 - `deleteBrowserSession(sessionId)`
+- `resetBrowserSession(sessionId)`
 - `pauseBrowserSession(sessionId)`
 - `resumeBrowserSession(sessionId)`
 - `createRun(sessionId, options)`

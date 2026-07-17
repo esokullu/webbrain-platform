@@ -90,6 +90,10 @@ export class WebBrainClient {
     return (await this.request('POST', `/api/browser-sessions/${encodeURIComponent(sessionId)}/resume`, {})).browser_session;
   }
 
+  async resetBrowserSession(sessionId) {
+    return (await this.request('POST', `/api/browser-sessions/${encodeURIComponent(sessionId)}/reset`, {})).browser_session;
+  }
+
   async createConnectToken(sessionId, options = {}) {
     return await this.request('POST', `/api/browser-sessions/${encodeURIComponent(sessionId)}/connect-token`, options);
   }

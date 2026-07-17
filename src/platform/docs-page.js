@@ -354,6 +354,7 @@ export function docsPage() {
             <div class="endpoint"><span class="method">GET</span><code>/api/browser-sessions/:sessionId/proxy</code><span>Read proxy and exit IP.</span></div>
             <div class="endpoint"><span class="method">PATCH</span><code>/api/browser-sessions/:sessionId/proxy</code><span>Switch proxy without restart.</span></div>
             <div class="endpoint"><span class="method">DELETE</span><code>/api/browser-sessions/:sessionId/proxy</code><span>Return to a direct connection.</span></div>
+            <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/reset</code><span>Force-restart the current Droplet.</span></div>
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/pause</code><span>Stop the Droplet and retain the profile.</span></div>
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/resume</code><span>Attach the profile to a new Droplet.</span></div>
             <div class="endpoint"><span class="method">DELETE</span><code>/api/browser-sessions/:sessionId</code><span>Destroy the browser and profile volume.</span></div>
