@@ -133,6 +133,46 @@ test('warm pool waits for an in-flight spare to become claimable before falling 
   assert.equal((await store.getWarmDroplet('wd_waiting')).status, 'assigned');
 });
 
+test('warm pool destroys excess unassigned creating capacity when a spare is already ready', async () => {
+  const store = new MemoryStore();
+  const provisioner = new NullProvisioner();
+  const controlChannel = fakeControlChannel();
+  const pool = new WarmDropletPool({ store, provisioner, controlChannel, config: config() });
+  const now = new Date().toISOString();
+  await store.createWarmDroplet({
+    id: 'wd_ready',
+    droplet_id: 'warm-ready',
+    public_ip: '127.0.0.1',
+    region: 'nyc3',
+    size: 's-2vcpu-4gb',
+    status: 'ready',
+    assigned_session_id: null,
+    pool_token: 'ready-secret',
+    last_error: null,
+    created_at: now,
+    updated_at: now,
+  });
+  await store.createWarmDroplet({
+    id: 'wd_extra',
+    droplet_id: 'warm-extra',
+    public_ip: '127.0.0.2',
+    region: 'nyc3',
+    size: 's-2vcpu-4gb',
+    status: 'creating',
+    assigned_session_id: null,
+    pool_token: 'extra-secret',
+    last_error: null,
+    created_at: new Date(Date.now() + 1000).toISOString(),
+    updated_at: now,
+  });
+  controlChannel.connected.add('wd_ready');
+
+  await pool.reconcile();
+  assert.deepEqual(provisioner.destroyed, ['warm-extra']);
+  assert.equal((await store.getWarmDroplet('wd_ready')).status, 'ready');
+  assert.equal((await store.getWarmDroplet('wd_extra')).status, 'destroying');
+});
+
 test('warm pool atomically claims one ready droplet and assigns volume-backed sessions', async () => {
   const store = new MemoryStore();
   const provisioner = new NullProvisioner();

@@ -75,13 +75,17 @@ export class WarmDropletPool {
     const ready = candidates.filter(droplet => (
       droplet.status === 'ready' && this.controlChannel.isPoolConnected(droplet.id)
     ));
-    const creating = candidates.filter(droplet => droplet.status === 'creating');
-    const extra = ready.slice(desired);
+    const pending = candidates.filter(droplet => (
+      droplet.status === 'creating'
+      || (droplet.status === 'ready' && !this.controlChannel.isPoolConnected(droplet.id))
+    ));
+    const extra = [...ready, ...pending].slice(desired);
     for (const droplet of extra) {
-      await this.destroyUnassignedDroplet(droplet, 'Warm pool has excess ready capacity.');
+      await this.destroyUnassignedDroplet(droplet, 'Warm pool has excess unassigned capacity.');
     }
 
-    const needed = Math.max(0, desired - Math.min(ready.length, desired) - creating.length);
+    const capacity = Math.min(desired, ready.length + pending.length);
+    const needed = Math.max(0, desired - capacity);
     for (let i = 0; i < needed; i += 1) {
       await this.createWarmDroplet();
     }
