@@ -2480,7 +2480,7 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
   assert.match(cloudInit, /webbrain-novnc\.service/);
   assert.match(cloudInit, /\/opt\/noVNC\/utils\/novnc_proxy --listen 127\.0\.0\.1:6080 --vnc 127\.0\.0\.1:5900/);
   assert.match(cloudInit, /ufw allow 6081\/tcp/);
-  assert.match(cloudInit, /ufw allow 6100:6100\/tcp/);
+  assert.match(cloudInit, /ufw allow 6100\/tcp/);
   assert.doesNotMatch(cloudInit, /ufw allow 608[23]\/tcp/);
   assert.match(cloudInit, /ufw --force enable/);
   assert.match(cloudInit, /https:\/\/deb\.nodesource\.com\/setup_20\.x/);

@@ -4,6 +4,12 @@ function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
+function ufwTcpPortSpec(startPort, count = 1) {
+  const start = Number(startPort || 6100);
+  const end = start + Math.max(1, Number(count || 1)) - 1;
+  return start === end ? `${start}/tcp` : `${start}:${end}/tcp`;
+}
+
 export function chromeExtensionIdForPath(extensionPath) {
   const hex = createHash('sha256').update(String(extensionPath)).digest('hex').slice(0, 32);
   return [...hex].map(char => String.fromCharCode(97 + Number.parseInt(char, 16))).join('');
@@ -22,6 +28,10 @@ export function renderCloudInit({ session, config, providerApiKey = '', proxyUrl
   const proxyStatePath = hasProfileVolume ? `${profileMount}/proxy.json` : config.browserProxy.statePath;
   const downloadsSyncEnabled = hasProfileVolume && config.downloads?.spaces?.enabled === true;
   const downloadsStagingDir = '/var/lib/webbrain/download-staging';
+  const ephemeralGatePortSpec = ufwTcpPortSpec(
+    config.droplet.ephemeralGateBasePort || 6100,
+    config.droplet.ephemeralMaxSessions || 1
+  );
   const profileMountScript = hasProfileVolume ? `#!/usr/bin/env bash
 set -euo pipefail
 device=${shellQuote(`/dev/disk/by-id/scsi-0DO_Volume_${session.volume_name}`)}
@@ -210,7 +220,7 @@ ${hasProfileVolume ? `      RequiresMountsFor=${profileMount}` : ''}
 runcmd:
   - ufw allow OpenSSH
   - ufw allow 6081/tcp
-  - ufw allow ${Number(config.droplet.ephemeralGateBasePort || 6100)}:${Number(config.droplet.ephemeralGateBasePort || 6100) + Math.max(1, Number(config.droplet.ephemeralMaxSessions || 1)) - 1}/tcp
+  - ufw allow ${ephemeralGatePortSpec}
   - ufw --force enable
   - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
   - apt-get install -y nodejs
@@ -242,6 +252,10 @@ export function renderWarmPoolCloudInit({ pool, config }) {
   const extensionDir = `${webbrainDir}/src/chrome`;
   const poolControlUrl = config.baseUrl.replace(/^http/, 'ws') + '/droplet/pool-control';
   const sessionControlUrl = config.baseUrl.replace(/^http/, 'ws') + '/droplet/control';
+  const ephemeralGatePortSpec = ufwTcpPortSpec(
+    config.droplet.ephemeralGateBasePort || 6100,
+    config.droplet.ephemeralMaxSessions || 1
+  );
   const env = {
     NODE_ENV: 'production',
     WEBBRAIN_ROLE: 'warm-pool',
@@ -321,7 +335,7 @@ ${envText.split('\n').map(line => `      ${line}`).join('\n')}
 runcmd:
   - ufw allow OpenSSH
   - ufw allow ${Number(config.droplet.noVncGatePort || 6081)}/tcp
-  - ufw allow ${Number(config.droplet.ephemeralGateBasePort || 6100)}:${Number(config.droplet.ephemeralGateBasePort || 6100) + Math.max(1, Number(config.droplet.ephemeralMaxSessions || 1)) - 1}/tcp
+  - ufw allow ${ephemeralGatePortSpec}
   - ufw --force enable
   - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
   - apt-get install -y nodejs
