@@ -10,6 +10,7 @@ function config(env = {}) {
     WEBBRAIN_DB_DRIVER: 'memory',
     WEBBRAIN_WARM_DROPLET_POOL_SIZE: '1',
     WEBBRAIN_WARM_DROPLET_SIZE: 's-2vcpu-4gb',
+    WEBBRAIN_WARM_DROPLET_CLAIM_WAIT_MS: '0',
     ...env,
   });
 }
@@ -30,10 +31,44 @@ function fakeControlChannel() {
   };
 }
 
+function browserSession(overrides = {}) {
+  const now = new Date().toISOString();
+  return {
+    id: 'bs_pool',
+    user_id: 'usr_pool',
+    display_name: 'Pool test',
+    status: 'provisioning',
+    droplet_id: null,
+    public_ip: null,
+    region: 'nyc3',
+    size: 's-2vcpu-4gb',
+    volume_id: 'vol-pool',
+    volume_name: 'wb-profile-bs-pool',
+    volume_size_gib: 2,
+    profile_mode: 'persistent',
+    host_session_id: null,
+    runtime_port: null,
+    runtime_generation: null,
+    connect_secret: 'session-secret',
+    proxy_enabled: false,
+    proxy_endpoint: null,
+    proxy_updated_at: null,
+    paused_at: null,
+    ended_at: null,
+    end_reason: null,
+    expires_at: null,
+    created_at: now,
+    updated_at: now,
+    ...overrides,
+  };
+}
+
 test('warm pool config defaults off and inherits the browser Droplet size when unset', () => {
   const defaults = loadConfig({ WEBBRAIN_DB_DRIVER: 'memory' });
   assert.equal(defaults.warmDropletPool.size, 0);
   assert.equal(defaults.warmDropletPool.dropletSize, 's-2vcpu-4gb');
+  assert.equal(defaults.warmDropletPool.claimWaitMs, 60000);
+  assert.equal(defaults.warmDropletPool.claimPollMs, 2000);
 
   const inheritedSize = loadConfig({ WEBBRAIN_DB_DRIVER: 'memory', DO_SIZE: 's-1vcpu-2gb' });
   assert.equal(inheritedSize.warmDropletPool.size, 0);
@@ -59,6 +94,43 @@ test('warm pool reconciler creates one configured spare and does nothing when di
   });
   await disabled.reconcile();
   assert.equal((await disabled.store.listWarmDroplets()).length, 0);
+});
+
+test('warm pool waits for an in-flight spare to become claimable before falling back cold', async () => {
+  const store = new MemoryStore();
+  const provisioner = new NullProvisioner();
+  const controlChannel = fakeControlChannel();
+  const pool = new WarmDropletPool({
+    store,
+    provisioner,
+    controlChannel,
+    config: config({
+      WEBBRAIN_WARM_DROPLET_CLAIM_WAIT_MS: '1000',
+      WEBBRAIN_WARM_DROPLET_CLAIM_POLL_MS: '10',
+    }),
+  });
+  const now = new Date().toISOString();
+  await store.createWarmDroplet({
+    id: 'wd_waiting',
+    droplet_id: 'warm-waiting',
+    public_ip: '127.0.0.1',
+    region: 'nyc3',
+    size: 's-2vcpu-4gb',
+    status: 'creating',
+    assigned_session_id: null,
+    pool_token: 'pool-secret',
+    last_error: null,
+    created_at: now,
+    updated_at: now,
+  });
+  controlChannel.connected.add('wd_waiting');
+
+  const assigned = await pool.tryAssignSession(browserSession({ id: 'bs_waiting' }));
+  assert.equal(assigned.droplet_id, 'warm-waiting');
+  assert.equal(assigned.warm_pool_id, 'wd_waiting');
+  assert.equal(provisioner.created.length, 0);
+  assert.equal(controlChannel.sent[0].payload.session_id, 'bs_waiting');
+  assert.equal((await store.getWarmDroplet('wd_waiting')).status, 'assigned');
 });
 
 test('warm pool atomically claims one ready droplet and assigns volume-backed sessions', async () => {

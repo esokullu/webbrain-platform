@@ -6,6 +6,10 @@ function safeError(error) {
   return String(error?.message || error || 'Unknown warm pool error').slice(0, 500);
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export class WarmDropletPool {
   constructor({ store, provisioner, controlChannel, config }) {
     this.store = store;
@@ -25,6 +29,14 @@ export class WarmDropletPool {
 
   get size() {
     return this.config.warmDropletPool?.dropletSize || this.config.digitalOcean.size;
+  }
+
+  get claimWaitMs() {
+    return Math.max(0, Number(this.config.warmDropletPool?.claimWaitMs || 0));
+  }
+
+  get claimPollMs() {
+    return Math.max(250, Number(this.config.warmDropletPool?.claimPollMs || 2000));
   }
 
   triggerReconcile() {
@@ -171,18 +183,25 @@ export class WarmDropletPool {
     });
   }
 
-  async tryAssignSession(session, { providerApiKey = '', proxyUrl = '' } = {}) {
-    if (this.desiredSize <= 0) return null;
+  async hasCreatingCandidate(session) {
+    const region = session.region || this.region;
+    const size = session.size || this.size;
+    return (await this.store.listWarmDroplets()).some(droplet => (
+      !droplet.assigned_session_id
+      && droplet.region === region
+      && droplet.size === size
+      && droplet.status === 'creating'
+    ));
+  }
+
+  async claimReadyCandidate(session) {
     const claimed = await this.store.claimReadyWarmDroplet({
       region: session.region || this.region,
       size: session.size || this.size,
       sessionId: session.id,
       now: nowIso(),
     });
-    if (!claimed) {
-      this.triggerReconcile();
-      return null;
-    }
+    if (!claimed) return null;
     if (!this.controlChannel.isPoolConnected(claimed.id)) {
       await this.store.updateWarmDroplet(claimed.id, {
         status: 'creating',
@@ -190,9 +209,12 @@ export class WarmDropletPool {
         last_error: 'Warm Droplet was not connected when claim started.',
         updated_at: nowIso(),
       });
-      this.triggerReconcile();
       return null;
     }
+    return claimed;
+  }
+
+  async assignClaimedDroplet(claimed, session, { providerApiKey = '', proxyUrl = '' } = {}) {
     try {
       if (session.volume_id) {
         const action = await this.provisioner.attachVolumeToDroplet(
@@ -243,6 +265,37 @@ export class WarmDropletPool {
       }
       this.triggerReconcile();
       return null;
+    }
+  }
+
+  async tryAssignSession(session, { providerApiKey = '', proxyUrl = '' } = {}) {
+    if (this.desiredSize <= 0) return null;
+    const deadline = Date.now() + this.claimWaitMs;
+
+    while (true) {
+      const claimed = await this.claimReadyCandidate(session);
+      if (claimed) {
+        return await this.assignClaimedDroplet(claimed, session, { providerApiKey, proxyUrl });
+      }
+
+      if (this.claimWaitMs <= 0 || Date.now() >= deadline) {
+        this.triggerReconcile();
+        return null;
+      }
+
+      await this.reconcile();
+
+      const reconciledClaim = await this.claimReadyCandidate(session);
+      if (reconciledClaim) {
+        return await this.assignClaimedDroplet(reconciledClaim, session, { providerApiKey, proxyUrl });
+      }
+
+      if (!await this.hasCreatingCandidate(session)) {
+        this.triggerReconcile();
+        return null;
+      }
+
+      await sleep(Math.min(this.claimPollMs, Math.max(0, deadline - Date.now())));
     }
   }
 }

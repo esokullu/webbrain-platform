@@ -45,6 +45,8 @@ export function loadConfig(env = process.env) {
       dropletSize: env.WEBBRAIN_WARM_DROPLET_SIZE || env.DO_SIZE || 's-2vcpu-4gb',
       reconcileIntervalMs: Math.max(15000, Number(env.WEBBRAIN_WARM_DROPLET_RECONCILE_INTERVAL_MS || 60000)),
       assignTimeoutMs: Math.max(5000, Number(env.WEBBRAIN_WARM_DROPLET_ASSIGN_TIMEOUT_MS || 90000)),
+      claimWaitMs: Math.max(0, Number(env.WEBBRAIN_WARM_DROPLET_CLAIM_WAIT_MS || 60000)),
+      claimPollMs: Math.max(250, Number(env.WEBBRAIN_WARM_DROPLET_CLAIM_POLL_MS || 2000)),
     },
     downloads: {
       quotaBytes: Number(env.WEBBRAIN_DOWNLOADS_USER_QUOTA_BYTES || 25 * 1024 * 1024 * 1024),

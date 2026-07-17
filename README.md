@@ -35,6 +35,8 @@ Platform:
 - `DO_BROWSER_VOLUME_SIZE_GIB` (defaults to a fixed 2 GiB Chrome-profile volume; volumes are not auto-expanded)
 - `WEBBRAIN_WARM_DROPLET_POOL_SIZE` (defaults to `0`; production can set `1` for one prebooted spare)
 - `WEBBRAIN_WARM_DROPLET_SIZE` (defaults to `DO_SIZE`, then `s-2vcpu-4gb`)
+- `WEBBRAIN_WARM_DROPLET_CLAIM_WAIT_MS` (defaults to `60000`; waits for a creating spare before cold fallback)
+- `WEBBRAIN_WARM_DROPLET_CLAIM_POLL_MS` (defaults to `2000`)
 - `WEBBRAIN_SPACES_ENDPOINT`, `WEBBRAIN_SPACES_ACCESS_KEY`, `WEBBRAIN_SPACES_SECRET_KEY`, `WEBBRAIN_SPACES_BUCKET`
 - `WEBBRAIN_SPACES_S3_REGION` (defaults to `us-east-1`, the S3 signing region used by DigitalOcean Spaces)
 - `WEBBRAIN_DOWNLOADS_USER_QUOTA_BYTES` (defaults to 25 GiB fair use per user)
