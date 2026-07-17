@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { createPlatformApp } from './app.js';
+import { cleanupExpiredBrowserSessions, createPlatformApp } from './app.js';
 import { DropletControlChannel } from './control-channel.js';
 import { createInstanceProxy } from './instance-proxy.js';
 import { createObjectDownloadsHandler } from './object-downloads.js';
@@ -43,6 +43,12 @@ export function createPlatformServer({ store, provisioner, config, downloadsHand
   server.requestTimeout = 0;
   instanceProxy.attach(server);
   controlChannel.attach(server);
+  const cleanupTimer = setInterval(() => {
+    cleanupExpiredBrowserSessions({ store, provisioner, controlChannel }).catch(error => {
+      console.error('[browser-cleanup]', error.message || error);
+    });
+  }, config.browserCleanupIntervalMs);
+  cleanupTimer.unref();
 
   return {
     app,
@@ -52,6 +58,7 @@ export function createPlatformServer({ store, provisioner, config, downloadsHand
       return new Promise(resolve => server.listen(port, host, () => resolve(server.address())));
     },
     close() {
+      clearInterval(cleanupTimer);
       return new Promise(resolve => {
         Promise.all([controlChannel.close(), instanceProxy.close()]).then(() => {
           spacesObjectStore?.close();

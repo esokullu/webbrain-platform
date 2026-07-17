@@ -9,6 +9,7 @@ import { normalizeProxyUrl, proxyUrlFromParts, publicProxyEndpoint, publicProxyS
 import { DEFAULT_DOWNLOADS_UPLOAD_LIMIT_BYTES, downloadsAccessCredentials } from '../shared/downloads-access.js';
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'aborted']);
+const TERMINAL_BROWSER_STATUSES = new Set(['destroyed']);
 
 function parseCookies(header = '') {
   const out = {};
@@ -34,10 +35,14 @@ function normalizeBrowserDisplayName(value) {
 
 function normalizeBrowserLifecycle(value) {
   const lifecycle = String(value ?? 'resumable').trim().toLowerCase();
-  if (!['resumable', 'always_on'].includes(lifecycle)) {
-    throw Object.assign(new Error('Browser lifecycle must be `resumable` or `always_on`'), { status: 400 });
+  if (!['resumable', 'always_on', 'ephemeral'].includes(lifecycle)) {
+    throw Object.assign(new Error('Browser lifecycle must be `resumable`, `always_on`, or `ephemeral`'), { status: 400 });
   }
   return lifecycle;
+}
+
+function isEphemeralBrowser(session) {
+  return session?.profile_mode === 'ephemeral';
 }
 
 function normalizeAccountEmail(value) {
@@ -626,7 +631,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           <p class="eyebrow">WebBrain Cloud</p>
           <h1>Cloud browsers</h1>
         </div>
-        <p class="intro-copy">Your persistent WebBrain sessions—visible here and controllable through the API.</p>
+        <p class="intro-copy">Your persistent and ephemeral WebBrain sessions—visible here and controllable through the API.</p>
       </section>
       <div class="grid" id="dashboardGrid">
         <section class="panel session-panel" id="sessionPanel">
@@ -655,7 +660,15 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
                 <select id="newSessionLifecycle" aria-describedby="newSessionLifecycleHint">
                   <option value="resumable">Resumable</option>
                   <option value="always_on">Always on</option>
+                  <option value="ephemeral">Ephemeral</option>
                 </select>
+              </label>
+              <label class="lifecycle-choice" for="newSessionHost" id="newSessionHostChoice" style="display:none">
+                <span class="lifecycle-choice-copy">
+                  <span class="lifecycle-choice-title">Run on existing browser</span>
+                  <span class="lifecycle-choice-hint">Uses a blank volatile profile. Any stop, reset, pause, or crash discards it.</span>
+                </span>
+                <select id="newSessionHost"></select>
               </label>
               <details class="proxy-setup">
                 <summary>Webshare proxy (optional)</summary>
@@ -1008,6 +1021,8 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const newSessionName = document.getElementById('newSessionName');
     const newSessionLifecycle = document.getElementById('newSessionLifecycle');
     const newSessionLifecycleHint = document.getElementById('newSessionLifecycleHint');
+    const newSessionHostChoice = document.getElementById('newSessionHostChoice');
+    const newSessionHost = document.getElementById('newSessionHost');
     const newProxyDomain = document.getElementById('newProxyDomain');
     const newProxyPort = document.getElementById('newProxyPort');
     const newProxyUsername = document.getElementById('newProxyUsername');
@@ -1135,6 +1150,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       settingsTargetId: null,
       downloadsTargetId: null,
       codeClient: 'rest',
+      creatingSession: false,
     };
     const viewerConnections = new Map();
     const connectingSessionIds = new Set();
@@ -2253,7 +2269,12 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         title.textContent = browserName(session);
         const meta = document.createElement('div');
         meta.className = 'session-meta';
-        meta.textContent = session.id;
+        if (session.profile_mode === 'ephemeral') {
+          const host = state.sessions.find(item => item.id === session.host_session_id);
+          meta.textContent = session.id + ' · ephemeral on ' + (host ? browserName(host) : session.host_session_id);
+        } else {
+          meta.textContent = session.id;
+        }
         details.append(title, meta);
         const status = document.createElement('span');
         status.className = 'status';
@@ -2267,8 +2288,36 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         });
         sessionsEl.appendChild(btn);
       }
+      syncCreateBrowserControls();
       renderViewer();
       renderConsole();
+    }
+
+    function syncCreateBrowserControls() {
+      const ephemeral = newSessionLifecycle.value === 'ephemeral';
+      newSessionHostChoice.style.display = ephemeral ? '' : 'none';
+      if (!ephemeral) {
+        newSessionHost.disabled = true;
+        createSessionBtn.disabled = state.creatingSession;
+        return;
+      }
+      const previous = newSessionHost.value;
+      const hosts = state.sessions.filter(session => (
+        session.profile_mode !== 'ephemeral'
+        && session.status === 'ready'
+        && session.droplet_id
+        && session.droplet_connected === true
+      ));
+      newSessionHost.innerHTML = '';
+      for (const host of hosts) {
+        const option = document.createElement('option');
+        option.value = host.id;
+        option.textContent = browserName(host) + ' · ' + host.id;
+        newSessionHost.appendChild(option);
+      }
+      if (hosts.some(host => host.id === previous)) newSessionHost.value = previous;
+      newSessionHost.disabled = hosts.length === 0;
+      createSessionBtn.disabled = state.creatingSession || hosts.length === 0;
     }
 
     function renderViewer() {
@@ -2301,6 +2350,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
               : 'Pause';
       lifecycleBtn.disabled = !canPause && !canResume;
       const canReset = !!session
+        && session.profile_mode !== 'ephemeral'
         && !!session.droplet_id
         && ['ready', 'provisioning', 'failed'].includes(session.status);
       resetSessionBtn.textContent = session && resettingSessionIds.has(session.id) ? 'Resetting…' : 'Reset';
@@ -2355,7 +2405,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           viewerStateDescription.textContent = 'Delete this browser and create a new one to try again.';
         } else if (session.status === 'destroyed') {
           viewerStateTitle.textContent = 'Browser unavailable';
-          viewerStateDescription.textContent = 'This browser has been destroyed.';
+          viewerStateDescription.textContent = session.end_reason || 'This browser has been destroyed.';
         } else {
           viewerStateTitle.textContent = 'Browser unavailable';
           viewerStateDescription.textContent = 'Refresh the dashboard to check this browser again.';
@@ -2449,8 +2499,15 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     }
 
     async function createSession() {
-      createSessionBtn.disabled = true;
-      showMessage(sessionMessage, 'Creating droplet...');
+      if (newSessionLifecycle.value === 'ephemeral' && !newSessionHost.value) {
+        showMessage(sessionMessage, 'Select a running browser to host the ephemeral session.', true);
+        return;
+      }
+      state.creatingSession = true;
+      syncCreateBrowserControls();
+      showMessage(sessionMessage, newSessionLifecycle.value === 'ephemeral'
+        ? 'Starting a volatile browser on the selected Droplet...'
+        : 'Creating droplet...');
       try {
         const startupProxy = proxyParts(newProxyDomain, newProxyPort, newProxyUsername, newProxyPassword);
         const hasStartupProxy = hasProxyParts(startupProxy);
@@ -2459,6 +2516,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           body: {
             display_name: newSessionName.value.trim() || null,
             lifecycle: newSessionLifecycle.value,
+            ...(newSessionLifecycle.value === 'ephemeral' ? { host_session_id: newSessionHost.value } : {}),
             ...(hasStartupProxy ? { proxy: startupProxy } : {}),
           },
         });
@@ -2473,7 +2531,8 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       } catch (e) {
         showMessage(sessionMessage, e.message, true);
       } finally {
-        createSessionBtn.disabled = false;
+        state.creatingSession = false;
+        syncCreateBrowserControls();
       }
     }
 
@@ -2528,10 +2587,14 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       const session = selectedSession();
       if (!session || !['ready', 'paused'].includes(session.status)) return;
       const usesSharedDownloads = sharedDownloadsEnabled && !!session.volume;
-      downloadsDialogDescription.textContent = usesSharedDownloads
+      downloadsDialogDescription.textContent = session.profile_mode === 'ephemeral'
+        ? 'Files are temporary and are permanently discarded when this ephemeral browser stops, crashes, expires, or its host restarts.'
+        : usesSharedDownloads
         ? 'Files use your private shared storage and remain available while this browser is paused. Use the credentials below when asked to sign in.'
         : 'Files stay on this running browser Droplet. Use the credentials below when asked to sign in.';
-      downloadsDialogNote.textContent = (usesSharedDownloads
+      downloadsDialogNote.textContent = (session.profile_mode === 'ephemeral'
+        ? 'Temporary storage is bounded per ephemeral browser.'
+        : usesSharedDownloads
         ? 'Your account has a 25 GiB fair-use allowance.'
         : 'Uploads are limited to 5 GB per file.') + ' Existing names receive an automatic numbered suffix.';
       state.downloadsTargetId = session.id;
@@ -2546,6 +2609,11 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         });
         if (state.downloadsTargetId !== session.id || !downloadsDialog.open) return;
         setDownloadsAccess(body);
+        if (session.profile_mode === 'ephemeral') {
+          const limitMiB = Math.floor(Number(body.upload_limit_bytes || 0) / (1024 * 1024));
+          downloadsDialogNote.textContent = 'Uploads are limited to ' + limitMiB
+            + ' MiB per file. Existing names receive an automatic numbered suffix.';
+        }
         showMessage(downloadsMessage, 'Access is ready until ' + body.expires_at + '.');
       } catch (error) {
         if (state.downloadsTargetId === session.id && downloadsDialog.open) {
@@ -2688,7 +2756,9 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       if (!session || session.status === 'destroyed') return;
       const confirmationName = browserName(session);
       state.deleteTargetId = session.id;
-      deleteDialogDescription.textContent = session.volume
+      deleteDialogDescription.textContent = session.profile_mode === 'ephemeral'
+        ? 'This ends “' + confirmationName + '” and permanently discards its temporary profile, cookies, sessions, cache, and Downloads.'
+        : session.volume
         ? 'This permanently destroys “' + confirmationName + '” and its private 2 GB Chrome session disk.'
           + (sharedDownloadsEnabled ? ' Shared Downloads remain in your account.' : ' Local Downloads will also be lost.')
         : 'This permanently destroys “' + confirmationName + '” and its always-on Droplet, including its Chrome state and local Downloads.';
@@ -2808,7 +2878,10 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     newSessionLifecycle.addEventListener('change', () => {
       newSessionLifecycleHint.textContent = newSessionLifecycle.value === 'always_on'
         ? 'Classic Droplet · local Downloads · no Pause.'
-        : 'Private 2 GB session disk · pause when shared Downloads are enabled.';
+        : newSessionLifecycle.value === 'ephemeral'
+          ? 'Blank volatile profile · reuses a running Droplet · never resumes.'
+          : 'Private 2 GB session disk · pause when shared Downloads are enabled.';
+      syncCreateBrowserControls();
     });
     newSessionName.addEventListener('keydown', event => {
       if (event.key === 'Enter') createSession();
@@ -3123,6 +3196,123 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
     return activeRuns;
   }
 
+  async function failActiveRunsForSession(session, error) {
+    const completedAt = nowIso();
+    const interrupted = [];
+    for (const run of await activeRunsForSession(session)) {
+      await store.updateCloudRun(run.id, {
+        status: 'failed',
+        error,
+        completed_at: completedAt,
+        updated_at: completedAt,
+      });
+      interrupted.push(run.id);
+    }
+    return interrupted;
+  }
+
+  async function markEphemeralStopping(session, reason) {
+    if (!isEphemeralBrowser(session) || TERMINAL_BROWSER_STATUSES.has(session.status)) return session;
+    const current = await store.getBrowserSession(session.id);
+    if (!current || TERMINAL_BROWSER_STATUSES.has(current.status)) return current || session;
+    const patch = {
+      status: 'stopping',
+      end_reason: String(reason || 'Ephemeral browser termination is pending.').slice(0, 255),
+      updated_at: nowIso(),
+    };
+    const stopping = current.status === 'stopping'
+      ? await store.updateBrowserSession(current.id, patch)
+      : await store.updateBrowserSessionIfStatus(current.id, current.status, patch);
+    if (!stopping) {
+      throw Object.assign(new Error('The ephemeral browser lifecycle changed before termination started.'), { status: 409 });
+    }
+    await failActiveRunsForSession(stopping, reason);
+    return stopping;
+  }
+
+  async function finalizeEphemeralSession(session, reason) {
+    if (!isEphemeralBrowser(session) || TERMINAL_BROWSER_STATUSES.has(session.status)) return session;
+    const completedAt = nowIso();
+    const finalized = await store.updateBrowserSessionIfStatus(session.id, 'stopping', {
+      status: 'destroyed',
+      droplet_id: null,
+      public_ip: null,
+      runtime_port: null,
+      runtime_generation: null,
+      ended_at: completedAt,
+      end_reason: String(reason || session.end_reason || 'Ephemeral browser ended.').slice(0, 255),
+      updated_at: completedAt,
+    });
+    if (finalized) return finalized;
+    return await store.getBrowserSession(session.id) || session;
+  }
+
+  async function terminateEphemeralSession(session, reason, { requestStop = true, confirmedAbsent = false } = {}) {
+    if (!isEphemeralBrowser(session) || TERMINAL_BROWSER_STATUSES.has(session.status)) return session;
+    const stopping = await markEphemeralStopping(session, reason);
+    const host = stopping.host_session_id
+      ? await store.getBrowserSession(stopping.host_session_id)
+      : null;
+    let stopped = confirmedAbsent
+      || !host
+      || TERMINAL_BROWSER_STATUSES.has(host.status)
+      || !host.droplet_id;
+    if (requestStop && !stopped) {
+      if (!controlChannel.isConnected(host.id)) {
+        throw Object.assign(
+          new Error('Ephemeral browser termination is pending until its host reconnects.'),
+          { status: 409 }
+        );
+      }
+      try {
+        await controlChannel.send(host.id, 'ephemeral.stop', { session_id: session.id }, 15_000);
+        stopped = true;
+      } catch (cause) {
+        throw Object.assign(
+          new Error('Ephemeral browser termination is pending; the host did not confirm that the runtime stopped.'),
+          { status: cause.status || 503, cause }
+        );
+      }
+    }
+    if (!stopped) return stopping;
+    return await finalizeEphemeralSession(stopping, reason);
+  }
+
+  async function terminateHostedEphemeralSessions(host, reason, { allowHostShutdown = false } = {}) {
+    const children = (await store.listHostedBrowserSessions(host.id))
+      .filter(child => !TERMINAL_BROWSER_STATUSES.has(child.status));
+    if (!children.length) return [];
+    const stopping = [];
+    for (const child of children) {
+      stopping.push(await markEphemeralStopping(child, reason));
+    }
+    let stopped = false;
+    if (controlChannel.isConnected(host.id)) {
+      try {
+        await controlChannel.send(host.id, 'ephemeral.stop_all', {}, 20_000);
+        stopped = true;
+      } catch (cause) {
+        if (!allowHostShutdown) {
+          throw Object.assign(
+            new Error('Hosted ephemeral browser termination is pending; the Droplet did not confirm shutdown.'),
+            { status: cause.status || 503, cause }
+          );
+        }
+      }
+    } else if (!allowHostShutdown) {
+      throw Object.assign(
+        new Error('Hosted ephemeral browser termination is pending until the Droplet reconnects.'),
+        { status: 409 }
+      );
+    }
+    if (!stopped) return stopping;
+    return await Promise.all(stopping.map(child => finalizeEphemeralSession(child, reason)));
+  }
+
+  async function finalizeHostedEphemeralSessions(children, reason) {
+    return await Promise.all(children.map(child => finalizeEphemeralSession(child, reason)));
+  }
+
   app.get('/healthz', (req, res) => {
     res.json({ ok: true, role: 'platform' });
   });
@@ -3365,6 +3555,116 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
         ? proxyUrlFromParts(req.body.proxy)
         : normalizeProxyUrl(requestedProxyUrl);
       const proxyEndpoint = publicProxyEndpoint(proxyUrl);
+      const requestedExpiresAt = isoAfterMs(Number(req.body.ttl_ms || config.browserSessionTtlMs));
+
+      if (lifecycle === 'ephemeral') {
+        const hostSessionId = String(
+          req.body.host_session_id
+          || req.body.placement?.existing_session_id
+          || req.body.placement?.host_session_id
+          || ''
+        ).trim();
+        const host = hostSessionId ? await store.getBrowserSession(hostSessionId) : null;
+        if (!host || host.user_id !== req.auth.user.id) {
+          return jsonError(res, 404, 'Ephemeral browser host session not found');
+        }
+        if (isEphemeralBrowser(host)) {
+          return jsonError(res, 409, 'An ephemeral browser cannot host another browser');
+        }
+        const refreshedHost = await refreshProvisioningSession(host);
+        if (
+          refreshedHost.status !== 'ready'
+          || !refreshedHost.droplet_id
+          || !refreshedHost.public_ip
+          || !controlChannel.isConnected(refreshedHost.id)
+        ) {
+          return jsonError(res, 409, 'The selected host browser must be running and connected');
+        }
+        const activeChildren = (await store.listHostedBrowserSessions(refreshedHost.id))
+          .filter(child => !TERMINAL_BROWSER_STATUSES.has(child.status) && child.status !== 'failed');
+        if (activeChildren.length >= config.droplet.ephemeralMaxSessions) {
+          return jsonError(res, 409, 'The selected Droplet has reached its ephemeral browser capacity');
+        }
+
+        const expiresAt = new Date(
+          Math.min(new Date(requestedExpiresAt).getTime(), new Date(refreshedHost.expires_at).getTime())
+        ).toISOString();
+        const session = await store.createBrowserSession({
+          id: randomId('bs'),
+          user_id: req.auth.user.id,
+          display_name: normalizeBrowserDisplayName(req.body.display_name ?? req.body.name),
+          status: 'provisioning',
+          droplet_id: refreshedHost.droplet_id,
+          public_ip: refreshedHost.public_ip,
+          volume_id: null,
+          volume_name: null,
+          volume_size_gib: null,
+          profile_mode: 'ephemeral',
+          host_session_id: refreshedHost.id,
+          runtime_port: null,
+          runtime_generation: null,
+          region: refreshedHost.region,
+          size: refreshedHost.size,
+          connect_secret: randomSecret(32),
+          proxy_enabled: Boolean(proxyEndpoint),
+          proxy_endpoint: proxyEndpoint,
+          proxy_updated_at: proxyEndpoint ? now : null,
+          paused_at: null,
+          ended_at: null,
+          end_reason: null,
+          expires_at: expiresAt,
+          created_at: now,
+          updated_at: now,
+        });
+        let runtime;
+        try {
+          runtime = await controlChannel.send(refreshedHost.id, 'ephemeral.start', {
+            session_id: session.id,
+            session_token: session.connect_secret,
+            provider_api_key: req.body.provider_api_key || session.connect_secret,
+            proxy_url: proxyUrl,
+            expires_at: session.expires_at,
+          }, 30_000);
+          const updated = await store.updateBrowserSession(session.id, {
+            runtime_port: Number(runtime.gate_port),
+            runtime_generation: runtime.generation,
+            updated_at: nowIso(),
+          });
+          await audit(req, 'browser_session.create', 'browser_session', session.id, {
+            droplet_id: refreshedHost.droplet_id,
+            lifecycle,
+            host_session_id: refreshedHost.id,
+            runtime_generation: runtime.generation,
+          });
+          return res.status(201).json({ browser_session: publicBrowserSession(updated) });
+        } catch (error) {
+          // A start request can time out after the Droplet has already launched
+          // the transient unit. Only clear its placement after the Droplet
+          // acknowledges that the runtime is gone; otherwise cleanup retries.
+          const stopConfirmed = await controlChannel.send(
+            refreshedHost.id,
+            'ephemeral.stop',
+            { session_id: session.id },
+            15_000
+          ).then(() => true).catch(() => false);
+          const completedAt = nowIso();
+          await store.updateBrowserSession(session.id, {
+            status: stopConfirmed ? 'failed' : 'stopping',
+            droplet_id: stopConfirmed ? null : refreshedHost.droplet_id,
+            public_ip: stopConfirmed ? null : refreshedHost.public_ip,
+            runtime_port: stopConfirmed ? null : Number(runtime?.gate_port) || null,
+            runtime_generation: stopConfirmed ? null : runtime?.generation || null,
+            ended_at: stopConfirmed ? completedAt : null,
+            end_reason: String(stopConfirmed
+              ? error.message || 'Ephemeral browser startup failed.'
+              : 'Ephemeral browser startup failed; termination is pending until the host confirms it stopped.'
+            ).slice(0, 255),
+            updated_at: completedAt,
+          }).catch(() => {});
+          throw error;
+        }
+      }
+
       const session = await store.createBrowserSession({
         id: randomId('bs'),
         user_id: req.auth.user.id,
@@ -3375,6 +3675,10 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
         volume_id: null,
         volume_name: null,
         volume_size_gib: null,
+        profile_mode: 'persistent',
+        host_session_id: null,
+        runtime_port: null,
+        runtime_generation: null,
         region: req.body.region || config.digitalOcean.region,
         size: req.body.size || config.digitalOcean.size,
         connect_secret: randomSecret(32),
@@ -3382,7 +3686,9 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
         proxy_endpoint: proxyEndpoint,
         proxy_updated_at: proxyEndpoint ? now : null,
         paused_at: null,
-        expires_at: isoAfterMs(Number(req.body.ttl_ms || config.browserSessionTtlMs)),
+        ended_at: null,
+        end_reason: null,
+        expires_at: requestedExpiresAt,
         created_at: now,
         updated_at: now,
       });
@@ -3572,6 +3878,60 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
 
   async function refreshProvisioningSession(session) {
     const runtime = await browserRuntimeState(session);
+    if (isEphemeralBrowser(session)) {
+      if (TERMINAL_BROWSER_STATUSES.has(session.status) || session.status === 'failed') {
+        return { ...session, ...runtime };
+      }
+      if (runtime.runtime_ready) {
+        if (session.status === 'ready') return { ...session, ...runtime };
+        const updated = await store.updateBrowserSession(session.id, {
+          status: 'ready',
+          ended_at: null,
+          end_reason: null,
+          updated_at: nowIso(),
+        });
+        return { ...updated, ...runtime };
+      }
+      const host = session.host_session_id
+        ? await store.getBrowserSession(session.host_session_id)
+        : null;
+      if (!host || TERMINAL_BROWSER_STATUSES.has(host.status)) {
+        const ended = await terminateEphemeralSession(
+          session,
+          'The host browser ended, so its ephemeral browser was discarded.',
+          { requestStop: false, confirmedAbsent: true }
+        );
+        return { ...ended, ...runtime };
+      }
+      if (!controlChannel.isConnected(host.id)) return { ...session, ...runtime };
+      const hosted = await controlChannel.send(
+        host.id,
+        'ephemeral.status',
+        { session_id: session.id },
+        3000
+      ).catch(() => null);
+      if (!hosted) return { ...session, ...runtime };
+      if (hosted.exists !== true) {
+        const ended = await terminateEphemeralSession(
+          session,
+          'The ephemeral runtime stopped or its host restarted; all temporary browser data was discarded.',
+          { requestStop: false, confirmedAbsent: true }
+        );
+        return { ...ended, ...runtime };
+      }
+      if (
+        Number(hosted.gate_port) !== Number(session.runtime_port)
+        || hosted.generation !== session.runtime_generation
+      ) {
+        const updated = await store.updateBrowserSession(session.id, {
+          runtime_port: Number(hosted.gate_port),
+          runtime_generation: hosted.generation,
+          updated_at: nowIso(),
+        });
+        return { ...updated, ...runtime };
+      }
+      return { ...session, ...runtime };
+    }
     if (session.status === 'resetting') {
       if (browserLifecycleOperations.has(session.id)) return { ...session, ...runtime };
       const recoveredStatus = runtime.runtime_ready ? 'ready' : 'restarting';
@@ -3613,6 +3973,20 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
     try {
       const session = await ownedBrowserSession(req, res);
       if (!session) return;
+      if (isEphemeralBrowser(session)) {
+        const ended = await terminateEphemeralSession(
+          session,
+          'The ephemeral browser was reset; its temporary data was discarded.'
+        );
+        await audit(req, 'browser_session.reset', 'browser_session', session.id, {
+          type: 'ephemeral_terminated',
+          host_session_id: session.host_session_id,
+        });
+        return res.status(202).json({
+          browser_session: publicBrowserSession(ended),
+          reset: { type: 'ephemeral_terminated', interrupted_run_ids: [] },
+        });
+      }
       if (!session.droplet_id || !['ready', 'provisioning', 'failed'].includes(session.status)) {
         return jsonError(res, 409, 'Only a running browser Droplet can be reset');
       }
@@ -3630,12 +4004,19 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       if (!reserved) return jsonError(res, 409, 'The browser lifecycle changed before reset started');
       reservedStatus = latest.status;
       const activeRuns = await activeRunsForSession(latest);
+      const childTerminationReason = 'The host Droplet was reset; this ephemeral browser and all temporary data were discarded.';
+      const terminatedChildren = await terminateHostedEphemeralSessions(
+        latest,
+        childTerminationReason,
+        { allowHostShutdown: true }
+      );
       const action = await provisioner.powerCycleDroplet(latest.droplet_id);
       resetAccepted = true;
       const resetAt = nowIso();
       const completedAction = action.action_id && action.status !== 'completed'
         ? await provisioner.waitForAction(action.action_id)
         : action;
+      await finalizeHostedEphemeralSessions(terminatedChildren, childTerminationReason);
       for (const run of activeRuns) {
         await store.updateCloudRun(run.id, {
           status: 'failed',
@@ -3654,6 +4035,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
         droplet_id: latest.droplet_id,
         action_id: action.action_id || null,
         interrupted_run_ids: activeRuns.map(run => run.id),
+        terminated_ephemeral_session_ids: terminatedChildren.map(child => child.id),
       });
       res.status(202).json({
         browser_session: publicBrowserSession(updated),
@@ -3662,6 +4044,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
           action_id: action.action_id || null,
           status: completedAction.status || null,
           interrupted_run_ids: activeRuns.map(run => run.id),
+          terminated_ephemeral_session_ids: terminatedChildren.map(child => child.id),
         },
       });
     } catch (error) {
@@ -3751,6 +4134,10 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
         return jsonError(res, 409, 'Browser control is not connected; wait for it to become ready before pausing.');
       }
 
+      await terminateHostedEphemeralSessions(
+        session,
+        'The host browser was paused; this ephemeral browser and all temporary data were discarded.'
+      );
       await controlChannel.send(session.id, 'pause.prepare', {}, 30_000);
       await provisioner.destroyDroplet(session.droplet_id);
       destroyConfirmed = true;
@@ -3857,6 +4244,17 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       }
       releaseLifecycle = claimBrowserLifecycleOperation(session.id);
       if (!releaseLifecycle) return jsonError(res, 409, 'A browser lifecycle change is already in progress');
+      if (isEphemeralBrowser(session)) {
+        const updated = await terminateEphemeralSession(
+          session,
+          'The ephemeral browser was deleted; all temporary data was discarded.'
+        );
+        await audit(req, 'browser_session.destroy', 'browser_session', session.id, {
+          host_session_id: session.host_session_id,
+          ephemeral: true,
+        });
+        return res.json({ browser_session: publicBrowserSession(updated) });
+      }
       const deleting = session.status === 'stopping'
         ? session
         : await store.updateBrowserSessionIfStatus(session.id, session.status, {
@@ -3864,7 +4262,14 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
           updated_at: nowIso(),
         });
       if (!deleting) return jsonError(res, 409, 'The browser lifecycle changed before deletion started');
+      const childTerminationReason = 'The host browser was deleted; this ephemeral browser and all temporary data were discarded.';
+      const terminatedChildren = await terminateHostedEphemeralSessions(
+        deleting,
+        childTerminationReason,
+        { allowHostShutdown: true }
+      );
       await provisioner.destroyDroplet(deleting.droplet_id);
+      await finalizeHostedEphemeralSessions(terminatedChildren, childTerminationReason);
       if (deleting.volume_id) {
         await provisioner.waitForVolumeDetached(deleting.volume_id);
         await provisioner.destroyVolume(deleting.volume_id);
@@ -3897,7 +4302,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
     const expiresAt = isoAfterMs(config.connectTokenTtlMs);
     const token = signNoVncToken({ sessionId: session.id, expiresAt, secret: session.connect_secret });
     const scheme = req.body.scheme || 'http';
-    const port = req.body.port || 6081;
+    const port = Number(session.runtime_port || req.body.port || config.droplet.noVncGatePort || 6081);
     const query = new URLSearchParams({
       token,
       autoconnect: 'true',
@@ -3938,6 +4343,8 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       password: credentials.password,
       upload_limit_bytes: usesSharedDownloads
         ? config.downloads.maxUploadBytes
+        : isEphemeralBrowser(session)
+          ? config.droplet.ephemeralDownloadLimitBytes
         : DEFAULT_DOWNLOADS_UPLOAD_LIMIT_BYTES,
       expires_at: session.expires_at,
     });
@@ -4156,17 +4563,105 @@ async function waitForRun({ run, session, store, controlChannel, config, timeout
   return latest;
 }
 
-export async function cleanupExpiredBrowserSessions({ store, provisioner }) {
-  const expired = await store.listExpiredBrowserSessions(nowIso());
+async function failStoredRunsForSession(store, sessionId, reason, completedAt = nowIso()) {
+  for (const run of await store.listCloudRunsForSession(sessionId)) {
+    if (TERMINAL_RUN_STATUSES.has(run.status)) continue;
+    await store.updateCloudRun(run.id, {
+      status: 'failed',
+      error: reason,
+      completed_at: completedAt,
+      updated_at: completedAt,
+    });
+  }
+}
+
+async function finalizeStoredEphemeralSession(store, session, reason, completedAt = nowIso()) {
+  if (TERMINAL_BROWSER_STATUSES.has(session.status)) return session;
+  const finalized = await store.updateBrowserSessionIfStatus(session.id, 'stopping', {
+    status: 'destroyed',
+    droplet_id: null,
+    public_ip: null,
+    runtime_port: null,
+    runtime_generation: null,
+    ended_at: completedAt,
+    end_reason: String(reason || session.end_reason || 'Ephemeral browser ended.').slice(0, 255),
+    updated_at: completedAt,
+  });
+  return finalized || await store.getBrowserSession(session.id);
+}
+
+async function confirmStoredEphemeralStopped({ store, controlChannel, session }) {
+  const host = session.host_session_id
+    ? await store.getBrowserSession(session.host_session_id)
+    : null;
+  if (!host || TERMINAL_BROWSER_STATUSES.has(host.status) || !host.droplet_id) return true;
+  if (!controlChannel?.isConnected(host.id)) return false;
+  return await controlChannel.send(
+    host.id,
+    'ephemeral.stop',
+    { session_id: session.id },
+    15_000
+  ).then(() => true).catch(() => false);
+}
+
+export async function cleanupExpiredBrowserSessions({ store, provisioner, controlChannel = null }) {
   const cleaned = [];
+
+  // Retry user-requested teardown independently of TTL. A temporary control
+  // disconnect must never turn a still-running browser into a terminal row.
+  for (const session of await store.listStoppingEphemeralBrowserSessions()) {
+    if (!await confirmStoredEphemeralStopped({ store, controlChannel, session })) continue;
+    const finalized = await finalizeStoredEphemeralSession(store, session, session.end_reason);
+    if (finalized) cleaned.push(finalized);
+  }
+
+  const expired = await store.listExpiredBrowserSessions(nowIso());
   for (const session of expired) {
     if (['pausing', 'resuming', 'resetting', 'restarting'].includes(session.status)) continue;
+    if (isEphemeralBrowser(session)) {
+      const reason = 'The ephemeral browser expired and its temporary data was discarded.';
+      const deleting = await store.updateBrowserSessionIfStatus(session.id, session.status, {
+        status: 'stopping',
+        end_reason: reason,
+        updated_at: nowIso(),
+      });
+      if (!deleting) continue;
+      const completedAt = nowIso();
+      await failStoredRunsForSession(store, deleting.id, reason, completedAt);
+      if (!await confirmStoredEphemeralStopped({ store, controlChannel, session: deleting })) continue;
+      const destroyed = await finalizeStoredEphemeralSession(store, deleting, reason, completedAt);
+      if (destroyed) cleaned.push(destroyed);
+      continue;
+    }
+
     const deleting = await store.updateBrowserSessionIfStatus(session.id, session.status, {
       status: 'stopping',
       updated_at: nowIso(),
     });
     if (!deleting) continue;
+    const childReason = 'The host browser expired; this ephemeral browser and its temporary data were discarded.';
+    const children = (await store.listHostedBrowserSessions(deleting.id))
+      .filter(child => !TERMINAL_BROWSER_STATUSES.has(child.status));
+    const stoppingChildren = [];
+    for (const child of children) {
+      const stopping = child.status === 'stopping'
+        ? await store.updateBrowserSession(child.id, { end_reason: childReason, updated_at: nowIso() })
+        : await store.updateBrowserSessionIfStatus(child.id, child.status, {
+          status: 'stopping',
+          end_reason: childReason,
+          updated_at: nowIso(),
+        });
+      if (!stopping) continue;
+      await failStoredRunsForSession(store, stopping.id, childReason);
+      stoppingChildren.push(stopping);
+    }
+    if (stoppingChildren.length && controlChannel?.isConnected(deleting.id)) {
+      await controlChannel.send(deleting.id, 'ephemeral.stop_all', {}, 20_000).catch(() => {});
+    }
     await provisioner.destroyDroplet(deleting.droplet_id);
+    for (const child of stoppingChildren) {
+      await finalizeStoredEphemeralSession(store, child, childReason);
+    }
     if (deleting.volume_id) {
       await provisioner.waitForVolumeDetached(deleting.volume_id);
       await provisioner.destroyVolume(deleting.volume_id);
@@ -4179,6 +4674,8 @@ export async function cleanupExpiredBrowserSessions({ store, provisioner }) {
       volume_name: null,
       volume_size_gib: null,
       paused_at: null,
+      ended_at: nowIso(),
+      end_reason: 'The browser session expired.',
       updated_at: nowIso(),
     });
     if (destroyed) cleaned.push(destroyed);

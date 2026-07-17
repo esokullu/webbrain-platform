@@ -20,7 +20,9 @@ const sessionId = process.env.WEBBRAIN_SESSION_ID || 'default';
 const extensionDir = path.resolve(process.env.WEBBRAIN_EXTENSION_DIR || path.join(rootDir, '..', 'webbrain3', 'src', 'chrome'));
 const profileDir = path.resolve(process.env.WEBBRAIN_PROFILE_DIR || path.join(rootDir, '.webbrain-sessions', sessionId));
 const debuggingPort = Number(process.env.WEBBRAIN_REMOTE_DEBUGGING_PORT || 9222);
+const debuggingHost = process.env.WEBBRAIN_REMOTE_DEBUGGING_ADDRESS || '127.0.0.1';
 const sidecarWsUrl = process.env.WEBBRAIN_SIDECAR_WS_URL || 'ws://127.0.0.1:17373/extension';
+const sidecarBase = process.env.WEBBRAIN_SIDECAR_BASE || 'http://127.0.0.1:17373';
 const startUrl = process.env.WEBBRAIN_START_URL || 'https://webbrain.one';
 const browserProxyServer = process.env.WEBBRAIN_BROWSER_PROXY_SERVER || '';
 const browserProxyBypassList = process.env.WEBBRAIN_BROWSER_PROXY_BYPASS_LIST || '';
@@ -109,7 +111,7 @@ async function waitForProxyServer() {
 }
 
 async function devtoolsJson(route) {
-  const res = await fetch(`http://127.0.0.1:${debuggingPort}${route}`);
+  const res = await fetch(`http://${debuggingHost}:${debuggingPort}${route}`);
   if (!res.ok) throw new Error(`DevTools ${route} failed with ${res.status}`);
   return await res.json();
 }
@@ -133,7 +135,7 @@ async function waitForExtensionBridge() {
   let lastError = null;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch('http://127.0.0.1:17373/healthz');
+      const res = await fetch(`${sidecarBase}/healthz`);
       const body = res.ok ? await res.json() : null;
       if (body?.extension_connected === true) return body;
       lastError = new Error('sidecar is running but the extension bridge is not connected');
@@ -411,7 +413,7 @@ async function main() {
   const browser = findBrowser();
   const args = [
     `--user-data-dir=${profileDir}`,
-    '--remote-debugging-address=127.0.0.1',
+    `--remote-debugging-address=${debuggingHost}`,
     `--remote-debugging-port=${debuggingPort}`,
     `--disable-extensions-except=${extensionDir}`,
     `--load-extension=${extensionDir}`,
@@ -426,11 +428,28 @@ async function main() {
   if (browserProxyServer) args.push(`--proxy-server=${browserProxyServer}`);
   if (browserProxyBypassList) args.push(`--proxy-bypass-list=${browserProxyBypassList}`);
   if (browserDiskCacheDir) args.push(`--disk-cache-dir=${browserDiskCacheDir}`);
+  const ephemeral = boolEnv('WEBBRAIN_EPHEMERAL', false);
+  if (ephemeral) {
+    // Chrome-for-Testing does not provide a configured setuid helper here.
+    // Disable only that legacy helper and retain the user-namespace/seccomp
+    // renderer sandbox used by the unprivileged DynamicUser.
+    args.push('--disable-breakpad', '--disable-crash-reporter', '--disable-setuid-sandbox');
+  }
   if (boolEnv('WEBBRAIN_HEADLESS', false)) args.push('--headless=new');
-  if (process.getuid?.() === 0) args.push('--no-sandbox');
+  if (!ephemeral && process.getuid?.() === 0) args.push('--no-sandbox');
   args.push(startUrl);
 
-  const child = spawn(browser, args, { stdio: 'inherit' });
+  const browserEnv = { ...process.env };
+  for (const name of [
+    'WEBBRAIN_SESSION_TOKEN',
+    'WEBBRAIN_PROVIDER_API_KEY',
+    'WEBBRAIN_BROWSER_PROXY_URL',
+    'WEBBRAIN_NOVNC_SECRET',
+    'WEBBRAIN_CONTROL_WS_URL',
+  ]) {
+    delete browserEnv[name];
+  }
+  const child = spawn(browser, args, { stdio: 'inherit', env: browserEnv });
   process.on('SIGINT', () => child.kill('SIGINT'));
   process.on('SIGTERM', () => child.kill('SIGTERM'));
 

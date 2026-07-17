@@ -8,6 +8,7 @@ import {
 const service = createDownloadsService({
   rootDir: process.env.WEBBRAIN_DOWNLOADS_ROOT || DEFAULT_DOWNLOADS_ROOT,
   maxUploadBytes: Number(process.env.WEBBRAIN_DOWNLOADS_UPLOAD_LIMIT_BYTES || DEFAULT_DOWNLOADS_UPLOAD_LIMIT_BYTES),
+  maxStorageBytes: process.env.WEBBRAIN_DOWNLOADS_TOTAL_LIMIT_BYTES || null,
 });
 const host = process.env.WEBBRAIN_DOWNLOADS_HOST || '127.0.0.1';
 const port = Number(process.env.WEBBRAIN_DOWNLOADS_PORT || 6083);

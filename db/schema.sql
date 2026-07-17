@@ -39,15 +39,22 @@ CREATE TABLE IF NOT EXISTS browser_sessions (
   volume_id VARCHAR(64) NULL,
   volume_name VARCHAR(128) NULL,
   volume_size_gib INT NULL,
+  profile_mode VARCHAR(16) NOT NULL DEFAULT 'persistent',
+  host_session_id VARCHAR(40) NULL,
+  runtime_port INT NULL,
+  runtime_generation VARCHAR(64) NULL,
   connect_secret TEXT NOT NULL,
   proxy_enabled TINYINT(1) NOT NULL DEFAULT 0,
   proxy_endpoint VARCHAR(512) NULL,
   proxy_updated_at DATETIME NULL,
   paused_at DATETIME NULL,
+  ended_at DATETIME NULL,
+  end_reason VARCHAR(255) NULL,
   expires_at DATETIME NOT NULL,
   created_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL,
-  FOREIGN KEY (user_id) REFERENCES users(id)
+  FOREIGN KEY (user_id) REFERENCES users(id),
+  INDEX idx_browser_sessions_host (host_session_id)
 );
 
 CREATE TABLE IF NOT EXISTS cloud_runs (

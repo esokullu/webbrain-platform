@@ -55,6 +55,15 @@ chmod 0700 "$mount_path" "$mount_path/chrome"
     WEBBRAIN_NOVNC_SECRET: session.connect_secret,
     WEBBRAIN_NOVNC_TARGET: 'http://127.0.0.1:6080',
     WEBBRAIN_NOVNC_GATE_PORT: String(config.droplet.noVncGatePort || 6081),
+    WEBBRAIN_EPHEMERAL_GATE_BASE_PORT: String(config.droplet.ephemeralGateBasePort || 6100),
+    WEBBRAIN_EPHEMERAL_MAX_SESSIONS: String(config.droplet.ephemeralMaxSessions || 1),
+    WEBBRAIN_EPHEMERAL_MEMORY_MAX: config.droplet.ephemeralMemoryMax || '2G',
+    WEBBRAIN_EPHEMERAL_DISK_MAX_BYTES: String(config.droplet.ephemeralDiskMaxBytes || 2 * 1024 * 1024 * 1024),
+    WEBBRAIN_EPHEMERAL_DOWNLOAD_LIMIT_BYTES: String(config.droplet.ephemeralDownloadLimitBytes || 512 * 1024 * 1024),
+    WEBBRAIN_EPHEMERAL_DOWNLOAD_TOTAL_LIMIT_BYTES: String(
+      config.droplet.ephemeralDownloadTotalLimitBytes || 1024 * 1024 * 1024
+    ),
+    WEBBRAIN_EPHEMERAL_LAUNCH_DIR: '/run/webbrain-ephemeral-launch',
     WEBBRAIN_DOWNLOADS_TARGET: 'http://127.0.0.1:6082',
     WEBBRAIN_DOWNLOADS_HOST: '127.0.0.1',
     WEBBRAIN_DOWNLOADS_PORT: '6083',
@@ -190,6 +199,9 @@ ${hasProfileVolume ? `      RequiresMountsFor=${profileMount}` : ''}
       [Service]
       EnvironmentFile=/etc/webbrain-droplet.env
       WorkingDirectory=${appDir}
+      RuntimeDirectory=webbrain-ephemeral-launch
+      RuntimeDirectoryMode=0700
+      RuntimeDirectoryPreserve=no
       ExecStart=/usr/bin/npm run start:droplet
       Restart=always
       RestartSec=3
@@ -198,6 +210,7 @@ ${hasProfileVolume ? `      RequiresMountsFor=${profileMount}` : ''}
 runcmd:
   - ufw allow OpenSSH
   - ufw allow 6081/tcp
+  - ufw allow ${Number(config.droplet.ephemeralGateBasePort || 6100)}:${Number(config.droplet.ephemeralGateBasePort || 6100) + Math.max(1, Number(config.droplet.ephemeralMaxSessions || 1)) - 1}/tcp
   - ufw --force enable
   - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
   - apt-get install -y nodejs

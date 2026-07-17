@@ -6,6 +6,7 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { MemoryStore } from '../src/db/memory.js';
 import { DigitalOceanProvisioner, NullProvisioner, digitalOceanDropletName, digitalOceanVolumeName } from '../src/platform/digitalocean.js';
 import { loadConfig } from '../src/platform/config.js';
+import { cleanupExpiredBrowserSessions } from '../src/platform/app.js';
 import { createPlatformServer } from '../src/platform/server.js';
 import { chromeExtensionIdForPath, renderCloudInit } from '../src/platform/cloud-init.js';
 import { verifyNoVncToken } from '../src/shared/novnc-token.js';
@@ -1094,6 +1095,449 @@ test('always-on browser creation skips the profile volume and keeps local Downlo
   }
 });
 
+test('ephemeral browsers reuse running resumable and always-on Droplets and are discarded on stop or host reset', async () => {
+  const ctx = await startPlatform({
+    WEBBRAIN_INSTANCE_DOMAIN: '',
+    WEBBRAIN_EPHEMERAL_MAX_SESSIONS: '1',
+    WEBBRAIN_SPACES_ENDPOINT: 'https://nyc3.digitaloceanspaces.com',
+    WEBBRAIN_SPACES_ACCESS_KEY: 'access',
+    WEBBRAIN_SPACES_SECRET_KEY: 'secret',
+    WEBBRAIN_SPACES_BUCKET: 'downloads',
+  }, { downloadsHandler: {} });
+  const sockets = [];
+
+  async function attachHost(sessionId, gatePort) {
+    const session = await ctx.store.getBrowserSession(sessionId);
+    const activeChildren = new Set();
+    const commands = [];
+    const ws = new WebSocket(`${ctx.wsBase}/droplet/control?session_token=${encodeURIComponent(session.connect_secret)}`);
+    sockets.push(ws);
+    await new Promise((resolve, reject) => {
+      ws.once('open', resolve);
+      ws.once('error', reject);
+    });
+    ws.on('message', raw => {
+      const msg = JSON.parse(raw.toString('utf8'));
+      if (msg.type === 'hello') return;
+      commands.push(msg.action);
+      let result = { ok: true };
+      if (msg.action === 'health') {
+        result = { ok: true, extension_connected: true, downloads_sync_enabled: Boolean(session.volume_id) };
+      } else if (msg.action === 'ephemeral.start') {
+        activeChildren.add(msg.payload.session_id);
+        result = {
+          exists: true,
+          session_id: msg.payload.session_id,
+          generation: `eph_${msg.payload.session_id}`,
+          gate_port: gatePort,
+          status: 'active',
+        };
+      } else if (msg.action === 'ephemeral.status') {
+        result = {
+          exists: activeChildren.has(msg.payload.session_id),
+          session_id: msg.payload.session_id,
+          generation: `eph_${msg.payload.session_id}`,
+          gate_port: gatePort,
+          status: 'active',
+        };
+      } else if (msg.action === 'ephemeral.stop') {
+        activeChildren.delete(msg.payload.session_id);
+        result = { ok: true, existed: true, session_id: msg.payload.session_id };
+      } else if (msg.action === 'ephemeral.stop_all') {
+        const stopped_session_ids = [...activeChildren];
+        activeChildren.clear();
+        result = { ok: true, stopped_session_ids };
+      }
+      ws.send(JSON.stringify({ id: msg.id, ok: true, result }));
+    });
+    return { commands, activeChildren };
+  }
+
+  try {
+    const cookie = await register(ctx.base, 'ephemeral@example.com');
+    const otherCookie = await register(ctx.base, 'ephemeral-other@example.com');
+    const resumable = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ display_name: 'Persistent host', lifecycle: 'resumable' }),
+    });
+    assert.equal(resumable.status, 201);
+    const resumableHost = await attachHost(resumable.body.browser_session.id, 6123);
+
+    const provisionedBeforeChild = ctx.provisioner.created.length;
+    const volumesBeforeChild = ctx.provisioner.createdVolumes.length;
+    const child = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({
+        display_name: 'Private research',
+        lifecycle: 'ephemeral',
+        host_session_id: resumable.body.browser_session.id,
+        ttl_ms: 60_000,
+      }),
+    });
+    assert.equal(child.status, 201);
+    assert.equal(child.body.browser_session.profile_mode, 'ephemeral');
+    assert.equal(child.body.browser_session.host_session_id, resumable.body.browser_session.id);
+    assert.equal(child.body.browser_session.volume, null);
+    assert.equal(ctx.provisioner.created.length, provisionedBeforeChild);
+    assert.equal(ctx.provisioner.createdVolumes.length, volumesBeforeChild);
+    assert.equal(resumableHost.commands.includes('ephemeral.start'), true);
+    const storedChild = await ctx.store.getBrowserSession(child.body.browser_session.id);
+    assert.equal(storedChild.droplet_id, resumable.body.browser_session.droplet_id);
+    assert.equal(storedChild.runtime_port, 6123);
+
+    const forbidden = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie: otherCookie },
+      body: JSON.stringify({
+        lifecycle: 'ephemeral',
+        host_session_id: resumable.body.browser_session.id,
+      }),
+    });
+    assert.equal(forbidden.status, 404);
+
+    const childWs = new WebSocket(`${ctx.wsBase}/droplet/control?session_token=${encodeURIComponent(storedChild.connect_secret)}`);
+    sockets.push(childWs);
+    await new Promise((resolve, reject) => {
+      childWs.once('open', resolve);
+      childWs.once('error', reject);
+    });
+    childWs.on('message', raw => {
+      const msg = JSON.parse(raw.toString('utf8'));
+      if (msg.type === 'hello') return;
+      if (msg.action === 'health') {
+        childWs.send(JSON.stringify({
+          id: msg.id,
+          ok: true,
+          result: { ok: true, extension_connected: true, downloads_sync_enabled: false },
+        }));
+      }
+    });
+    const readyChild = await request(ctx.base, `/api/browser-sessions/${storedChild.id}`, {
+      headers: { cookie },
+    });
+    assert.equal(readyChild.body.browser_session.status, 'ready');
+    assert.equal(readyChild.body.browser_session.runtime_ready, true);
+
+    const connect = await request(ctx.base, `/api/browser-sessions/${storedChild.id}/connect-token`, {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ scheme: 'http' }),
+    });
+    assert.equal(connect.status, 200);
+    assert.match(connect.body.url, /:6123\/vnc\.html/);
+
+    const deleted = await request(ctx.base, `/api/browser-sessions/${storedChild.id}`, {
+      method: 'DELETE',
+      headers: { cookie },
+    });
+    assert.equal(deleted.status, 200);
+    assert.equal(deleted.body.browser_session.status, 'destroyed');
+    assert.match(deleted.body.browser_session.end_reason, /temporary data was discarded/);
+    assert.equal(resumableHost.commands.includes('ephemeral.stop'), true);
+    assert.deepEqual(ctx.provisioner.destroyed, []);
+
+    const crashedChild = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({
+        lifecycle: 'ephemeral',
+        host_session_id: resumable.body.browser_session.id,
+      }),
+    });
+    assert.equal(crashedChild.status, 201);
+    resumableHost.activeChildren.clear();
+    const reconciledCrash = await request(
+      ctx.base,
+      `/api/browser-sessions/${crashedChild.body.browser_session.id}`,
+      { headers: { cookie } }
+    );
+    assert.equal(reconciledCrash.body.browser_session.status, 'destroyed');
+    assert.match(reconciledCrash.body.browser_session.end_reason, /runtime stopped or its host restarted/);
+
+    const pauseChild = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({
+        lifecycle: 'ephemeral',
+        host_session_id: resumable.body.browser_session.id,
+      }),
+    });
+    assert.equal(pauseChild.status, 201);
+    const pausedHost = await request(ctx.base, `/api/browser-sessions/${resumable.body.browser_session.id}/pause`, {
+      method: 'POST',
+      headers: { cookie },
+      body: '{}',
+    });
+    assert.equal(pausedHost.status, 200);
+    assert.equal(pausedHost.body.browser_session.status, 'paused');
+    assert.equal((await ctx.store.getBrowserSession(pauseChild.body.browser_session.id)).status, 'destroyed');
+    assert.equal(resumableHost.commands.includes('ephemeral.stop_all'), true);
+
+    const alwaysOn = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ display_name: 'Legacy host', lifecycle: 'always_on' }),
+    });
+    assert.equal(alwaysOn.status, 201);
+    const legacyHost = await attachHost(alwaysOn.body.browser_session.id, 6124);
+    const legacyChild = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({
+        lifecycle: 'ephemeral',
+        host_session_id: alwaysOn.body.browser_session.id,
+      }),
+    });
+    assert.equal(legacyChild.status, 201);
+    assert.equal(legacyChild.body.browser_session.host_session_id, alwaysOn.body.browser_session.id);
+    assert.equal(ctx.provisioner.created.length, 2);
+
+    const reset = await request(ctx.base, `/api/browser-sessions/${alwaysOn.body.browser_session.id}/reset`, {
+      method: 'POST',
+      headers: { cookie },
+      body: '{}',
+    });
+    assert.equal(reset.status, 202);
+    assert.deepEqual(reset.body.reset.terminated_ephemeral_session_ids, [legacyChild.body.browser_session.id]);
+    assert.equal(legacyHost.commands.includes('ephemeral.stop_all'), true);
+    const endedLegacyChild = await ctx.store.getBrowserSession(legacyChild.body.browser_session.id);
+    assert.equal(endedLegacyChild.status, 'destroyed');
+    assert.match(endedLegacyChild.end_reason, /host Droplet was reset/);
+  } finally {
+    for (const ws of sockets) ws.close();
+    await ctx.platform.close();
+  }
+});
+
+test('failed ephemeral startup keeps its placement until stop is confirmed', async () => {
+  const ctx = await startPlatform({ WEBBRAIN_INSTANCE_DOMAIN: '' });
+  const sockets = [];
+  try {
+    const cookie = await register(ctx.base, 'ephemeral-start-failure@example.com');
+    const createdHost = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ display_name: 'Startup failure host' }),
+    });
+    assert.equal(createdHost.status, 201);
+    const host = await ctx.store.getBrowserSession(createdHost.body.browser_session.id);
+    const failingSocket = new WebSocket(
+      `${ctx.wsBase}/droplet/control?session_token=${encodeURIComponent(host.connect_secret)}`
+    );
+    sockets.push(failingSocket);
+    await new Promise((resolve, reject) => {
+      failingSocket.once('open', resolve);
+      failingSocket.once('error', reject);
+    });
+    failingSocket.on('message', raw => {
+      const msg = JSON.parse(raw.toString('utf8'));
+      if (msg.type === 'hello') return;
+      if (msg.action === 'health') {
+        failingSocket.send(JSON.stringify({
+          id: msg.id,
+          ok: true,
+          result: { ok: true, extension_connected: true },
+        }));
+      } else if (msg.action === 'ephemeral.start') {
+        failingSocket.send(JSON.stringify({
+          id: msg.id,
+          ok: false,
+          status: 500,
+          error: 'transient unit failed to start',
+        }), () => failingSocket.terminate());
+      }
+    });
+
+    const failedCreate = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({
+        lifecycle: 'ephemeral',
+        host_session_id: host.id,
+      }),
+    });
+    assert.equal(failedCreate.status, 500);
+    const child = (await ctx.store.listHostedBrowserSessions(host.id))[0];
+    assert.equal(child.status, 'stopping');
+    assert.equal(child.droplet_id, host.droplet_id);
+    assert.equal(child.public_ip, host.public_ip);
+    assert.match(child.end_reason, /termination is pending/);
+
+    const commands = [];
+    const recoveredSocket = new WebSocket(
+      `${ctx.wsBase}/droplet/control?session_token=${encodeURIComponent(host.connect_secret)}`
+    );
+    sockets.push(recoveredSocket);
+    await new Promise((resolve, reject) => {
+      recoveredSocket.once('open', resolve);
+      recoveredSocket.once('error', reject);
+    });
+    recoveredSocket.on('message', raw => {
+      const msg = JSON.parse(raw.toString('utf8'));
+      if (msg.type === 'hello') return;
+      commands.push(msg.action);
+      recoveredSocket.send(JSON.stringify({
+        id: msg.id,
+        ok: true,
+        result: { ok: true, existed: true, session_id: child.id },
+      }));
+    });
+    const deleted = await request(ctx.base, `/api/browser-sessions/${child.id}`, {
+      method: 'DELETE',
+      headers: { cookie },
+    });
+    assert.equal(deleted.status, 200);
+    assert.equal(deleted.body.browser_session.status, 'destroyed');
+    assert.equal(commands.includes('ephemeral.stop'), true);
+    assert.equal((await ctx.store.getBrowserSession(child.id)).droplet_id, null);
+  } finally {
+    for (const ws of sockets) ws.close();
+    await ctx.platform.close();
+  }
+});
+
+test('expired ephemeral browsers are stopped and destroyed without touching their host Droplet', async () => {
+  const store = new MemoryStore();
+  const now = new Date().toISOString();
+  const host = await store.createBrowserSession({
+    id: 'bs_expiryhost',
+    user_id: 'usr_expiry',
+    status: 'ready',
+    profile_mode: 'persistent',
+    droplet_id: 'droplet-host',
+    public_ip: '203.0.113.10',
+    connect_secret: 'host-secret',
+    expires_at: new Date(Date.now() + 60_000).toISOString(),
+    created_at: now,
+    updated_at: now,
+  });
+  const child = await store.createBrowserSession({
+    id: 'bs_expirychild',
+    user_id: 'usr_expiry',
+    status: 'ready',
+    profile_mode: 'ephemeral',
+    host_session_id: host.id,
+    droplet_id: host.droplet_id,
+    public_ip: host.public_ip,
+    runtime_port: 6100,
+    runtime_generation: 'eph_expiry',
+    connect_secret: 'child-secret',
+    expires_at: new Date(Date.now() - 1_000).toISOString(),
+    created_at: now,
+    updated_at: now,
+  });
+  await store.createCloudRun({
+    id: 'run_expirychild',
+    user_id: child.user_id,
+    browser_session_id: child.id,
+    status: 'running',
+    created_at: now,
+    updated_at: now,
+  });
+
+  const commands = [];
+  const controlChannel = {
+    isConnected: sessionId => sessionId === host.id,
+    send: async (sessionId, action, payload) => {
+      commands.push({ sessionId, action, payload });
+      return { ok: true };
+    },
+  };
+  const provisioner = {
+    destroyDroplet: async () => assert.fail('ephemeral expiry must not destroy the host Droplet'),
+    waitForVolumeDetached: async () => assert.fail('ephemeral expiry must not detach a host volume'),
+    destroyVolume: async () => assert.fail('ephemeral expiry must not destroy a host volume'),
+  };
+
+  const cleaned = await cleanupExpiredBrowserSessions({ store, provisioner, controlChannel });
+  assert.deepEqual(cleaned.map(session => session.id), [child.id]);
+  assert.deepEqual(commands, [{
+    sessionId: host.id,
+    action: 'ephemeral.stop',
+    payload: { session_id: child.id },
+  }]);
+  assert.equal((await store.getBrowserSession(host.id)).status, 'ready');
+  const endedChild = await store.getBrowserSession(child.id);
+  assert.equal(endedChild.status, 'destroyed');
+  assert.equal(endedChild.droplet_id, null);
+  assert.equal(endedChild.runtime_port, null);
+  assert.match(endedChild.end_reason, /expired/);
+  const failedRun = await store.getCloudRun('run_expirychild');
+  assert.equal(failedRun.status, 'failed');
+  assert.match(failedRun.error, /expired/);
+});
+
+test('pending ephemeral teardown is retried after its host reconnects', async () => {
+  const store = new MemoryStore();
+  const now = new Date().toISOString();
+  const host = await store.createBrowserSession({
+    id: 'bs_retryhost',
+    user_id: 'usr_retry',
+    status: 'ready',
+    profile_mode: 'persistent',
+    droplet_id: 'droplet-retry',
+    public_ip: '203.0.113.11',
+    connect_secret: 'host-secret',
+    expires_at: new Date(Date.now() + 60_000).toISOString(),
+    created_at: now,
+    updated_at: now,
+  });
+  const child = await store.createBrowserSession({
+    id: 'bs_retrychild',
+    user_id: 'usr_retry',
+    status: 'stopping',
+    profile_mode: 'ephemeral',
+    host_session_id: host.id,
+    droplet_id: host.droplet_id,
+    public_ip: host.public_ip,
+    runtime_port: 6100,
+    runtime_generation: 'eph_retry',
+    connect_secret: 'child-secret',
+    end_reason: 'Termination is pending.',
+    expires_at: new Date(Date.now() + 60_000).toISOString(),
+    created_at: now,
+    updated_at: now,
+  });
+  let connected = false;
+  const commands = [];
+  const controlChannel = {
+    isConnected: sessionId => connected && sessionId === host.id,
+    send: async (sessionId, action, payload) => {
+      commands.push({ sessionId, action, payload });
+      return { ok: true };
+    },
+  };
+  const provisioner = {
+    destroyDroplet: async () => assert.fail('child teardown must not destroy the host Droplet'),
+    waitForVolumeDetached: async () => assert.fail('child teardown must not touch a host volume'),
+    destroyVolume: async () => assert.fail('child teardown must not touch a host volume'),
+  };
+
+  assert.deepEqual(
+    await cleanupExpiredBrowserSessions({ store, provisioner, controlChannel }),
+    []
+  );
+  const pending = await store.getBrowserSession(child.id);
+  assert.equal(pending.status, 'stopping');
+  assert.equal(pending.droplet_id, host.droplet_id);
+  assert.equal(pending.runtime_port, 6100);
+
+  connected = true;
+  const cleaned = await cleanupExpiredBrowserSessions({ store, provisioner, controlChannel });
+  assert.deepEqual(cleaned.map(session => session.id), [child.id]);
+  assert.deepEqual(commands, [{
+    sessionId: host.id,
+    action: 'ephemeral.stop',
+    payload: { session_id: child.id },
+  }]);
+  const destroyed = await store.getBrowserSession(child.id);
+  assert.equal(destroyed.status, 'destroyed');
+  assert.equal(destroyed.droplet_id, null);
+  assert.equal(destroyed.runtime_port, null);
+});
+
 test('browser create destroys the profile volume when droplet provisioning fails', async () => {
   const ctx = await startPlatform();
   try {
@@ -1649,7 +2093,7 @@ test('instance subdomains proxy HTTP and WebSocket traffic to the session drople
     WEBBRAIN_DB_DRIVER: 'memory',
     WEBBRAIN_PROVISIONER: 'null',
     WEBBRAIN_INSTANCE_DOMAIN: 'webbrain.cloud',
-    WEBBRAIN_NOVNC_GATE_PORT: String(upstreamAddress.port),
+    WEBBRAIN_NOVNC_GATE_PORT: String(upstreamAddress.port + 1),
   });
   const store = new MemoryStore();
   await store.createBrowserSession({
@@ -1657,6 +2101,7 @@ test('instance subdomains proxy HTTP and WebSocket traffic to the session drople
     user_id: 'usr_test',
     status: 'ready',
     public_ip: '127.0.0.1',
+    runtime_port: upstreamAddress.port,
     connect_secret: 'secret',
     expires_at: new Date(Date.now() + 60000).toISOString(),
     created_at: new Date().toISOString(),
@@ -1881,6 +2326,12 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
   assert.match(cloudInit, /DISPLAY=':99'/);
   assert.match(cloudInit, /WEBBRAIN_HEADLESS='false'/);
   assert.match(cloudInit, /WEBBRAIN_NOVNC_GATE_PORT='6081'/);
+  assert.match(cloudInit, /WEBBRAIN_EPHEMERAL_GATE_BASE_PORT='6100'/);
+  assert.match(cloudInit, /WEBBRAIN_EPHEMERAL_MAX_SESSIONS='1'/);
+  assert.match(cloudInit, /WEBBRAIN_EPHEMERAL_DISK_MAX_BYTES='2147483648'/);
+  assert.match(cloudInit, /WEBBRAIN_EPHEMERAL_DOWNLOAD_LIMIT_BYTES='536870912'/);
+  assert.match(cloudInit, /WEBBRAIN_EPHEMERAL_DOWNLOAD_TOTAL_LIMIT_BYTES='1073741824'/);
+  assert.match(cloudInit, /RuntimeDirectory=webbrain-ephemeral-launch/);
   assert.match(cloudInit, /WEBBRAIN_DOWNLOADS_TARGET='http:\/\/127\.0\.0\.1:6082'/);
   assert.match(cloudInit, /WEBBRAIN_DOWNLOADS_HOST='127\.0\.0\.1'/);
   assert.match(cloudInit, /WEBBRAIN_DOWNLOADS_PORT='6083'/);
@@ -1901,6 +2352,7 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
   assert.match(cloudInit, /webbrain-novnc\.service/);
   assert.match(cloudInit, /\/opt\/noVNC\/utils\/novnc_proxy --listen 127\.0\.0\.1:6080 --vnc 127\.0\.0\.1:5900/);
   assert.match(cloudInit, /ufw allow 6081\/tcp/);
+  assert.match(cloudInit, /ufw allow 6100:6100\/tcp/);
   assert.doesNotMatch(cloudInit, /ufw allow 608[23]\/tcp/);
   assert.match(cloudInit, /ufw --force enable/);
   assert.match(cloudInit, /https:\/\/deb\.nodesource\.com\/setup_20\.x/);
@@ -1979,6 +2431,11 @@ test('cloud browser launches at the virtual display size', async () => {
   assert.match(source, /try \{\s+tabNormalization = await normalizeStartupTabs\(extensionId\);/);
   assert.match(source, /start tab normalization skipped/);
   assert.match(source, /tab_normalization: tabNormalization/);
+  assert.match(source, /if \(!ephemeral && process\.getuid\?\.\(\) === 0\) args\.push\('--no-sandbox'\)/);
+  assert.match(source, /args\.push\('--disable-breakpad', '--disable-crash-reporter', '--disable-setuid-sandbox'\)/);
+  assert.match(source, /delete browserEnv\[name\]/);
+  assert.match(source, /'WEBBRAIN_SESSION_TOKEN'/);
+  assert.match(source, /'WEBBRAIN_PROVIDER_API_KEY'/);
 });
 
 test('digitalocean provisioner uses hostname-safe droplet names', async () => {

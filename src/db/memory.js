@@ -129,6 +129,16 @@ export class MemoryStore {
     return clone([...this.browserSessions.values()].filter(s => s.user_id === userId));
   }
 
+  async listHostedBrowserSessions(hostSessionId) {
+    return clone([...this.browserSessions.values()].filter(s => s.host_session_id === hostSessionId));
+  }
+
+  async listStoppingEphemeralBrowserSessions() {
+    return clone([...this.browserSessions.values()].filter(s => (
+      s.profile_mode === 'ephemeral' && s.status === 'stopping'
+    )));
+  }
+
   async updateBrowserSession(id, patch) {
     const row = this.browserSessions.get(id);
     if (!row) throw notFound('Browser session not found');

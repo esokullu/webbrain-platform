@@ -18,6 +18,7 @@ export function loadConfig(env = process.env) {
     registrationEnabled: env.WEBBRAIN_REGISTRATION_ENABLED === 'true',
     sessionTtlMs: Number(env.WEBBRAIN_WEB_SESSION_TTL_MS || 30 * 24 * 60 * 60 * 1000),
     browserSessionTtlMs: Number(env.WEBBRAIN_BROWSER_SESSION_TTL_MS || 6 * 60 * 60 * 1000),
+    browserCleanupIntervalMs: Math.max(5000, Number(env.WEBBRAIN_BROWSER_CLEANUP_INTERVAL_MS || 30000)),
     connectTokenTtlMs: Number(env.WEBBRAIN_CONNECT_TOKEN_TTL_MS || 5 * 60 * 1000),
     instanceDomain: String(env.WEBBRAIN_INSTANCE_DOMAIN || '').trim().toLowerCase(),
     runWaitTimeoutMs: Number(env.WEBBRAIN_RUN_WAIT_TIMEOUT_MS || 120000),
@@ -77,6 +78,14 @@ export function loadConfig(env = process.env) {
       providerBaseUrl: env.WEBBRAIN_PROVIDER_BASE_URL || `${baseUrl}/v1`,
       providerModel: env.WEBBRAIN_PROVIDER_MODEL || 'webbrain-cloud 1.0',
       noVncGatePort: Number(env.WEBBRAIN_NOVNC_GATE_PORT || 6081),
+      ephemeralGateBasePort: Number(env.WEBBRAIN_EPHEMERAL_GATE_BASE_PORT || 6100),
+      ephemeralMaxSessions: Math.max(1, Number(env.WEBBRAIN_EPHEMERAL_MAX_SESSIONS || 1)),
+      ephemeralMemoryMax: env.WEBBRAIN_EPHEMERAL_MEMORY_MAX || '2G',
+      ephemeralDiskMaxBytes: Number(env.WEBBRAIN_EPHEMERAL_DISK_MAX_BYTES || 2 * 1024 * 1024 * 1024),
+      ephemeralDownloadLimitBytes: Number(env.WEBBRAIN_EPHEMERAL_DOWNLOAD_LIMIT_BYTES || 512 * 1024 * 1024),
+      ephemeralDownloadTotalLimitBytes: Number(
+        env.WEBBRAIN_EPHEMERAL_DOWNLOAD_TOTAL_LIMIT_BYTES || 1024 * 1024 * 1024
+      ),
       readyTimeoutMs: Number(env.WEBBRAIN_DROPLET_READY_TIMEOUT_MS || 1000),
       profileMount: env.WEBBRAIN_PROFILE_MOUNT || '/mnt/webbrain-profile',
     },

@@ -23,6 +23,7 @@ export class DropletControlClient {
     reconnectMaxMs = 10000,
     pausePrepare = prepareDropletForPause,
     pauseCancel = cancelDropletPause,
+    ephemeralRuntimeManager = null,
     downloadsSyncEnabled = process.env.WEBBRAIN_DOWNLOADS_SYNC_ENABLED === 'true',
   }) {
     this.controlUrl = controlUrl;
@@ -34,6 +35,7 @@ export class DropletControlClient {
     this.reconnectMaxMs = reconnectMaxMs;
     this.pausePrepare = pausePrepare;
     this.pauseCancel = pauseCancel;
+    this.ephemeralRuntimeManager = ephemeralRuntimeManager;
     this.downloadsSyncEnabled = downloadsSyncEnabled;
     this.stopped = false;
     this.ws = null;
@@ -98,6 +100,26 @@ export class DropletControlClient {
   }
 
   async handleCommand(action, payload) {
+    if (action === 'ephemeral.start') {
+      if (!this.ephemeralRuntimeManager) {
+        throw Object.assign(new Error('This Droplet does not support hosted ephemeral browsers.'), { status: 409 });
+      }
+      return await this.ephemeralRuntimeManager.start(payload);
+    }
+    if (action === 'ephemeral.stop') {
+      if (!this.ephemeralRuntimeManager) {
+        throw Object.assign(new Error('This Droplet does not support hosted ephemeral browsers.'), { status: 409 });
+      }
+      return await this.ephemeralRuntimeManager.stop(payload);
+    }
+    if (action === 'ephemeral.status') {
+      if (!this.ephemeralRuntimeManager) return { exists: false, session_id: payload.session_id || null };
+      return await this.ephemeralRuntimeManager.status(payload);
+    }
+    if (action === 'ephemeral.stop_all') {
+      if (!this.ephemeralRuntimeManager) return { ok: true, stopped_session_ids: [] };
+      return await this.ephemeralRuntimeManager.stopAll();
+    }
     if (action === 'pause.prepare') {
       return await this.pausePrepare(payload);
     }

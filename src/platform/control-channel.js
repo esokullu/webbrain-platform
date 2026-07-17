@@ -17,7 +17,9 @@ export class DropletControlChannel {
       ws.sessionId = session.id;
       ws.on('message', raw => this.onMessage(raw));
       ws.on('close', () => {
-        if (this.connections.get(session.id) === ws) this.connections.delete(session.id);
+        if (this.connections.get(session.id) !== ws) return;
+        this.connections.delete(session.id);
+        this.rejectPendingForSession(session.id);
       });
       ws.send(JSON.stringify({ type: 'hello', session_id: session.id }));
     });
@@ -69,8 +71,19 @@ export class DropletControlChannel {
         e.status = 504;
         reject(e);
       }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve, reject, timer, sessionId });
     });
+  }
+
+  rejectPendingForSession(sessionId) {
+    for (const [id, item] of this.pending) {
+      if (item.sessionId !== sessionId) continue;
+      this.pending.delete(id);
+      clearTimeout(item.timer);
+      const error = new Error('Droplet control channel disconnected before confirming the command.');
+      error.status = 409;
+      item.reject(error);
+    }
   }
 
   onMessage(raw) {

@@ -23,6 +23,16 @@ test('dashboard columns are present in fresh schema and existing-database migrat
   assert.match(storeSource, /ALTER TABLE browser_sessions ADD COLUMN volume_id VARCHAR\(64\) NULL/);
   assert.match(storeSource, /ALTER TABLE browser_sessions ADD COLUMN volume_size_gib INT NULL/);
   assert.match(storeSource, /ALTER TABLE browser_sessions ADD COLUMN paused_at DATETIME NULL/);
+  assert.match(schema, /profile_mode VARCHAR\(16\) NOT NULL DEFAULT 'persistent'/);
+  assert.match(schema, /host_session_id VARCHAR\(40\) NULL/);
+  assert.match(schema, /runtime_port INT NULL/);
+  assert.match(schema, /runtime_generation VARCHAR\(64\) NULL/);
+  assert.match(schema, /ended_at DATETIME NULL/);
+  assert.match(schema, /end_reason VARCHAR\(255\) NULL/);
+  assert.match(schema, /INDEX idx_browser_sessions_host \(host_session_id\)/);
+  assert.match(storeSource, /ALTER TABLE browser_sessions ADD COLUMN profile_mode VARCHAR\(16\) NOT NULL DEFAULT 'persistent'/);
+  assert.match(storeSource, /CREATE INDEX idx_browser_sessions_host ON browser_sessions \(host_session_id\)/);
+  assert.match(storeSource, /async listHostedBrowserSessions\(/);
   assert.match(schema, /updates JSON NULL/);
   assert.match(storeSource, /ALTER TABLE cloud_runs ADD COLUMN updates JSON NULL AFTER error/);
   assert.match(schema, /parent_run_id VARCHAR\(40\) NULL/);

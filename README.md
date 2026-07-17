@@ -44,6 +44,13 @@ Platform:
 - `WEBBRAIN_PROXY_VERIFY_URL` (HTTP exit-IP endpoint; defaults to `http://api.ipify.org?format=json`)
 - `WEBBRAIN_PROXY_VERIFY_TIMEOUT_MS` (defaults to `10000`)
 - `WEBBRAIN_PROXY_BYPASS_LIST` (optional Chrome bypass list; defaults to the platform hostname)
+- `WEBBRAIN_EPHEMERAL_GATE_BASE_PORT` (defaults to `6100`; first public noVNC gate reserved for hosted ephemeral browsers)
+- `WEBBRAIN_EPHEMERAL_MAX_SESSIONS` (defaults to `1` additional browser per running Droplet)
+- `WEBBRAIN_EPHEMERAL_MEMORY_MAX` (defaults to `2G` for each transient runtime)
+- `WEBBRAIN_EPHEMERAL_DISK_MAX_BYTES` (defaults to 2 GiB total writable data per temporary browser)
+- `WEBBRAIN_EPHEMERAL_DOWNLOAD_LIMIT_BYTES` (defaults to 512 MiB per uploaded file in a temporary browser)
+- `WEBBRAIN_EPHEMERAL_DOWNLOAD_TOTAL_LIMIT_BYTES` (defaults to 1 GiB of temporary Downloads)
+- `WEBBRAIN_BROWSER_CLEANUP_INTERVAL_MS` (defaults to `30000`)
 
 Production uses `WEBBRAIN_MODEL_PROXY_BASE_URL=https://api.webbrain.one/v1`.
 The platform authenticates browser model traffic with the per-session secret,
@@ -119,11 +126,12 @@ curl -sS -X POST \
   -d '{"display_name":"Research","lifecycle":"resumable"}'
 ```
 
-`lifecycle` accepts `resumable` (the default) or `always_on`. Resumable
+`lifecycle` accepts `resumable` (the default), `always_on`, or `ephemeral`. Resumable
 browsers receive a fixed 2 GiB profile volume and can be paused once shared
 Downloads storage is configured. Always-on browsers use the classic single
 Droplet layout: Chrome state and Downloads stay on that Droplet, and Pause is
-unavailable.
+unavailable. Ephemeral browsers reuse one of the user's running resumable or
+always-on Droplets without mounting or reading its Chrome profile.
 
 The response is `201 Created`:
 
@@ -136,6 +144,8 @@ The response is `201 Created`:
     "public_ip": null,
     "region": "nyc3",
     "size": "s-2vcpu-4gb",
+    "profile_mode": "persistent",
+    "host_session_id": null,
     "volume": {
       "id": "volume-id",
       "name": "wb-profile-bs-0123456789abcdef",
@@ -183,6 +193,40 @@ authentication, while API and session responses expose only the credential-free
 endpoint and verified exit IP. The initial URL is written to the root-only
 Droplet environment by cloud-init; live replacements are stored in a root-only
 state file and survive service restarts.
+
+To start a blank ephemeral browser on a running browser's Droplet, pass that
+browser as `host_session_id`:
+
+```bash
+export WEBBRAIN_HOST_SESSION_ID='bs_existing_host'
+
+curl -sS -X POST https://webbrain.cloud/api/browser-sessions \
+  -H "Authorization: Bearer $WEBBRAIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"display_name\": \"Private research\",
+    \"lifecycle\": \"ephemeral\",
+    \"host_session_id\": \"$WEBBRAIN_HOST_SESSION_ID\",
+    \"ttl_ms\": 3600000
+  }"
+```
+
+The host must belong to the same user and be running with its Droplet control
+channel connected. A paused resumable browser cannot host a child because its
+Droplet no longer exists. New Droplets support hosted ephemeral browsers;
+older already-running Droplets must be upgraded or recreated once so their
+runtime manager is installed.
+
+An ephemeral browser gets a separate control channel, display, proxy relay,
+noVNC gate, Downloads service, and blank Chrome profile. All writable browser
+state lives in the service's private, disk-backed `/tmp` namespace; `/run`
+holds only the systemd lifetime marker. The runtime uses a dynamic unprivileged
+user, cannot access the host's loopback services or persistent profile paths,
+and never attaches the host's profile volume. systemd removes the private
+temporary namespace after a normal stop or crash. Browser crashes, runtime
+manager restarts, host pause/reset/delete, Droplet reboot, and TTL expiry all
+end the session instead of restoring it. Downloads are temporary and have a
+separate aggregate quota.
 
 Provisioning takes time. Poll the session until `runtime_ready` is `true`:
 
@@ -295,6 +339,10 @@ so destroying a Droplet can never discard local-only Downloads.
 The running Droplet must also report that sync was enabled when it booted.
 Turning on Spaces later does not migrate an existing Droplet's local Downloads
 or make that Droplet safe to pause.
+
+Pausing, resetting, deleting, or expiring a host first terminates all of its
+ephemeral children and marks their unfinished runs failed. Their volatile
+profiles and Downloads cannot be resumed.
 
 ```bash
 curl -sS -X POST \
@@ -556,14 +604,14 @@ Abort is cooperative. A run can briefly report `aborting` before becoming
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/browser-sessions` | Create a resumable browser by default, or an always-on browser with `lifecycle: "always_on"`. |
+| `POST` | `/api/browser-sessions` | Create a resumable browser by default, an always-on browser, or an ephemeral browser on a running `host_session_id`. |
 | `GET` | `/api/browser-sessions` | List the authenticated user's browser sessions. |
 | `GET` | `/api/browser-sessions/:sessionId` | Read provisioning and runtime readiness. |
 | `PATCH` | `/api/browser-sessions/:sessionId` | Set or clear the browser's `display_name`. |
-| `POST` | `/api/browser-sessions/:sessionId/reset` | Force-restart the current Droplet with a hard power cycle. Any active run is marked failed. |
+| `POST` | `/api/browser-sessions/:sessionId/reset` | Force-restart a persistent browser's Droplet, ending hosted ephemeral children. Resetting an ephemeral browser ends it. |
 | `POST` | `/api/browser-sessions/:sessionId/pause` | Safely stop Chrome, retain its 2 GiB profile volume, and destroy the Droplet. |
 | `POST` | `/api/browser-sessions/:sessionId/resume` | Create a new Droplet and attach the saved profile volume. |
-| `DELETE` | `/api/browser-sessions/:sessionId` | Destroy the browser session, Droplet, and profile volume. |
+| `DELETE` | `/api/browser-sessions/:sessionId` | Destroy a persistent browser and its infrastructure, or stop only an ephemeral runtime while retaining its host Droplet. |
 | `POST` | `/api/browser-sessions/:sessionId/connect-token` | Create a short-lived signed noVNC URL. |
 | `POST` | `/api/browser-sessions/:sessionId/downloads-access` | Create private Downloads URL and Basic Auth credentials. |
 

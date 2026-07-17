@@ -223,6 +223,34 @@ test('interrupted uploads remove internal temporary files', async () => {
   }
 });
 
+test('downloads service enforces an aggregate storage quota across uploads', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'webbrain-downloads-quota-'));
+  const service = createDownloadsService({
+    rootDir: root,
+    maxUploadBytes: 16,
+    maxStorageBytes: 6,
+  });
+  const address = await service.listen(0);
+  try {
+    const first = await request(address.port, '/downloads/first.bin', {
+      method: 'PUT',
+      body: Buffer.from('1234'),
+    });
+    assert.equal(first.status, 201);
+    const overQuota = await request(address.port, '/downloads/second.bin', {
+      method: 'PUT',
+      body: Buffer.from('567'),
+    });
+    assert.equal(overQuota.status, 507);
+    assert.match(overQuota.body.toString(), /storage has reached/i);
+    assert.equal(await fs.readFile(path.join(root, 'first.bin'), 'utf8'), '1234');
+    assert.deepEqual(await fs.readdir(root), ['first.bin']);
+  } finally {
+    await service.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('droplet gate rejects direct and stale Downloads requests while preserving noVNC', async () => {
   const received = [];
   const downloads = http.createServer((req, res) => {

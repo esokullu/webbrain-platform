@@ -88,6 +88,26 @@ test('droplet control exposes proxy status and verified live updates', async () 
   }]);
 });
 
+test('droplet control delegates hosted ephemeral runtime lifecycle commands', async () => {
+  const calls = [];
+  const manager = {
+    async start(payload) { calls.push(['start', payload]); return { exists: true, gate_port: 6100 }; },
+    async status(payload) { calls.push(['status', payload]); return { exists: true }; },
+    async stop(payload) { calls.push(['stop', payload]); return { ok: true }; },
+    async stopAll() { calls.push(['stopAll']); return { ok: true, stopped_session_ids: [] }; },
+  };
+  const client = new DropletControlClient({
+    controlUrl: 'ws://127.0.0.1/control',
+    sessionToken: 'test',
+    ephemeralRuntimeManager: manager,
+  });
+  assert.equal((await client.handleCommand('ephemeral.start', { session_id: 'bs_child' })).gate_port, 6100);
+  assert.equal((await client.handleCommand('ephemeral.status', { session_id: 'bs_child' })).exists, true);
+  assert.equal((await client.handleCommand('ephemeral.stop', { session_id: 'bs_child' })).ok, true);
+  assert.equal((await client.handleCommand('ephemeral.stop_all', {})).ok, true);
+  assert.deepEqual(calls.map(call => call[0]), ['start', 'status', 'stop', 'stopAll']);
+});
+
 test('pause preparation refuses staged downloads and otherwise stops, flushes, and unmounts in order', async () => {
   const commands = [];
   await assert.rejects(() => prepareDropletForPause({

@@ -83,7 +83,8 @@ export function createInstanceProxy({ store, domain, targetPort = 6081, download
       res.end('Browser instance not found');
       return true;
     }
-    const headers = upstreamHeaders(req, session.public_ip, targetPort);
+    const sessionTargetPort = Number(session.runtime_port || targetPort);
+    const headers = upstreamHeaders(req, session.public_ip, sessionTargetPort);
     if (isDownloads) {
       delete headers.authorization;
       const signed = signDownloadsProxyRequest(session.connect_secret, {
@@ -95,7 +96,7 @@ export function createInstanceProxy({ store, domain, targetPort = 6081, download
     }
     const upstreamReq = http.request({
       hostname: session.public_ip,
-      port: targetPort,
+      port: sessionTargetPort,
       method: req.method,
       path: req.url,
       headers,
@@ -139,8 +140,9 @@ export function createInstanceProxy({ store, domain, targetPort = 6081, download
 
       wss.handleUpgrade(req, socket, head, client => {
         const protocols = websocketProtocols(req);
+        const sessionTargetPort = Number(session.runtime_port || targetPort);
         const upstream = new WebSocket(
-          `ws://${session.public_ip}:${targetPort}${req.url}`,
+          `ws://${session.public_ip}:${sessionTargetPort}${req.url}`,
           protocols.length ? protocols : undefined,
           { headers: websocketUpstreamHeaders(req) }
         );

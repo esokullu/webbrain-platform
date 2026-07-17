@@ -345,19 +345,19 @@ export function docsPage() {
         <section class="docs-section" id="sessions">
           <p class="section-kicker">Lifecycle</p>
           <h2>Browser sessions</h2>
-          <p>Resumable sessions keep Chrome on a fixed private 2 GiB volume and can be paused after shared Downloads storage is configured. Always-on sessions keep Chrome and Downloads on one running Droplet and cannot be paused. Create either type, poll until <span class="inline-code">runtime_ready</span> is true, then start runs. There is no automatic disk expansion.</p>
+          <p>Resumable sessions keep Chrome on a fixed private 2 GiB volume and can be paused after shared Downloads storage is configured. Always-on sessions keep Chrome and Downloads on one running Droplet and cannot be paused. Ephemeral sessions pass <span class="inline-code">lifecycle: "ephemeral"</span> plus a same-owner running <span class="inline-code">host_session_id</span>; their blank profile, cache, and Downloads live in a bounded systemd-private <span class="inline-code">/tmp</span> namespace and are discarded on any stop, crash, host restart, or expiry. Poll until <span class="inline-code">runtime_ready</span> is true before starting runs.</p>
           <div class="endpoint-list">
-            <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions</code><span>Create a resumable browser by default, or pass <code>lifecycle: "always_on"</code>.</span></div>
+            <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions</code><span>Create a resumable, always-on, or hosted ephemeral browser.</span></div>
             <div class="endpoint"><span class="method">GET</span><code>/api/browser-sessions</code><span>List your sessions.</span></div>
             <div class="endpoint"><span class="method">GET</span><code>/api/browser-sessions/:sessionId</code><span>Read readiness.</span></div>
             <div class="endpoint"><span class="method">PATCH</span><code>/api/browser-sessions/:sessionId</code><span>Set its display name.</span></div>
             <div class="endpoint"><span class="method">GET</span><code>/api/browser-sessions/:sessionId/proxy</code><span>Read proxy and exit IP.</span></div>
             <div class="endpoint"><span class="method">PATCH</span><code>/api/browser-sessions/:sessionId/proxy</code><span>Switch proxy without restart.</span></div>
             <div class="endpoint"><span class="method">DELETE</span><code>/api/browser-sessions/:sessionId/proxy</code><span>Return to a direct connection.</span></div>
-            <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/reset</code><span>Force-restart the current Droplet.</span></div>
+            <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/reset</code><span>Restart a persistent host or terminate an ephemeral browser.</span></div>
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/pause</code><span>Stop the Droplet and retain the profile.</span></div>
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/resume</code><span>Attach the profile to a new Droplet.</span></div>
-            <div class="endpoint"><span class="method">DELETE</span><code>/api/browser-sessions/:sessionId</code><span>Destroy the browser and profile volume.</span></div>
+            <div class="endpoint"><span class="method">DELETE</span><code>/api/browser-sessions/:sessionId</code><span>Destroy persistent infrastructure or stop an ephemeral runtime.</span></div>
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/connect-token</code><span>Create a noVNC link.</span></div>
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/downloads-access</code><span>Create private Downloads credentials.</span></div>
           </div>

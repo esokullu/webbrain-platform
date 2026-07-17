@@ -14,15 +14,34 @@ const TEMP_PREFIX = '.webbrain-upload-';
 export function createDownloadsService({
   rootDir = DEFAULT_DOWNLOADS_ROOT,
   maxUploadBytes = DEFAULT_DOWNLOADS_UPLOAD_LIMIT_BYTES,
+  maxStorageBytes = null,
 } = {}) {
   const root = path.resolve(rootDir);
   const uploadLimit = Number(maxUploadBytes);
   if (!Number.isSafeInteger(uploadLimit) || uploadLimit <= 0) {
     throw new Error('Downloads upload limit must be a positive safe integer.');
   }
+  const storageLimit = maxStorageBytes == null || maxStorageBytes === ''
+    ? null
+    : Number(maxStorageBytes);
+  if (storageLimit != null && (!Number.isSafeInteger(storageLimit) || storageLimit <= 0)) {
+    throw new Error('Downloads storage limit must be a positive safe integer.');
+  }
+  let uploadQueue = Promise.resolve();
+  const withUploadLock = async callback => {
+    const previous = uploadQueue;
+    let release;
+    uploadQueue = new Promise(resolve => { release = resolve; });
+    await previous;
+    try {
+      return await callback();
+    } finally {
+      release();
+    }
+  };
 
   const server = http.createServer((req, res) => {
-    handleRequest(req, res, { root, uploadLimit }).catch(error => {
+    handleRequest(req, res, { root, uploadLimit, storageLimit, withUploadLock }).catch(error => {
       if (res.headersSent || res.destroyed) {
         res.destroy(error);
         return;
@@ -82,7 +101,7 @@ async function handleRequest(req, res, context) {
     if (route.trailingSlash || route.segments.length === 0) {
       return sendText(res, 400, 'Upload URL must include a filename.');
     }
-    return await receiveUpload(req, res, context, route);
+    return await context.withUploadLock(() => receiveUpload(req, res, context, route));
   }
 
   res.setHeader('allow', 'GET, HEAD, PUT');
@@ -190,7 +209,7 @@ function serveFile(req, res, filePath, fileName, stat) {
   stream.pipe(res);
 }
 
-async function receiveUpload(req, res, { root, uploadLimit }, route) {
+async function receiveUpload(req, res, { root, uploadLimit, storageLimit }, route) {
   const declaredLength = parseContentLength(req.headers['content-length']);
   if (declaredLength?.invalid) return sendText(res, 400, 'Invalid Content-Length.');
   if (declaredLength != null && declaredLength > uploadLimit) {
@@ -202,11 +221,23 @@ async function receiveUpload(req, res, { root, uploadLimit }, route) {
   const parent = await resolveExistingPath(root, parentSegments);
   if (!parent || !parent.stat.isDirectory()) return sendText(res, 404, 'Upload directory not found.');
 
+  const usedBytes = storageLimit == null ? 0 : await directorySize(root);
+  const remainingBytes = storageLimit == null ? uploadLimit : Math.max(0, storageLimit - usedBytes);
+  if (storageLimit != null && (
+    remainingBytes === 0
+    || (declaredLength != null && declaredLength > remainingBytes)
+  )) {
+    return sendText(res, 507, `Downloads storage has reached its ${formatBytes(storageLimit)} limit.`);
+  }
+  const streamLimit = Math.min(uploadLimit, remainingBytes);
+  const limitErrorCode = storageLimit != null && streamLimit < uploadLimit
+    ? 'STORAGE_FULL'
+    : 'UPLOAD_TOO_LARGE';
   const tempName = `${TEMP_PREFIX}${randomBytes(12).toString('hex')}.part`;
   const tempPath = path.join(parent.path, tempName);
   let bytesWritten = 0;
   try {
-    bytesWritten = await streamUpload(req, tempPath, uploadLimit);
+    bytesWritten = await streamUpload(req, tempPath, streamLimit, limitErrorCode);
     const final = await linkWithAvailableName(tempPath, parent.path, requestedName);
     await fs.unlink(tempPath);
     const body = JSON.stringify({
@@ -226,6 +257,9 @@ async function receiveUpload(req, res, { root, uploadLimit }, route) {
     if (error.code === 'UPLOAD_TOO_LARGE') {
       return sendText(res, 413, `File exceeds the ${formatBytes(uploadLimit)} upload limit.`);
     }
+    if (error.code === 'STORAGE_FULL') {
+      return sendText(res, 507, `Downloads storage has reached its ${formatBytes(storageLimit)} limit.`);
+    }
     if (error.code === 'REQUEST_ABORTED') {
       if (!res.destroyed) res.destroy();
       return;
@@ -234,7 +268,7 @@ async function receiveUpload(req, res, { root, uploadLimit }, route) {
   }
 }
 
-function streamUpload(req, tempPath, uploadLimit) {
+function streamUpload(req, tempPath, uploadLimit, limitErrorCode = 'UPLOAD_TOO_LARGE') {
   return new Promise((resolve, reject) => {
     const output = createWriteStream(tempPath, { flags: 'wx', mode: 0o600 });
     let bytes = 0;
@@ -252,7 +286,7 @@ function streamUpload(req, tempPath, uploadLimit) {
       bytes += chunk.length;
       if (bytes > uploadLimit) {
         const error = new Error('Upload exceeds the configured limit.');
-        error.code = 'UPLOAD_TOO_LARGE';
+        error.code = limitErrorCode;
         req.resume();
         fail(error);
         return;
@@ -280,6 +314,24 @@ function streamUpload(req, tempPath, uploadLimit) {
       resolve(bytes);
     });
   });
+}
+
+async function directorySize(root) {
+  let total = 0;
+  const pending = [root];
+  while (pending.length) {
+    const directory = pending.pop();
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) continue;
+      const itemPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(itemPath);
+      } else if (entry.isFile()) {
+        total += (await fs.lstat(itemPath)).size;
+      }
+    }
+  }
+  return total;
 }
 
 async function linkWithAvailableName(tempPath, parentPath, requestedName) {

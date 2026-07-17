@@ -29,6 +29,7 @@ function normalizeBrowserSession(row) {
     proxy_enabled: Boolean(row.proxy_enabled),
     proxy_updated_at: fromMysqlDate(row.proxy_updated_at),
     paused_at: fromMysqlDate(row.paused_at),
+    ended_at: fromMysqlDate(row.ended_at),
     expires_at: fromMysqlDate(row.expires_at),
     created_at: fromMysqlDate(row.created_at),
     updated_at: fromMysqlDate(row.updated_at),
@@ -117,6 +118,37 @@ export class MySqlStore {
         { column }
       );
       if (!rows.length) await this.pool.query(alter);
+    }
+    const ephemeralBrowserColumns = [
+      ['profile_mode', "ALTER TABLE browser_sessions ADD COLUMN profile_mode VARCHAR(16) NOT NULL DEFAULT 'persistent' AFTER volume_size_gib"],
+      ['host_session_id', 'ALTER TABLE browser_sessions ADD COLUMN host_session_id VARCHAR(40) NULL AFTER profile_mode'],
+      ['runtime_port', 'ALTER TABLE browser_sessions ADD COLUMN runtime_port INT NULL AFTER host_session_id'],
+      ['runtime_generation', 'ALTER TABLE browser_sessions ADD COLUMN runtime_generation VARCHAR(64) NULL AFTER runtime_port'],
+      ['ended_at', 'ALTER TABLE browser_sessions ADD COLUMN ended_at DATETIME NULL AFTER paused_at'],
+      ['end_reason', 'ALTER TABLE browser_sessions ADD COLUMN end_reason VARCHAR(255) NULL AFTER ended_at'],
+    ];
+    for (const [column, alter] of ephemeralBrowserColumns) {
+      const [rows] = await this.pool.execute(
+        `SELECT 1
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'browser_sessions'
+           AND COLUMN_NAME = :column
+         LIMIT 1`,
+        { column }
+      );
+      if (!rows.length) await this.pool.query(alter);
+    }
+    const [hostSessionIndexes] = await this.pool.execute(
+      `SELECT 1
+       FROM information_schema.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'browser_sessions'
+         AND INDEX_NAME = 'idx_browser_sessions_host'
+       LIMIT 1`
+    );
+    if (!hostSessionIndexes.length) {
+      await this.pool.query('CREATE INDEX idx_browser_sessions_host ON browser_sessions (host_session_id)');
     }
     const [runUpdateColumns] = await this.pool.execute(
       `SELECT 1
@@ -296,11 +328,15 @@ export class MySqlStore {
   async createBrowserSession(row) {
     await this.pool.execute(
       `INSERT INTO browser_sessions
-       (id,user_id,display_name,status,droplet_id,public_ip,region,size,volume_id,volume_name,volume_size_gib,connect_secret,proxy_enabled,proxy_endpoint,proxy_updated_at,paused_at,expires_at,created_at,updated_at)
-       VALUES (:id,:user_id,:display_name,:status,:droplet_id,:public_ip,:region,:size,:volume_id,:volume_name,:volume_size_gib,:connect_secret,:proxy_enabled,:proxy_endpoint,:proxy_updated_at,:paused_at,:expires_at,:created_at,:updated_at)`,
+       (id,user_id,display_name,status,droplet_id,public_ip,region,size,volume_id,volume_name,volume_size_gib,profile_mode,host_session_id,runtime_port,runtime_generation,connect_secret,proxy_enabled,proxy_endpoint,proxy_updated_at,paused_at,ended_at,end_reason,expires_at,created_at,updated_at)
+       VALUES (:id,:user_id,:display_name,:status,:droplet_id,:public_ip,:region,:size,:volume_id,:volume_name,:volume_size_gib,:profile_mode,:host_session_id,:runtime_port,:runtime_generation,:connect_secret,:proxy_enabled,:proxy_endpoint,:proxy_updated_at,:paused_at,:ended_at,:end_reason,:expires_at,:created_at,:updated_at)`,
       {
         ...row,
         display_name: row.display_name || null,
+        profile_mode: row.profile_mode || 'persistent',
+        host_session_id: row.host_session_id || null,
+        runtime_port: row.runtime_port || null,
+        runtime_generation: row.runtime_generation || null,
         proxy_enabled: row.proxy_enabled ? 1 : 0,
         proxy_endpoint: row.proxy_endpoint || null,
         proxy_updated_at: toMysqlDate(row.proxy_updated_at),
@@ -308,6 +344,8 @@ export class MySqlStore {
         volume_name: row.volume_name || null,
         volume_size_gib: row.volume_size_gib || null,
         paused_at: toMysqlDate(row.paused_at),
+        ended_at: toMysqlDate(row.ended_at),
+        end_reason: row.end_reason || null,
         expires_at: toMysqlDate(row.expires_at),
         created_at: toMysqlDate(row.created_at),
         updated_at: toMysqlDate(row.updated_at),
@@ -328,13 +366,28 @@ export class MySqlStore {
     return rows.map(normalizeBrowserSession);
   }
 
+  async listHostedBrowserSessions(hostSessionId) {
+    const [rows] = await this.pool.execute(
+      'SELECT * FROM browser_sessions WHERE host_session_id = :hostSessionId ORDER BY created_at DESC',
+      { hostSessionId }
+    );
+    return rows.map(normalizeBrowserSession);
+  }
+
+  async listStoppingEphemeralBrowserSessions() {
+    const [rows] = await this.pool.execute(
+      "SELECT * FROM browser_sessions WHERE profile_mode = 'ephemeral' AND status = 'stopping' ORDER BY updated_at ASC"
+    );
+    return rows.map(normalizeBrowserSession);
+  }
+
   async updateBrowserSession(id, patch) {
     const fields = Object.keys(patch).filter(k => patch[k] !== undefined);
     if (!fields.length) return await this.getBrowserSession(id);
     const assignments = fields.map(k => `${k} = :${k}`).join(', ');
     const values = { id, ...patch };
     if ('proxy_enabled' in values) values.proxy_enabled = values.proxy_enabled ? 1 : 0;
-    for (const key of ['proxy_updated_at', 'paused_at', 'expires_at', 'created_at', 'updated_at']) {
+    for (const key of ['proxy_updated_at', 'paused_at', 'ended_at', 'expires_at', 'created_at', 'updated_at']) {
       if (values[key]) values[key] = toMysqlDate(values[key]);
     }
     await this.pool.execute(`UPDATE browser_sessions SET ${assignments} WHERE id = :id`, values);
@@ -359,7 +412,7 @@ export class MySqlStore {
     const assignments = fields.map(k => `${k} = :${k}`).join(', ');
     const values = { id, expectedStatus, ...patch };
     if ('proxy_enabled' in values) values.proxy_enabled = values.proxy_enabled ? 1 : 0;
-    for (const key of ['proxy_updated_at', 'paused_at', 'expires_at', 'created_at', 'updated_at']) {
+    for (const key of ['proxy_updated_at', 'paused_at', 'ended_at', 'expires_at', 'created_at', 'updated_at']) {
       if (values[key]) values[key] = toMysqlDate(values[key]);
     }
     const [result] = await this.pool.execute(

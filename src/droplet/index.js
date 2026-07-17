@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { DropletControlClient } from './control-client.js';
+import { EphemeralRuntimeManager } from './ephemeral-runtime-manager.js';
 import { createNoVncGate } from './novnc-gate.js';
 import { BrowserProxyRelay } from './proxy-relay.js';
 
@@ -13,6 +14,11 @@ if (!sessionToken) {
   console.error('WEBBRAIN_SESSION_TOKEN is required for droplet role.');
   process.exit(1);
 }
+
+const ephemeralRuntimeManager = process.env.WEBBRAIN_EPHEMERAL_CHILD === 'true'
+  ? null
+  : new EphemeralRuntimeManager();
+await ephemeralRuntimeManager?.discardStaleRuntimes();
 
 const proxyRelay = new BrowserProxyRelay({
   host: process.env.WEBBRAIN_PROXY_RELAY_HOST || '127.0.0.1',
@@ -31,6 +37,7 @@ const control = new DropletControlClient({
   sidecarBase,
   proxyRelay,
   proxyVerifyUrl,
+  ephemeralRuntimeManager,
 });
 control.start();
 
@@ -52,9 +59,22 @@ async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
   control.stop();
-  await gate?.close();
-  await proxyRelay.close();
-  process.exit(0);
+  let exitCode = 0;
+  try {
+    await ephemeralRuntimeManager?.stopAll();
+  } catch (error) {
+    exitCode = 1;
+    console.error('[ephemeral] graceful shutdown could not confirm every runtime stopped:', error.message);
+  }
+  await gate?.close().catch(error => {
+    exitCode = 1;
+    console.error('[novnc] shutdown failed:', error.message);
+  });
+  await proxyRelay.close().catch(error => {
+    exitCode = 1;
+    console.error('[browser-proxy] shutdown failed:', error.message);
+  });
+  process.exit(exitCode);
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
