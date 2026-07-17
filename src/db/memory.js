@@ -22,6 +22,7 @@ export class MemoryStore {
     this.webSessions = new Map();
     this.apiKeys = new Map();
     this.browserSessions = new Map();
+    this.warmDroplets = new Map();
     this.cloudRuns = new Map();
     this.auditLogs = [];
   }
@@ -171,6 +172,56 @@ export class MemoryStore {
         && expiresAt <= cutoff
         && !['stopping', 'stopped', 'destroyed'].includes(s.status);
     }));
+  }
+
+  async createWarmDroplet(row) {
+    this.warmDroplets.set(row.id, clone(row));
+    return clone(row);
+  }
+
+  async getWarmDroplet(id) {
+    return clone(this.warmDroplets.get(id) || null);
+  }
+
+  async getWarmDropletByToken(token) {
+    return clone([...this.warmDroplets.values()].find(row => row.pool_token === token) || null);
+  }
+
+  async listWarmDroplets() {
+    return clone([...this.warmDroplets.values()]);
+  }
+
+  async updateWarmDroplet(id, patch) {
+    const row = this.warmDroplets.get(id);
+    if (!row) throw notFound('Warm Droplet not found');
+    Object.assign(row, clone(patch), { updated_at: patch.updated_at || nowIso() });
+    return clone(row);
+  }
+
+  async updateWarmDropletIfStatus(id, expectedStatus, patch) {
+    const row = this.warmDroplets.get(id);
+    if (!row) throw notFound('Warm Droplet not found');
+    if (row.status !== expectedStatus) return null;
+    Object.assign(row, clone(patch), { updated_at: patch.updated_at || nowIso() });
+    return clone(row);
+  }
+
+  async claimReadyWarmDroplet({ region, size, sessionId, now = nowIso() }) {
+    const row = [...this.warmDroplets.values()]
+      .filter(item => (
+        item.status === 'ready'
+        && !item.assigned_session_id
+        && item.region === region
+        && item.size === size
+        && item.droplet_id
+        && item.public_ip
+      ))
+      .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))[0];
+    if (!row) return null;
+    row.status = 'claiming';
+    row.assigned_session_id = sessionId;
+    row.updated_at = now;
+    return clone(row);
   }
 
   async createCloudRun(row) {

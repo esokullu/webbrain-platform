@@ -4,6 +4,7 @@ import { DropletControlChannel } from './control-channel.js';
 import { createInstanceProxy } from './instance-proxy.js';
 import { createObjectDownloadsHandler } from './object-downloads.js';
 import { createSpacesObjectStore } from './spaces-object-store.js';
+import { WarmDropletPool } from './warm-pool.js';
 
 export function createPlatformServer({ store, provisioner, config, downloadsHandler: injectedDownloadsHandler = null }) {
   const spacesObjectStore = injectedDownloadsHandler ? null : createSpacesObjectStore(config.downloads?.spaces);
@@ -16,7 +17,8 @@ export function createPlatformServer({ store, provisioner, config, downloadsHand
     store,
     requestTimeoutMs: config.runWaitTimeoutMs,
   });
-  const app = createPlatformApp({ store, provisioner, controlChannel, config, downloadsHandler });
+  const warmPool = new WarmDropletPool({ store, provisioner, controlChannel, config });
+  const app = createPlatformApp({ store, provisioner, controlChannel, config, downloadsHandler, warmPool });
   const instanceProxy = createInstanceProxy({
     store,
     domain: config.instanceDomain,
@@ -49,6 +51,15 @@ export function createPlatformServer({ store, provisioner, config, downloadsHand
     });
   }, config.browserCleanupIntervalMs);
   cleanupTimer.unref();
+  const warmPoolTimer = setInterval(() => {
+    warmPool.reconcile().catch(error => {
+      console.error('[warm-pool]', error.message || error);
+    });
+  }, config.warmDropletPool.reconcileIntervalMs);
+  warmPoolTimer.unref();
+  warmPool.reconcile().catch(error => {
+    console.error('[warm-pool]', error.message || error);
+  });
 
   return {
     app,
@@ -59,6 +70,7 @@ export function createPlatformServer({ store, provisioner, config, downloadsHand
     },
     close() {
       clearInterval(cleanupTimer);
+      clearInterval(warmPoolTimer);
       return new Promise(resolve => {
         Promise.all([controlChannel.close(), instanceProxy.close()]).then(() => {
           spacesObjectStore?.close();

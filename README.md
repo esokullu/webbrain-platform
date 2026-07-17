@@ -6,6 +6,7 @@ The repo has two runtime roles:
 
 - `platform`: Express + MySQL control plane for users, API keys, browser sessions, DigitalOcean droplets, run orchestration, and signed noVNC URLs.
 - `droplet`: cloud browser runtime that runs the local WebBrain sidecar, connects outbound to the platform control WebSocket, and gates noVNC with signed tokens.
+- `warm-pool`: prebooted browser VM role that installs Chrome/WebBrain/noVNC and waits for the platform to assign one browser session.
 
 [`webbrain-one/webbrain`](https://github.com/webbrain-one/webbrain) is the canonical WebBrain execution engine cloned into each browser VM.
 
@@ -32,6 +33,8 @@ Platform:
 - `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`
 - `DO_API_TOKEN`, `DO_REGION`, `DO_SIZE`, `DO_IMAGE`, `DO_SSH_KEYS`
 - `DO_BROWSER_VOLUME_SIZE_GIB` (defaults to a fixed 2 GiB Chrome-profile volume; volumes are not auto-expanded)
+- `WEBBRAIN_WARM_DROPLET_POOL_SIZE` (defaults to `0`; production can set `1` for one prebooted spare)
+- `WEBBRAIN_WARM_DROPLET_SIZE` (defaults to `DO_SIZE`, then `s-2vcpu-4gb`)
 - `WEBBRAIN_SPACES_ENDPOINT`, `WEBBRAIN_SPACES_ACCESS_KEY`, `WEBBRAIN_SPACES_SECRET_KEY`, `WEBBRAIN_SPACES_BUCKET`
 - `WEBBRAIN_SPACES_S3_REGION` (defaults to `us-east-1`, the S3 signing region used by DigitalOcean Spaces)
 - `WEBBRAIN_DOWNLOADS_USER_QUOTA_BYTES` (defaults to 25 GiB fair use per user)
@@ -52,6 +55,14 @@ Platform:
 - `WEBBRAIN_EPHEMERAL_DOWNLOAD_LIMIT_BYTES` (defaults to 512 MiB per uploaded file in a temporary browser)
 - `WEBBRAIN_EPHEMERAL_DOWNLOAD_TOTAL_LIMIT_BYTES` (defaults to 1 GiB of temporary Downloads)
 - `WEBBRAIN_BROWSER_CLEANUP_INTERVAL_MS` (defaults to `30000`)
+
+Warm spare cost is one normal running Droplet per spare. As of July 2026,
+DigitalOcean lists the Basic 2 vCPU / 4 GiB Droplet (`s-2vcpu-4gb`) at
+`$24/mo`; verify current pricing before changing pool size:
+[`digitalocean.com/pricing/droplets`](https://www.digitalocean.com/pricing/droplets).
+DigitalOcean bills powered-off Droplets because compute remains reserved, so
+unused warm capacity is destroyed rather than powered down:
+[`docs.digitalocean.com/products/droplets/details/pricing/`](https://docs.digitalocean.com/products/droplets/details/pricing/).
 
 Production uses `WEBBRAIN_MODEL_PROXY_BASE_URL=https://api.webbrain.one/v1`.
 The platform authenticates browser model traffic with the per-session secret,

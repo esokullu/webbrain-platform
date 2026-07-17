@@ -4,11 +4,17 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import WebSocket, { WebSocketServer } from 'ws';
 import { MemoryStore } from '../src/db/memory.js';
-import { DigitalOceanProvisioner, NullProvisioner, digitalOceanDropletName, digitalOceanVolumeName } from '../src/platform/digitalocean.js';
+import {
+  DigitalOceanProvisioner,
+  NullProvisioner,
+  digitalOceanDropletName,
+  digitalOceanVolumeName,
+  digitalOceanWarmDropletName,
+} from '../src/platform/digitalocean.js';
 import { loadConfig } from '../src/platform/config.js';
 import { cleanupExpiredBrowserSessions } from '../src/platform/app.js';
 import { createPlatformServer } from '../src/platform/server.js';
-import { chromeExtensionIdForPath, renderCloudInit } from '../src/platform/cloud-init.js';
+import { chromeExtensionIdForPath, renderCloudInit, renderWarmPoolCloudInit } from '../src/platform/cloud-init.js';
 import { verifyNoVncToken } from '../src/shared/novnc-token.js';
 import { instanceHostname, sessionIdFromInstanceHost } from '../src/platform/instance-proxy.js';
 import { hashToken } from '../src/shared/crypto.js';
@@ -799,14 +805,23 @@ test('browser sessions inherit the platform proxy default unless explicitly disa
     assert.equal(inherited.body.browser_session.proxy.endpoint, 'http://proxy-default.example:8080');
     assert.equal(ctx.provisioner.createdOptions[0].proxyUrl, 'http://default-user:default-pass@proxy-default.example:8080/');
 
+    const enabledByToggle = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ display_name: 'Enabled by toggle', proxy_enabled: true }),
+    });
+    assert.equal(enabledByToggle.status, 201);
+    assert.equal(enabledByToggle.body.browser_session.proxy.endpoint, 'http://proxy-default.example:8080');
+    assert.equal(ctx.provisioner.createdOptions[1].proxyUrl, 'http://default-user:default-pass@proxy-default.example:8080/');
+
     const direct = await request(ctx.base, '/api/browser-sessions', {
       method: 'POST',
       headers: { cookie },
-      body: JSON.stringify({ display_name: 'Direct', proxy_url: null }),
+      body: JSON.stringify({ display_name: 'Direct', proxy_enabled: false }),
     });
     assert.equal(direct.status, 201);
     assert.equal(direct.body.browser_session.proxy.enabled, false);
-    assert.equal(ctx.provisioner.createdOptions[1].proxyUrl, '');
+    assert.equal(ctx.provisioner.createdOptions[2].proxyUrl, '');
 
     const invalid = await request(ctx.base, '/api/browser-sessions', {
       method: 'POST',
@@ -814,8 +829,76 @@ test('browser sessions inherit the platform proxy default unless explicitly disa
       body: JSON.stringify({ proxy_url: 'ftp://proxy.example:21' }),
     });
     assert.equal(invalid.status, 400);
-    assert.equal(ctx.provisioner.created.length, 2);
+    assert.equal(ctx.provisioner.created.length, 3);
   } finally {
+    await ctx.platform.close();
+  }
+});
+
+test('browser creation claims a ready warm Droplet and attaches the resumable profile volume', async () => {
+  const ctx = await startPlatform({
+    WEBBRAIN_WARM_DROPLET_POOL_SIZE: '1',
+  });
+  let ws = null;
+  try {
+    const now = new Date().toISOString();
+    const warm = await ctx.store.createWarmDroplet({
+      id: 'wd_ready',
+      droplet_id: '123',
+      public_ip: '127.0.0.1',
+      region: 'nyc3',
+      size: 's-2vcpu-4gb',
+      status: 'ready',
+      assigned_session_id: null,
+      pool_token: 'warm-pool-secret',
+      last_error: null,
+      created_at: now,
+      updated_at: now,
+    });
+    let assignPayload = null;
+    ws = new WebSocket(`${ctx.wsBase}/droplet/pool-control?pool_token=${encodeURIComponent(warm.pool_token)}`);
+    await new Promise((resolve, reject) => {
+      ws.once('error', reject);
+      ws.on('message', raw => {
+        const msg = JSON.parse(raw.toString('utf8'));
+        if (msg.type === 'hello') {
+          resolve();
+          return;
+        }
+        if (msg.action === 'assign') {
+          assignPayload = msg.payload;
+          ws.send(JSON.stringify({ id: msg.id, ok: true, result: { assigned: true } }));
+        }
+      });
+    });
+
+    const cookie = await register(ctx.base, 'warm-claim@example.com');
+    const created = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ display_name: 'Warm normal', lifecycle: 'resumable' }),
+    });
+    assert.equal(created.status, 201);
+    const session = created.body.browser_session;
+    assert.equal(session.status, 'provisioning');
+    assert.equal(session.droplet_id, '123');
+    assert.equal(session.public_ip, '127.0.0.1');
+    assert.equal(ctx.provisioner.created.length, 0);
+    assert.equal(ctx.provisioner.createdVolumes.length, 1);
+    assert.deepEqual(ctx.provisioner.attachedVolumes, [{
+      volumeId: `mock-volume-${session.id}`,
+      dropletId: '123',
+      region: 'nyc3',
+    }]);
+    assert.equal(assignPayload.session_id, session.id);
+    assert.equal(assignPayload.volume_id, `mock-volume-${session.id}`);
+    assert.equal(assignPayload.volume_name, digitalOceanVolumeName(session.id));
+    assert.equal(assignPayload.downloads_sync_enabled, 'false');
+    const assigned = await ctx.store.getWarmDroplet(warm.id);
+    assert.equal(assigned.status, 'assigned');
+    assert.equal(assigned.assigned_session_id, session.id);
+  } finally {
+    ws?.close();
     await ctx.platform.close();
   }
 });
@@ -1879,14 +1962,18 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /browser-boot 1\.25s/);
     assert.match(res.text, /id="viewerFrames"/);
     assert.match(res.text, /id="newSessionName"/);
-    assert.match(res.text, /id="newSessionLifecycle"/);
-    assert.match(res.text, /value="resumable">Resumable/);
-    assert.match(res.text, /value="always_on">Always on/);
-    assert.match(res.text, /lifecycle: newSessionLifecycle\.value/);
-    assert.match(res.text, /id="newProxyDomain"/);
-    assert.match(res.text, /id="newProxyPort"/);
-    assert.match(res.text, /id="newProxyUsername"/);
-    assert.match(res.text, /id="newProxyPassword"/);
+    assert.match(res.text, /id="createSessionBtn"[^>]*>\+ New browser/);
+    assert.match(res.text, /id="createIncognitoBtn"[^>]*>Incognito/);
+    assert.match(res.text, /id="newProxyEnabled"/);
+    assert.match(res.text, /createSessionBtn\.addEventListener\('click', \(\) => createSession\('resumable'\)\)/);
+    assert.match(res.text, /createIncognitoBtn\.addEventListener\('click', \(\) => createSession\('always_on'\)\)/);
+    assert.doesNotMatch(res.text, /id="newSessionLifecycle"/);
+    assert.doesNotMatch(res.text, /value="resumable">Resumable/);
+    assert.doesNotMatch(res.text, /value="always_on">Always on/);
+    assert.doesNotMatch(res.text, /id="newProxyDomain"/);
+    assert.doesNotMatch(res.text, /id="newProxyPort"/);
+    assert.doesNotMatch(res.text, /id="newProxyUsername"/);
+    assert.doesNotMatch(res.text, /id="newProxyPassword"/);
     assert.match(res.text, /id="browserSettingsBtn"/);
     assert.match(res.text, /id="resetSessionBtn"/);
     assert.match(res.text, /function resetSession\(\)/);
@@ -1896,6 +1983,8 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /id="browserSettingsDialog"/);
     assert.match(res.text, /id="browserNameForm"/);
     assert.match(res.text, /id="proxyForm"/);
+    assert.match(res.text, /id="proxyEnabled"/);
+    assert.match(res.text, /Credentials are managed by the server environment/);
     assert.match(res.text, /function openBrowserSettings\(\)/);
     assert.doesNotMatch(res.text, /id="proxyBtn"/);
     assert.doesNotMatch(res.text, /id="renameSessionBtn"/);
@@ -1905,12 +1994,12 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /function openDownloadsDialog\(\)/);
     assert.match(res.text, /\/downloads-access/);
     assert.match(res.text, /function saveBrowserProxy\(event\)/);
-    assert.match(res.text, /body: hasNextProxy \? \{ proxy: nextProxy \} : \{ proxy_url: null \}/);
+    assert.match(res.text, /body: \{ proxy_enabled: proxyEnabled\.checked \}/);
     assert.match(res.text, /method: 'PATCH'/);
     assert.match(res.text, /display_name/);
     assert.match(res.text, /id="deleteConfirmName"/);
     assert.match(res.text, /Type <span class="confirm-phrase" id="deleteConfirmName">the browser name/);
-    assert.match(res.text, /always-on Droplet, including its Chrome state and local Downloads/);
+    assert.match(res.text, /permanently discards its Chrome state and local Downloads/);
     assert.match(res.text, /deleteConfirmInput\.value === browserName\(session\)/);
     assert.match(res.text, /function deleteConfirmationMatches\(\)/);
     assert.doesNotMatch(res.text, /confirm\('Delete browser session/);
@@ -2405,6 +2494,38 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
   assert.match(cloudInit, /systemctl start webbrain-sidecar\.service webbrain-xvfb\.service webbrain-x11vnc\.service webbrain-novnc\.service webbrain-droplet\.service webbrain-browser\.service/);
 });
 
+test('warm Droplet cloud-init installs dependencies and starts only the pool agent', () => {
+  const config = loadConfig({
+    WEBBRAIN_PLATFORM_URL: 'https://webbrain.cloud',
+    WEBBRAIN_REF: 'main',
+  });
+  const cloudInit = renderWarmPoolCloudInit({
+    pool: {
+      id: 'wd_test',
+      pool_token: 'pool-secret',
+      region: 'nyc3',
+      size: 's-2vcpu-4gb',
+    },
+    config,
+  });
+
+  assert.match(cloudInit, /WEBBRAIN_ROLE='warm-pool'/);
+  assert.match(cloudInit, /WEBBRAIN_POOL_ID='wd_test'/);
+  assert.match(cloudInit, /WEBBRAIN_POOL_TOKEN='pool-secret'/);
+  assert.match(cloudInit, /WEBBRAIN_POOL_CONTROL_WS_URL='wss:\/\/webbrain\.cloud\/droplet\/pool-control'/);
+  assert.match(cloudInit, /WEBBRAIN_CONTROL_WS_URL='wss:\/\/webbrain\.cloud\/droplet\/control'/);
+  assert.match(cloudInit, /webbrain-pool-agent\.service/);
+  assert.match(cloudInit, /ExecStart=\/usr\/bin\/npm run start:pool-agent/);
+  assert.match(cloudInit, /git clone 'https:\/\/github\.com\/esokullu\/webbrain-platform\.git' \/opt\/webbrain-platform/);
+  assert.match(cloudInit, /git clone 'https:\/\/github\.com\/webbrain-one\/webbrain\.git' \/opt\/webbrain3/);
+  assert.match(cloudInit, /chrome-for-testing/);
+  assert.match(cloudInit, /systemctl start webbrain-pool-agent\.service/);
+  assert.doesNotMatch(cloudInit, /WEBBRAIN_SESSION_TOKEN/);
+  assert.doesNotMatch(cloudInit, /WEBBRAIN_SESSION_ID/);
+  assert.doesNotMatch(cloudInit, /webbrain-browser\.service/);
+  assert.doesNotMatch(cloudInit, /webbrain-droplet\.service/);
+});
+
 test('volume-backed cloud-init mounts the fixed profile disk and stages Downloads off-volume', () => {
   const config = loadConfig({
     WEBBRAIN_PLATFORM_URL: 'https://webbrain.cloud',
@@ -2526,6 +2647,50 @@ test('digitalocean provisioner uses hostname-safe droplet names', async () => {
 
   const refreshed = await provisioner.getDroplet(123);
   assert.equal(refreshed.status, 'ready');
+});
+
+test('digitalocean provisioner creates warm Droplets with pool agent cloud-init', async () => {
+  const config = loadConfig({
+    DO_API_TOKEN: 'do-token',
+    DO_REGION: 'nyc3',
+    DO_SIZE: 's-1vcpu-1gb',
+    WEBBRAIN_PLATFORM_URL: 'https://webbrain.cloud',
+  });
+  let requestBody = null;
+  const provisioner = new DigitalOceanProvisioner(config, async (url, options = {}) => {
+    assert.equal(url, 'https://api.digitalocean.com/v2/droplets');
+    assert.equal(options.method, 'POST');
+    requestBody = JSON.parse(options.body);
+    return {
+      ok: true,
+      async json() {
+        return {
+          droplet: {
+            id: 456,
+            status: 'new',
+            networks: { v4: [{ type: 'public', ip_address: '203.0.113.20' }] },
+          },
+        };
+      },
+    };
+  });
+
+  assert.equal(digitalOceanWarmDropletName('wd_abc123'), 'webbrain-warm-wd-abc123');
+  const created = await provisioner.createWarmDroplet({
+    id: 'wd_abc123',
+    pool_token: 'pool-secret',
+    region: 'nyc3',
+    size: 's-2vcpu-4gb',
+  });
+
+  assert.equal(created.status, 'creating');
+  assert.equal(created.droplet_id, '456');
+  assert.equal(requestBody.name, 'webbrain-warm-wd-abc123');
+  assert.equal(requestBody.size, 's-2vcpu-4gb');
+  assert.deepEqual(requestBody.tags, ['webbrain', 'webbrain-warm-pool', 'warm:wd_abc123']);
+  assert.match(requestBody.user_data, /WEBBRAIN_ROLE='warm-pool'/);
+  assert.match(requestBody.user_data, /WEBBRAIN_POOL_TOKEN='pool-secret'/);
+  assert.doesNotMatch(requestBody.user_data, /WEBBRAIN_SESSION_TOKEN/);
 });
 
 test('digitalocean provisioner creates, attaches, and deletes a fixed 2 GiB profile volume', async () => {

@@ -36,6 +36,15 @@ function normalizeBrowserSession(row) {
   };
 }
 
+function normalizeWarmDroplet(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    created_at: fromMysqlDate(row.created_at),
+    updated_at: fromMysqlDate(row.updated_at),
+  };
+}
+
 export function normalizeCloudRun(row) {
   if (!row) return null;
   return {
@@ -167,6 +176,24 @@ export class MySqlStore {
     if (!hostSessionIndexes.length) {
       await this.pool.query('CREATE INDEX idx_browser_sessions_host ON browser_sessions (host_session_id)');
     }
+    await this.pool.query(
+      `CREATE TABLE IF NOT EXISTS warm_droplets (
+        id VARCHAR(40) PRIMARY KEY,
+        droplet_id VARCHAR(64) NULL,
+        public_ip VARCHAR(64) NULL,
+        region VARCHAR(64) NOT NULL,
+        size VARCHAR(64) NOT NULL,
+        status VARCHAR(32) NOT NULL,
+        assigned_session_id VARCHAR(40) NULL,
+        pool_token TEXT NOT NULL,
+        last_error TEXT NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        INDEX idx_warm_droplets_status (status, assigned_session_id),
+        INDEX idx_warm_droplets_droplet (droplet_id),
+        FOREIGN KEY (assigned_session_id) REFERENCES browser_sessions(id)
+      )`
+    );
     const [runUpdateColumns] = await this.pool.execute(
       `SELECT 1
        FROM information_schema.COLUMNS
@@ -462,6 +489,121 @@ export class MySqlStore {
       { now: toMysqlDate(now) }
     );
     return rows.map(normalizeBrowserSession);
+  }
+
+  async createWarmDroplet(row) {
+    await this.pool.execute(
+      `INSERT INTO warm_droplets
+       (id,droplet_id,public_ip,region,size,status,assigned_session_id,pool_token,last_error,created_at,updated_at)
+       VALUES (:id,:droplet_id,:public_ip,:region,:size,:status,:assigned_session_id,:pool_token,:last_error,:created_at,:updated_at)`,
+      {
+        ...row,
+        droplet_id: row.droplet_id || null,
+        public_ip: row.public_ip || null,
+        assigned_session_id: row.assigned_session_id || null,
+        last_error: row.last_error || null,
+        created_at: toMysqlDate(row.created_at),
+        updated_at: toMysqlDate(row.updated_at),
+      }
+    );
+    return await this.getWarmDroplet(row.id);
+  }
+
+  async getWarmDroplet(id) {
+    return normalizeWarmDroplet(await this.queryOne('SELECT * FROM warm_droplets WHERE id = :id', { id }));
+  }
+
+  async getWarmDropletByToken(token) {
+    return normalizeWarmDroplet(await this.queryOne('SELECT * FROM warm_droplets WHERE pool_token = :token', { token }));
+  }
+
+  async listWarmDroplets() {
+    const [rows] = await this.pool.execute('SELECT * FROM warm_droplets ORDER BY created_at ASC');
+    return rows.map(normalizeWarmDroplet);
+  }
+
+  async updateWarmDroplet(id, patch) {
+    const fields = Object.keys(patch).filter(k => patch[k] !== undefined);
+    if (!fields.length) return await this.getWarmDroplet(id);
+    const values = { id, ...patch };
+    for (const key of ['created_at', 'updated_at']) {
+      if (values[key]) values[key] = toMysqlDate(values[key]);
+    }
+    await this.pool.execute(
+      `UPDATE warm_droplets SET ${fields.map(k => `${k} = :${k}`).join(', ')} WHERE id = :id`,
+      values
+    );
+    return await this.getWarmDroplet(id);
+  }
+
+  async updateWarmDropletIfStatus(id, expectedStatus, patch) {
+    const fields = Object.keys(patch).filter(k => patch[k] !== undefined);
+    if (!fields.length) {
+      const current = await this.getWarmDroplet(id);
+      if (!current) {
+        const e = new Error('Warm Droplet not found');
+        e.status = 404;
+        throw e;
+      }
+      return current.status === expectedStatus ? current : null;
+    }
+    const values = { id, expectedStatus, ...patch };
+    for (const key of ['created_at', 'updated_at']) {
+      if (values[key]) values[key] = toMysqlDate(values[key]);
+    }
+    const [result] = await this.pool.execute(
+      `UPDATE warm_droplets SET ${fields.map(k => `${k} = :${k}`).join(', ')}
+       WHERE id = :id AND status = :expectedStatus`,
+      values
+    );
+    if (!result.affectedRows) {
+      const current = await this.getWarmDroplet(id);
+      if (!current) {
+        const e = new Error('Warm Droplet not found');
+        e.status = 404;
+        throw e;
+      }
+      return null;
+    }
+    return await this.getWarmDroplet(id);
+  }
+
+  async claimReadyWarmDroplet({ region, size, sessionId, now }) {
+    const conn = await this.pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const [rows] = await conn.execute(
+        `SELECT * FROM warm_droplets
+         WHERE status = 'ready'
+           AND assigned_session_id IS NULL
+           AND region = :region
+           AND size = :size
+           AND droplet_id IS NOT NULL
+           AND public_ip IS NOT NULL
+         ORDER BY created_at ASC
+         LIMIT 1
+         FOR UPDATE`,
+        { region, size }
+      );
+      const row = rows[0];
+      if (!row) {
+        await conn.commit();
+        return null;
+      }
+      await conn.execute(
+        `UPDATE warm_droplets
+         SET status = 'claiming', assigned_session_id = :sessionId, updated_at = :updatedAt
+         WHERE id = :id`,
+        { id: row.id, sessionId, updatedAt: toMysqlDate(now) }
+      );
+      await conn.commit();
+      return await this.getWarmDroplet(row.id);
+    } catch (error) {
+      await conn.rollback();
+      throw error;
+    } finally {
+      conn.release();
+    }
   }
 
   async createCloudRun(row) {

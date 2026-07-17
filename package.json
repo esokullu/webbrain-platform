@@ -10,6 +10,7 @@
     "start": "node src/platform/index.js",
     "start:platform": "node src/platform/index.js",
     "start:droplet": "node src/droplet/index.js",
+    "start:pool-agent": "node src/droplet/pool-agent.js",
     "start:downloads": "node src/droplet/downloads-index.js",
     "start:browser": "node scripts/launch-cloud-browser.mjs",
     "start:sidecar": "node src/sidecar.js",

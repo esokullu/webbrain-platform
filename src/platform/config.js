@@ -40,6 +40,12 @@ export function loadConfig(env = process.env) {
       volumeSizeGiB: Number(env.DO_BROWSER_VOLUME_SIZE_GIB || 2),
       sshKeys: (env.DO_SSH_KEYS || '').split(',').map(s => s.trim()).filter(Boolean),
     },
+    warmDropletPool: {
+      size: Math.max(0, Number(env.WEBBRAIN_WARM_DROPLET_POOL_SIZE || 0)),
+      dropletSize: env.WEBBRAIN_WARM_DROPLET_SIZE || env.DO_SIZE || 's-2vcpu-4gb',
+      reconcileIntervalMs: Math.max(15000, Number(env.WEBBRAIN_WARM_DROPLET_RECONCILE_INTERVAL_MS || 60000)),
+      assignTimeoutMs: Math.max(5000, Number(env.WEBBRAIN_WARM_DROPLET_ASSIGN_TIMEOUT_MS || 90000)),
+    },
     downloads: {
       quotaBytes: Number(env.WEBBRAIN_DOWNLOADS_USER_QUOTA_BYTES || 25 * 1024 * 1024 * 1024),
       maxUploadBytes: Number(env.WEBBRAIN_DOWNLOADS_MAX_UPLOAD_BYTES || 25 * 1024 * 1024 * 1024),

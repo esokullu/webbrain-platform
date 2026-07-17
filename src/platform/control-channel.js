@@ -7,10 +7,26 @@ export class DropletControlChannel {
     this.requestTimeoutMs = requestTimeoutMs;
     this.wss = new WebSocketServer({ noServer: true });
     this.connections = new Map();
+    this.poolConnections = new Map();
     this.pending = new Map();
     this.seq = 0;
 
-    this.wss.on('connection', (ws, req, session) => {
+    this.wss.on('connection', (ws, req, target) => {
+      if (target?.kind === 'pool') {
+        const current = this.poolConnections.get(target.pool.id);
+        if (current && current.readyState === WebSocket.OPEN) current.close(4000, 'Replaced by a new warm pool connection');
+        this.poolConnections.set(target.pool.id, ws);
+        ws.poolId = target.pool.id;
+        ws.on('message', raw => this.onMessage(raw));
+        ws.on('close', () => {
+          if (this.poolConnections.get(target.pool.id) !== ws) return;
+          this.poolConnections.delete(target.pool.id);
+          this.rejectPendingForPool(target.pool.id);
+        });
+        ws.send(JSON.stringify({ type: 'hello', warm_pool_id: target.pool.id }));
+        return;
+      }
+      const session = target;
       const current = this.connections.get(session.id);
       if (current && current.readyState === WebSocket.OPEN) current.close(4000, 'Replaced by a new droplet connection');
       this.connections.set(session.id, ws);
@@ -34,6 +50,19 @@ export class DropletControlChannel {
         socket.destroy();
         return;
       }
+      if (parsed.pathname === '/droplet/pool-control') {
+        const poolToken = parsed.searchParams.get('pool_token') || req.headers['x-webbrain-pool-token'];
+        const pool = poolToken ? await this.store.getWarmDropletByToken(poolToken) : null;
+        if (!pool || ['assigned', 'destroying', 'failed'].includes(pool.status)) {
+          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+        this.wss.handleUpgrade(req, socket, head, ws => {
+          this.wss.emit('connection', ws, req, { kind: 'pool', pool });
+        });
+        return;
+      }
       if (parsed.pathname !== '/droplet/control') {
         return;
       }
@@ -52,6 +81,11 @@ export class DropletControlChannel {
 
   isConnected(sessionId) {
     const ws = this.connections.get(sessionId);
+    return !!ws && ws.readyState === WebSocket.OPEN;
+  }
+
+  isPoolConnected(poolId) {
+    const ws = this.poolConnections.get(poolId);
     return !!ws && ws.readyState === WebSocket.OPEN;
   }
 
@@ -75,12 +109,43 @@ export class DropletControlChannel {
     });
   }
 
+  sendPool(poolId, action, payload = {}, timeoutMs = this.requestTimeoutMs) {
+    const ws = this.poolConnections.get(poolId);
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      const e = new Error('Warm Droplet pool channel is not connected.');
+      e.status = 409;
+      return Promise.reject(e);
+    }
+    const id = `pool_${Date.now().toString(36)}_${this.seq++}`;
+    ws.send(JSON.stringify({ id, action, payload }));
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        const e = new Error(`Warm Droplet command timed out: ${action}`);
+        e.status = 504;
+        reject(e);
+      }, timeoutMs);
+      this.pending.set(id, { resolve, reject, timer, poolId });
+    });
+  }
+
   rejectPendingForSession(sessionId) {
     for (const [id, item] of this.pending) {
       if (item.sessionId !== sessionId) continue;
       this.pending.delete(id);
       clearTimeout(item.timer);
       const error = new Error('Droplet control channel disconnected before confirming the command.');
+      error.status = 409;
+      item.reject(error);
+    }
+  }
+
+  rejectPendingForPool(poolId) {
+    for (const [id, item] of this.pending) {
+      if (item.poolId !== poolId) continue;
+      this.pending.delete(id);
+      clearTimeout(item.timer);
+      const error = new Error('Warm Droplet pool channel disconnected before confirming the command.');
       error.status = 409;
       item.reject(error);
     }
@@ -114,6 +179,8 @@ export class DropletControlChannel {
     this.pending.clear();
     for (const ws of this.connections.values()) ws.terminate();
     this.connections.clear();
+    for (const ws of this.poolConnections.values()) ws.terminate();
+    this.poolConnections.clear();
     return new Promise(resolve => this.wss.close(resolve));
   }
 }

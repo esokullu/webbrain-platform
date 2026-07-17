@@ -1,5 +1,5 @@
 import net from 'node:net';
-import { renderCloudInit } from './cloud-init.js';
+import { renderCloudInit, renderWarmPoolCloudInit } from './cloud-init.js';
 
 export class DigitalOceanProvisioner {
   constructor(config, fetchImpl = fetch, opts = {}) {
@@ -86,6 +86,43 @@ export class DigitalOceanProvisioner {
     };
   }
 
+  async createWarmDroplet(pool, opts = {}) {
+    if (!this.config.digitalOcean.token) {
+      const e = new Error('DO_API_TOKEN is required to create warm droplets.');
+      e.status = 503;
+      throw e;
+    }
+    const body = {
+      name: digitalOceanWarmDropletName(pool.id),
+      region: opts.region || pool.region || this.config.digitalOcean.region,
+      size: opts.size || pool.size || this.config.warmDropletPool?.dropletSize || this.config.digitalOcean.size,
+      image: opts.image || this.config.digitalOcean.image,
+      ssh_keys: opts.sshKeys || this.config.digitalOcean.sshKeys,
+      backups: false,
+      ipv6: false,
+      monitoring: true,
+      tags: ['webbrain', 'webbrain-warm-pool', `warm:${pool.id}`],
+      user_data: renderWarmPoolCloudInit({ pool, config: this.config }),
+    };
+    const res = await this.fetch('https://api.digitalocean.com/v2/droplets', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${this.config.digitalOcean.token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`DigitalOcean warm create failed: ${res.status} ${await res.text()}`);
+    const parsed = await res.json();
+    if (!parsed.droplet?.id) throw new Error('DigitalOcean warm create response did not include a Droplet id.');
+    return {
+      droplet_id: String(parsed.droplet?.id || ''),
+      public_ip: findPublicIp(parsed.droplet),
+      status: 'creating',
+      request: body,
+    };
+  }
+
   async getDroplet(dropletId) {
     if (!this.config.digitalOcean.token) return null;
     const res = await this.fetch(`https://api.digitalocean.com/v2/droplets/${dropletId}`, {
@@ -102,6 +139,22 @@ export class DigitalOceanProvisioner {
       public_ip: publicIp,
       raw_status: parsed.droplet?.status,
       status: runtimeReady ? 'ready' : 'provisioning',
+    };
+  }
+
+  async getDropletState(dropletId) {
+    if (!this.config.digitalOcean.token) return null;
+    const res = await this.fetch(`https://api.digitalocean.com/v2/droplets/${dropletId}`, {
+      headers: { authorization: `Bearer ${this.config.digitalOcean.token}` },
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`DigitalOcean Droplet lookup failed: ${res.status} ${await res.text()}`);
+    const parsed = await res.json();
+    return {
+      droplet_id: String(parsed.droplet?.id || dropletId),
+      public_ip: findPublicIp(parsed.droplet),
+      raw_status: parsed.droplet?.status || '',
+      status: parsed.droplet?.status === 'active' ? 'active' : 'creating',
     };
   }
 
@@ -194,6 +247,49 @@ export class DigitalOceanProvisioner {
     throw Object.assign(new Error('Browser profile volume is still detaching; retry shortly.'), { status: 409 });
   }
 
+  async attachVolumeToDroplet(volumeId, dropletId, region) {
+    if (!volumeId || !dropletId) {
+      throw Object.assign(new Error('Volume id and Droplet id are required to attach browser storage.'), { status: 409 });
+    }
+    if (!this.config.digitalOcean.token) {
+      throw Object.assign(new Error('DO_API_TOKEN is required to attach browser storage.'), { status: 503 });
+    }
+    const numericDropletId = Number(dropletId);
+    const res = await this.fetch(`https://api.digitalocean.com/v2/volumes/${volumeId}/actions`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${this.config.digitalOcean.token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        type: 'attach',
+        droplet_id: Number.isSafeInteger(numericDropletId) ? numericDropletId : dropletId,
+        region: region || this.config.digitalOcean.region,
+      }),
+    });
+    if (!res.ok) throw new Error(`DigitalOcean volume attach failed: ${res.status} ${await res.text()}`);
+    const parsed = await res.json();
+    return {
+      ok: true,
+      action_id: parsed.action?.id ? String(parsed.action.id) : null,
+      status: parsed.action?.status || null,
+    };
+  }
+
+  async waitForVolumeAttached(volumeId, dropletId, timeoutMs = 60_000) {
+    if (!volumeId || !dropletId) return { ok: true, skipped: true };
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const volume = await this.getVolume(volumeId);
+      if (!volume) throw Object.assign(new Error('Browser profile volume no longer exists.'), { status: 409 });
+      if (Array.isArray(volume.droplet_ids) && volume.droplet_ids.map(String).includes(String(dropletId))) {
+        return { ok: true };
+      }
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    throw Object.assign(new Error('Browser profile volume is still attaching; retry shortly.'), { status: 409 });
+  }
+
   async destroyVolume(volumeId) {
     if (!volumeId || !this.config.digitalOcean.token) return { ok: true, skipped: true };
     const res = await this.fetch(`https://api.digitalocean.com/v2/volumes/${volumeId}`, {
@@ -212,6 +308,8 @@ export class NullProvisioner {
     this.destroyed = [];
     this.createdVolumes = [];
     this.destroyedVolumes = [];
+    this.createdWarmDroplets = [];
+    this.attachedVolumes = [];
     this.powerCycled = [];
     this.waitedActions = [];
   }
@@ -242,6 +340,22 @@ export class NullProvisioner {
     return null;
   }
 
+  async createWarmDroplet(pool, opts = {}) {
+    const warm = {
+      droplet_id: `mock-warm-${pool.id}`,
+      public_ip: '127.0.0.1',
+      status: 'creating',
+      request: null,
+      opts,
+    };
+    this.createdWarmDroplets.push({ pool, opts, warm });
+    return warm;
+  }
+
+  async getDropletState(dropletId) {
+    return { droplet_id: String(dropletId), public_ip: '127.0.0.1', raw_status: 'active', status: 'active' };
+  }
+
   async destroyDroplet(dropletId) {
     this.destroyed.push(dropletId);
     return { ok: true };
@@ -261,6 +375,15 @@ export class NullProvisioner {
     return { ok: true };
   }
 
+  async attachVolumeToDroplet(volumeId, dropletId, region) {
+    this.attachedVolumes.push({ volumeId, dropletId, region });
+    return { ok: true, action_id: `mock-attach-${volumeId}-${dropletId}`, status: 'completed' };
+  }
+
+  async waitForVolumeAttached() {
+    return { ok: true };
+  }
+
   async destroyVolume(volumeId) {
     this.destroyedVolumes.push(volumeId);
     return { ok: true };
@@ -275,6 +398,16 @@ export function digitalOceanDropletName(sessionId) {
     .replace(/[^a-z0-9]+$/, '')
     .slice(0, 48) || 'session';
   return `webbrain-${suffix}`;
+}
+
+export function digitalOceanWarmDropletName(poolId) {
+  const suffix = String(poolId || 'pool')
+    .toLowerCase()
+    .replace(/[^a-z0-9.-]+/g, '-')
+    .replace(/^[^a-z0-9]+/, '')
+    .replace(/[^a-z0-9]+$/, '')
+    .slice(0, 46) || 'pool';
+  return `webbrain-warm-${suffix}`;
 }
 
 export function digitalOceanVolumeName(sessionId) {

@@ -57,6 +57,23 @@ CREATE TABLE IF NOT EXISTS browser_sessions (
   INDEX idx_browser_sessions_host (host_session_id)
 );
 
+CREATE TABLE IF NOT EXISTS warm_droplets (
+  id VARCHAR(40) PRIMARY KEY,
+  droplet_id VARCHAR(64) NULL,
+  public_ip VARCHAR(64) NULL,
+  region VARCHAR(64) NOT NULL,
+  size VARCHAR(64) NOT NULL,
+  status VARCHAR(32) NOT NULL,
+  assigned_session_id VARCHAR(40) NULL,
+  pool_token TEXT NOT NULL,
+  last_error TEXT NULL,
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL,
+  INDEX idx_warm_droplets_status (status, assigned_session_id),
+  INDEX idx_warm_droplets_droplet (droplet_id),
+  FOREIGN KEY (assigned_session_id) REFERENCES browser_sessions(id)
+);
+
 CREATE TABLE IF NOT EXISTS cloud_runs (
   id VARCHAR(40) PRIMARY KEY,
   browser_session_id VARCHAR(40) NOT NULL,

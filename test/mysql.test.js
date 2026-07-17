@@ -45,6 +45,11 @@ test('dashboard columns are present in fresh schema and existing-database migrat
   assert.match(schema, /parent_run_id VARCHAR\(40\) NULL/);
   assert.match(schema, /tab_id BIGINT NULL/);
   assert.match(schema, /UNIQUE INDEX idx_cloud_runs_parent_run \(parent_run_id\)/);
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS warm_droplets/);
+  assert.match(schema, /assigned_session_id VARCHAR\(40\) NULL/);
+  assert.match(schema, /INDEX idx_warm_droplets_status \(status, assigned_session_id\)/);
+  assert.match(storeSource, /CREATE TABLE IF NOT EXISTS warm_droplets/);
+  assert.match(storeSource, /async claimReadyWarmDroplet\(/);
   assert.match(storeSource, /ALTER TABLE cloud_runs ADD COLUMN parent_run_id VARCHAR\(40\) NULL AFTER user_id/);
   assert.match(storeSource, /ALTER TABLE cloud_runs ADD COLUMN tab_id BIGINT NULL AFTER parent_run_id/);
   assert.match(storeSource, /CREATE UNIQUE INDEX idx_cloud_runs_parent_run ON cloud_runs \(parent_run_id\)/);

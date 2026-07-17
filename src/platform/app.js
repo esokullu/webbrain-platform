@@ -41,6 +41,25 @@ function normalizeBrowserLifecycle(value) {
   return lifecycle;
 }
 
+function resolveBrowserProxyUrl(body, config, { defaultToConfigured = true } = {}) {
+  if (Object.prototype.hasOwnProperty.call(body, 'proxy')) {
+    return proxyUrlFromParts(body.proxy);
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'proxy_url')) {
+    return normalizeProxyUrl(body.proxy_url);
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'proxy_enabled')) {
+    if (body.proxy_enabled === true) {
+      if (!config.browserProxy.url) {
+        throw Object.assign(new Error('Configured browser proxy is unavailable.'), { status: 503 });
+      }
+      return normalizeProxyUrl(config.browserProxy.url);
+    }
+    return '';
+  }
+  return defaultToConfigured ? normalizeProxyUrl(config.browserProxy.url) : null;
+}
+
 function isEphemeralBrowser(session) {
   return session?.profile_mode === 'ephemeral';
 }
@@ -287,13 +306,10 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     .session-panel.is-collapsed .collapse-sessions span { transform: rotate(180deg); }
     .panel-body { padding: 16px; }
     .create-row { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: start; gap: 8px; margin-bottom: 14px; }
-    .lifecycle-choice { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0,1fr) 138px; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px; background: rgba(89,55,25,.025); }
-    .lifecycle-choice-copy { min-width: 0; display: grid; gap: 2px; }
-    .lifecycle-choice-title { color: var(--text); font-size: 11px; font-weight: 800; }
-    .lifecycle-choice-hint { color: var(--text-dim); font-size: 10px; line-height: 1.35; }
-    .lifecycle-choice select { min-width: 0; height: 34px; min-height: 34px; padding-block: 5px; font-size: 11px; font-weight: 700; }
-    .proxy-setup { grid-column: 1 / -1; border: 1px solid var(--border); border-radius: 8px; background: rgba(89,55,25,.025); }
-    .proxy-setup summary { padding: 7px 10px; color: var(--text-dim); cursor: pointer; font-size: 11px; font-weight: 700; }
+    .create-actions { display: grid; grid-template-columns: minmax(0,1fr) minmax(112px,.58fr); gap: 8px; }
+    .create-actions button { min-width: 0; }
+    .proxy-toggle { grid-column: 1 / -1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px; background: rgba(89,55,25,.025); color: var(--text-dim); font-size: 11px; font-weight: 750; }
+    .proxy-toggle input { width: 16px; height: 16px; accent-color: var(--accent); }
     .proxy-fields { display: grid; grid-template-columns: minmax(0,1.35fr) minmax(80px,.65fr); gap: 8px; padding: 2px 9px 9px; }
     .proxy-fields input { min-width: 0; }
     .proxy-current { margin-top: 12px; padding: 10px 11px; border: 1px solid var(--border); border-radius: 9px; background: rgba(89,55,25,.035); color: var(--text-dim); font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
@@ -556,7 +572,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       .settings-section + .settings-section { border-top: 1px solid var(--border); border-left: 0; }
       .create-row { grid-template-columns: 1fr; }
       .create-row button { width: 100%; }
-      .lifecycle-choice { grid-template-columns: 1fr; }
+      .create-actions { grid-template-columns: 1fr; }
       .api-key-row { grid-template-columns: 1fr; }
       .api-key-item { grid-template-columns: 1fr; }
       .api-key-actions { justify-content: space-between; }
@@ -631,7 +647,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           <p class="eyebrow">WebBrain Cloud</p>
           <h1>Cloud browsers</h1>
         </div>
-        <p class="intro-copy">Your persistent and ephemeral WebBrain sessions—visible here and controllable through the API.</p>
+        <p class="intro-copy">Your cloud browsers, ready to open, pause, resume, or stop from one quiet workspace.</p>
       </section>
       <div class="grid" id="dashboardGrid">
         <section class="panel session-panel" id="sessionPanel">
@@ -651,34 +667,14 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           <div class="panel-body" id="sessionPanelBody">
             <div class="create-row">
               <input id="newSessionName" aria-label="Browser name" maxlength="120" placeholder="Name this browser (optional)">
-              <button id="createSessionBtn" type="button">+ New browser</button>
-              <label class="lifecycle-choice" for="newSessionLifecycle">
-                <span class="lifecycle-choice-copy">
-                  <span class="lifecycle-choice-title">Browser type</span>
-                  <span class="lifecycle-choice-hint" id="newSessionLifecycleHint">Private 2 GB session disk · pause when shared Downloads are enabled.</span>
-                </span>
-                <select id="newSessionLifecycle" aria-describedby="newSessionLifecycleHint">
-                  <option value="resumable">Resumable</option>
-                  <option value="always_on">Always on</option>
-                  <option value="ephemeral">Ephemeral</option>
-                </select>
+              <div class="create-actions">
+                <button id="createSessionBtn" type="button">+ New browser</button>
+                <button class="secondary" id="createIncognitoBtn" type="button">Incognito</button>
+              </div>
+              <label class="proxy-toggle" for="newProxyEnabled">
+                <input id="newProxyEnabled" type="checkbox">
+                <span>Use Webshare proxy for this browser</span>
               </label>
-              <label class="lifecycle-choice" for="newSessionHost" id="newSessionHostChoice" style="display:none">
-                <span class="lifecycle-choice-copy">
-                  <span class="lifecycle-choice-title">Run on existing browser</span>
-                  <span class="lifecycle-choice-hint">Uses a blank volatile profile. Any stop, reset, pause, or crash discards it.</span>
-                </span>
-                <select id="newSessionHost"></select>
-              </label>
-              <details class="proxy-setup">
-                <summary>Webshare proxy (optional)</summary>
-                <div class="proxy-fields">
-                  <input id="newProxyDomain" aria-label="Webshare proxy domain" autocomplete="off" spellcheck="false" placeholder="Domain name">
-                  <input id="newProxyPort" aria-label="Webshare proxy port" inputmode="numeric" autocomplete="off" placeholder="Port">
-                  <input id="newProxyUsername" aria-label="Webshare proxy username" autocomplete="off" spellcheck="false" placeholder="Username">
-                  <input id="newProxyPassword" aria-label="Webshare proxy password" type="password" autocomplete="new-password" placeholder="Password">
-                </div>
-              </details>
             </div>
             <div class="sessions" id="sessions"></div>
             <div class="message" id="sessionMessage"></div>
@@ -947,20 +943,18 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         <form class="settings-section" id="proxyForm">
           <span class="settings-section-kicker">Network route</span>
           <h3>Webshare proxy</h3>
-          <p class="settings-section-copy" id="proxyAvailability">Replace the upstream without restarting Chrome. Existing connections will be closed.</p>
+          <p class="settings-section-copy" id="proxyAvailability">Switch the browser between direct traffic and the configured Webshare route.</p>
           <div class="proxy-current" id="proxyCurrent">Loading current proxy…</div>
           <fieldset class="settings-fieldset" id="proxyFieldsGroup">
-            <div class="proxy-fields">
-              <input id="proxyDomain" aria-label="Webshare proxy domain" autocomplete="off" spellcheck="false" placeholder="Domain name">
-              <input id="proxyPort" aria-label="Webshare proxy port" inputmode="numeric" autocomplete="off" placeholder="Port">
-              <input id="proxyUsername" aria-label="Webshare proxy username" autocomplete="off" spellcheck="false" placeholder="Username">
-              <input id="proxyPassword" aria-label="Webshare proxy password" type="password" autocomplete="new-password" placeholder="Password">
-            </div>
+            <label class="proxy-toggle" for="proxyEnabled">
+              <input id="proxyEnabled" type="checkbox">
+              <span>Use Webshare proxy</span>
+            </label>
           </fieldset>
-          <span class="field-hint">Enter all four values. Leave all fields blank to switch to direct mode.</span>
+          <span class="field-hint">Credentials are managed by the server environment.</span>
           <div class="message" id="proxyMessage" aria-live="polite"></div>
           <div class="dialog-actions">
-            <button type="submit" id="saveProxyBtn">Verify and switch</button>
+            <button type="submit" id="saveProxyBtn">Save route</button>
           </div>
         </form>
       </div>
@@ -1018,15 +1012,9 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const sessionMessage = document.getElementById('sessionMessage');
     const sessionCount = document.getElementById('sessionCount');
     const createSessionBtn = document.getElementById('createSessionBtn');
+    const createIncognitoBtn = document.getElementById('createIncognitoBtn');
     const newSessionName = document.getElementById('newSessionName');
-    const newSessionLifecycle = document.getElementById('newSessionLifecycle');
-    const newSessionLifecycleHint = document.getElementById('newSessionLifecycleHint');
-    const newSessionHostChoice = document.getElementById('newSessionHostChoice');
-    const newSessionHost = document.getElementById('newSessionHost');
-    const newProxyDomain = document.getElementById('newProxyDomain');
-    const newProxyPort = document.getElementById('newProxyPort');
-    const newProxyUsername = document.getElementById('newProxyUsername');
-    const newProxyPassword = document.getElementById('newProxyPassword');
+    const newProxyEnabled = document.getElementById('newProxyEnabled');
     const accountMenu = document.getElementById('accountMenu');
     const accountSummaryEmail = document.getElementById('accountSummaryEmail');
     const accountContextEmail = document.getElementById('accountContextEmail');
@@ -1103,10 +1091,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const proxyCurrent = document.getElementById('proxyCurrent');
     const proxyAvailability = document.getElementById('proxyAvailability');
     const proxyFieldsGroup = document.getElementById('proxyFieldsGroup');
-    const proxyDomain = document.getElementById('proxyDomain');
-    const proxyPort = document.getElementById('proxyPort');
-    const proxyUsername = document.getElementById('proxyUsername');
-    const proxyPassword = document.getElementById('proxyPassword');
+    const proxyEnabled = document.getElementById('proxyEnabled');
     const proxyMessage = document.getElementById('proxyMessage');
     const saveProxyBtn = document.getElementById('saveProxyBtn');
     const downloadsDialog = document.getElementById('downloadsDialog');
@@ -1267,20 +1252,6 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
 
     function browserName(session) {
       return session?.display_name || ('Browser ' + String(session?.id || '').slice(-4).toUpperCase());
-    }
-
-    function proxyParts(domainInput, portInput, usernameInput, passwordInput) {
-      return {
-        protocol: 'http',
-        domain: domainInput.value.trim(),
-        port: portInput.value.trim(),
-        username: usernameInput.value.trim(),
-        password: passwordInput.value,
-      };
-    }
-
-    function hasProxyParts(proxy) {
-      return Boolean(proxy.domain || proxy.port || proxy.username || proxy.password);
     }
 
     function shellDoubleQuoted(value) {
@@ -2269,12 +2240,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         title.textContent = browserName(session);
         const meta = document.createElement('div');
         meta.className = 'session-meta';
-        if (session.profile_mode === 'ephemeral') {
-          const host = state.sessions.find(item => item.id === session.host_session_id);
-          meta.textContent = session.id + ' · ephemeral on ' + (host ? browserName(host) : session.host_session_id);
-        } else {
-          meta.textContent = session.id;
-        }
+        meta.textContent = session.id;
         details.append(title, meta);
         const status = document.createElement('span');
         status.className = 'status';
@@ -2294,30 +2260,8 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     }
 
     function syncCreateBrowserControls() {
-      const ephemeral = newSessionLifecycle.value === 'ephemeral';
-      newSessionHostChoice.style.display = ephemeral ? '' : 'none';
-      if (!ephemeral) {
-        newSessionHost.disabled = true;
-        createSessionBtn.disabled = state.creatingSession;
-        return;
-      }
-      const previous = newSessionHost.value;
-      const hosts = state.sessions.filter(session => (
-        session.profile_mode !== 'ephemeral'
-        && session.status === 'ready'
-        && session.droplet_id
-        && session.droplet_connected === true
-      ));
-      newSessionHost.innerHTML = '';
-      for (const host of hosts) {
-        const option = document.createElement('option');
-        option.value = host.id;
-        option.textContent = browserName(host) + ' · ' + host.id;
-        newSessionHost.appendChild(option);
-      }
-      if (hosts.some(host => host.id === previous)) newSessionHost.value = previous;
-      newSessionHost.disabled = hosts.length === 0;
-      createSessionBtn.disabled = state.creatingSession || hosts.length === 0;
+      createSessionBtn.disabled = state.creatingSession;
+      createIncognitoBtn.disabled = state.creatingSession;
     }
 
     function renderViewer() {
@@ -2355,6 +2299,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         && ['ready', 'provisioning', 'failed'].includes(session.status);
       resetSessionBtn.textContent = session && resettingSessionIds.has(session.id) ? 'Resetting…' : 'Reset';
       resetSessionBtn.disabled = !canReset || resettingSessionIds.has(session?.id);
+      deleteSessionBtn.textContent = session && !session.volume ? 'Stop' : 'Delete';
       deleteSessionBtn.disabled = !session || session.status === 'destroyed';
       viewerTitle.textContent = session ? browserName(session) + ' · ' + session.status : 'Browser preview';
 
@@ -2415,7 +2360,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
 
     async function loadSessions() {
       const body = await api('/api/browser-sessions');
-      state.sessions = body.browser_sessions || [];
+      state.sessions = (body.browser_sessions || []).filter(session => session.profile_mode !== 'ephemeral');
       renderSessions();
       if (!logsView.hidden && state.runLogs.length) {
         renderLogFilters();
@@ -2437,10 +2382,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     }
 
     function clearProxyInputs() {
-      proxyDomain.value = '';
-      proxyPort.value = '';
-      proxyUsername.value = '';
-      proxyPassword.value = '';
+      proxyEnabled.checked = false;
     }
 
     async function openBrowserSettings() {
@@ -2451,11 +2393,11 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       browserSettingsTitle.textContent = browserName(session) + ' settings';
       browserSettingsMeta.textContent = session.id + ' · ' + session.status;
       browserNameInput.value = session.display_name || '';
-      clearProxyInputs();
+      proxyEnabled.checked = session.proxy?.enabled === true;
       proxyFieldsGroup.disabled = !proxyAvailable;
       saveProxyBtn.disabled = !proxyAvailable;
       proxyAvailability.textContent = proxyAvailable
-        ? 'Replace the upstream without restarting Chrome. Existing connections will be closed.'
+        ? 'Switching routes closes existing browser connections while the new exit is verified.'
         : 'Network routing becomes available when this browser is running and connected.';
       proxyCurrent.textContent = proxyAvailable ? proxyStatusText(session.proxy) : 'Browser connection unavailable';
       showMessage(browserNameMessage, '');
@@ -2468,6 +2410,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         const body = await api('/api/browser-sessions/' + encodeURIComponent(session.id) + '/proxy');
         if (state.settingsTargetId === session.id && browserSettingsDialog.open) {
           proxyCurrent.textContent = proxyStatusText(body.proxy);
+          proxyEnabled.checked = body.proxy?.enabled === true;
         }
       } catch (error) {
         if (state.settingsTargetId === session.id && browserSettingsDialog.open) {
@@ -2498,36 +2441,26 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       }
     }
 
-    async function createSession() {
-      if (newSessionLifecycle.value === 'ephemeral' && !newSessionHost.value) {
-        showMessage(sessionMessage, 'Select a running browser to host the ephemeral session.', true);
-        return;
-      }
+    async function createSession(lifecycle) {
       state.creatingSession = true;
       syncCreateBrowserControls();
-      showMessage(sessionMessage, newSessionLifecycle.value === 'ephemeral'
-        ? 'Starting a volatile browser on the selected Droplet...'
-        : 'Creating droplet...');
+      showMessage(sessionMessage, lifecycle === 'always_on'
+        ? 'Opening an incognito browser...'
+        : 'Opening a new browser...');
       try {
-        const startupProxy = proxyParts(newProxyDomain, newProxyPort, newProxyUsername, newProxyPassword);
-        const hasStartupProxy = hasProxyParts(startupProxy);
         const body = await api('/api/browser-sessions', {
           method: 'POST',
           body: {
             display_name: newSessionName.value.trim() || null,
-            lifecycle: newSessionLifecycle.value,
-            ...(newSessionLifecycle.value === 'ephemeral' ? { host_session_id: newSessionHost.value } : {}),
-            ...(hasStartupProxy ? { proxy: startupProxy } : {}),
+            lifecycle,
+            proxy_enabled: newProxyEnabled.checked,
           },
         });
         state.selectedId = body.browser_session.id;
         newSessionName.value = '';
-        newProxyDomain.value = '';
-        newProxyPort.value = '';
-        newProxyUsername.value = '';
-        newProxyPassword.value = '';
+        newProxyEnabled.checked = false;
         await loadSessions();
-        showMessage(sessionMessage, 'Session created. It may take a few minutes before noVNC is ready.');
+        showMessage(sessionMessage, 'Browser created. It may take a few minutes before noVNC is ready.');
       } catch (e) {
         showMessage(sessionMessage, e.message, true);
       } finally {
@@ -2549,11 +2482,9 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       saveProxyBtn.disabled = true;
       showMessage(proxyMessage, 'Closing old connections and verifying the new exit…');
       try {
-        const nextProxy = proxyParts(proxyDomain, proxyPort, proxyUsername, proxyPassword);
-        const hasNextProxy = hasProxyParts(nextProxy);
         const body = await api('/api/browser-sessions/' + encodeURIComponent(sessionId) + '/proxy', {
           method: 'PATCH',
-          body: hasNextProxy ? { proxy: nextProxy } : { proxy_url: null },
+          body: { proxy_enabled: proxyEnabled.checked },
         });
         state.sessions = state.sessions.map(session => session.id === sessionId ? {
           ...session,
@@ -2564,9 +2495,9 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           },
         } : session);
         proxyCurrent.textContent = proxyStatusText(body.proxy);
-        clearProxyInputs();
+        proxyEnabled.checked = body.proxy.enabled === true;
         renderSessions();
-        showMessage(proxyMessage, 'Network route updated.');
+        showMessage(proxyMessage, 'Network route saved.');
         showMessage(sessionMessage, 'Network route updated: ' + proxyStatusText(body.proxy) + '.');
       } catch (error) {
         showMessage(proxyMessage, error.message, true);
@@ -2587,14 +2518,10 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       const session = selectedSession();
       if (!session || !['ready', 'paused'].includes(session.status)) return;
       const usesSharedDownloads = sharedDownloadsEnabled && !!session.volume;
-      downloadsDialogDescription.textContent = session.profile_mode === 'ephemeral'
-        ? 'Files are temporary and are permanently discarded when this ephemeral browser stops, crashes, expires, or its host restarts.'
-        : usesSharedDownloads
+      downloadsDialogDescription.textContent = usesSharedDownloads
         ? 'Files use your private shared storage and remain available while this browser is paused. Use the credentials below when asked to sign in.'
         : 'Files stay on this running browser Droplet. Use the credentials below when asked to sign in.';
-      downloadsDialogNote.textContent = (session.profile_mode === 'ephemeral'
-        ? 'Temporary storage is bounded per ephemeral browser.'
-        : usesSharedDownloads
+      downloadsDialogNote.textContent = (usesSharedDownloads
         ? 'Your account has a 25 GiB fair-use allowance.'
         : 'Uploads are limited to 5 GB per file.') + ' Existing names receive an automatic numbered suffix.';
       state.downloadsTargetId = session.id;
@@ -2609,11 +2536,6 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         });
         if (state.downloadsTargetId !== session.id || !downloadsDialog.open) return;
         setDownloadsAccess(body);
-        if (session.profile_mode === 'ephemeral') {
-          const limitMiB = Math.floor(Number(body.upload_limit_bytes || 0) / (1024 * 1024));
-          downloadsDialogNote.textContent = 'Uploads are limited to ' + limitMiB
-            + ' MiB per file. Existing names receive an automatic numbered suffix.';
-        }
         showMessage(downloadsMessage, 'Access is ready until ' + body.expires_at + '.');
       } catch (error) {
         if (state.downloadsTargetId === session.id && downloadsDialog.open) {
@@ -2756,12 +2678,11 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       if (!session || session.status === 'destroyed') return;
       const confirmationName = browserName(session);
       state.deleteTargetId = session.id;
-      deleteDialogDescription.textContent = session.profile_mode === 'ephemeral'
-        ? 'This ends “' + confirmationName + '” and permanently discards its temporary profile, cookies, sessions, cache, and Downloads.'
-        : session.volume
+      deleteDialogDescription.textContent = session.volume
         ? 'This permanently destroys “' + confirmationName + '” and its private 2 GB Chrome session disk.'
           + (sharedDownloadsEnabled ? ' Shared Downloads remain in your account.' : ' Local Downloads will also be lost.')
-        : 'This permanently destroys “' + confirmationName + '” and its always-on Droplet, including its Chrome state and local Downloads.';
+        : 'This stops “' + confirmationName + '” and permanently discards its Chrome state and local Downloads.';
+      confirmDeleteBtn.textContent = session.volume ? 'Delete browser' : 'Stop browser';
       deleteConfirmName.textContent = confirmationName;
       deleteConfirmInput.placeholder = confirmationName;
       deleteConfirmInput.setAttribute('aria-label', 'Type ' + confirmationName + ' to delete');
@@ -2874,23 +2795,11 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       }
     }
 
-    createSessionBtn.addEventListener('click', createSession);
-    newSessionLifecycle.addEventListener('change', () => {
-      newSessionLifecycleHint.textContent = newSessionLifecycle.value === 'always_on'
-        ? 'Classic Droplet · local Downloads · no Pause.'
-        : newSessionLifecycle.value === 'ephemeral'
-          ? 'Blank volatile profile · reuses a running Droplet · never resumes.'
-          : 'Private 2 GB session disk · pause when shared Downloads are enabled.';
-      syncCreateBrowserControls();
-    });
+    createSessionBtn.addEventListener('click', () => createSession('resumable'));
+    createIncognitoBtn.addEventListener('click', () => createSession('always_on'));
     newSessionName.addEventListener('keydown', event => {
-      if (event.key === 'Enter') createSession();
+      if (event.key === 'Enter') createSession('resumable');
     });
-    for (const input of [newProxyDomain, newProxyPort, newProxyUsername, newProxyPassword]) {
-      input.addEventListener('keydown', event => {
-        if (event.key === 'Enter') createSession();
-      });
-    }
     collapseSessionsBtn.addEventListener('click', () => setSessionsCollapsed(!sessionPanel.classList.contains('is-collapsed')));
     toggleDestroyedBtn.addEventListener('click', () => {
       state.showDestroyed = !state.showDestroyed;
@@ -2983,6 +2892,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       deleteConfirmName.textContent = 'the browser name';
       deleteConfirmInput.placeholder = 'Browser name';
       deleteConfirmInput.setAttribute('aria-label', 'Type the browser name to delete');
+      confirmDeleteBtn.textContent = 'Delete browser';
       confirmDeleteBtn.disabled = true;
     });
     createApiKeyBtn.addEventListener('click', createApiKey);
@@ -3079,7 +2989,7 @@ function normalizeRunSnapshot(snapshot, existing = {}) {
   };
 }
 
-export function createPlatformApp({ store, provisioner, controlChannel, config, downloadsHandler = null }) {
+export function createPlatformApp({ store, provisioner, controlChannel, config, downloadsHandler = null, warmPool = null }) {
   const app = express();
   const browserLifecycleOperations = new Set();
   app.use(express.json({ limit: '1mb' }));
@@ -3548,12 +3458,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
     try {
       const now = nowIso();
       const lifecycle = normalizeBrowserLifecycle(req.body.lifecycle);
-      const requestedProxyUrl = Object.prototype.hasOwnProperty.call(req.body, 'proxy_url')
-        ? req.body.proxy_url
-        : config.browserProxy.url;
-      const proxyUrl = Object.prototype.hasOwnProperty.call(req.body, 'proxy')
-        ? proxyUrlFromParts(req.body.proxy)
-        : normalizeProxyUrl(requestedProxyUrl);
+      const proxyUrl = resolveBrowserProxyUrl(req.body, config);
       const proxyEndpoint = publicProxyEndpoint(proxyUrl);
 
       if (lifecycle === 'ephemeral') {
@@ -3722,7 +3627,10 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
             throw error;
           }
         }
-        provisioned = await provisioner.createBrowserDroplet(sessionForDroplet, {
+        provisioned = await warmPool?.tryAssignSession(sessionForDroplet, {
+          providerApiKey: req.body.provider_api_key || session.connect_secret,
+          proxyUrl,
+        }) || await provisioner.createBrowserDroplet(sessionForDroplet, {
           providerApiKey: req.body.provider_api_key || session.connect_secret,
           proxyUrl,
         });
@@ -3765,6 +3673,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       await audit(req, 'browser_session.create', 'browser_session', session.id, {
         droplet_id: updated.droplet_id,
         lifecycle,
+        warm_pool_id: provisioned.warm_pool_id || null,
       });
       res.status(201).json({ browser_session: publicBrowserSession(updated) });
     } catch (e) {
@@ -3824,8 +3733,9 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       if (session.status !== 'ready') return jsonError(res, 409, 'Browser must be ready before changing its proxy.');
       if (!clear
           && !Object.prototype.hasOwnProperty.call(req.body, 'proxy_url')
-          && !Object.prototype.hasOwnProperty.call(req.body, 'proxy')) {
-        return jsonError(res, 400, '`proxy_url` or `proxy` is required; use an empty value for direct mode');
+          && !Object.prototype.hasOwnProperty.call(req.body, 'proxy')
+          && !Object.prototype.hasOwnProperty.call(req.body, 'proxy_enabled')) {
+        return jsonError(res, 400, '`proxy_url`, `proxy`, or `proxy_enabled` is required; use an empty value for direct mode');
       }
       const activeRuns = await activeRunsForSession(session);
       if (activeRuns.length) {
@@ -3840,9 +3750,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
 
       const proxyUrl = clear
         ? ''
-        : Object.prototype.hasOwnProperty.call(req.body, 'proxy')
-          ? proxyUrlFromParts(req.body.proxy)
-          : normalizeProxyUrl(req.body.proxy_url);
+        : resolveBrowserProxyUrl(req.body, config, { defaultToConfigured: false });
       const proxy = await controlChannel.send(session.id, 'proxy.update', {
         proxy_url: proxyUrl,
         verify: true,
@@ -4130,6 +4038,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
               volume_id: session.volume_id,
               reconciled: true,
             });
+            warmPool?.triggerReconcile();
             return res.json({ browser_session: publicBrowserSession(updated) });
           }
         }
@@ -4161,6 +4070,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       if (!updated) throw Object.assign(new Error('The browser lifecycle changed while pausing'), { status: 409 });
       reserved = false;
       await audit(req, 'browser_session.pause', 'browser_session', session.id, { volume_id: session.volume_id });
+      warmPool?.triggerReconcile();
       res.json({ browser_session: publicBrowserSession(updated) });
     } catch (error) {
       if (reserved && !destroyConfirmed) {
@@ -4201,7 +4111,11 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       if (!resuming) return jsonError(res, 409, 'Only a paused browser can be resumed');
       let provisioned;
       try {
-        provisioned = await provisioner.createBrowserDroplet(resuming, {
+        provisioned = await warmPool?.tryAssignSession(resuming, {
+          providerApiKey: session.connect_secret,
+          // The volume-backed proxy.json is authoritative after a resume.
+          proxyUrl: '',
+        }) || await provisioner.createBrowserDroplet(resuming, {
           providerApiKey: session.connect_secret,
           // The volume-backed proxy.json is authoritative after a resume.
           proxyUrl: '',
@@ -4233,7 +4147,10 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
         }).catch(() => {});
         throw error;
       }
-      await audit(req, 'browser_session.resume', 'browser_session', session.id, { droplet_id: updated.droplet_id });
+      await audit(req, 'browser_session.resume', 'browser_session', session.id, {
+        droplet_id: updated.droplet_id,
+        warm_pool_id: provisioned.warm_pool_id || null,
+      });
       res.status(202).json({ browser_session: publicBrowserSession(updated) });
     } catch (error) {
       next(error);
@@ -4295,6 +4212,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       });
       if (!updated) throw Object.assign(new Error('The browser lifecycle changed while deleting'), { status: 409 });
       await audit(req, 'browser_session.destroy', 'browser_session', session.id);
+      warmPool?.triggerReconcile();
       res.json({ browser_session: publicBrowserSession(updated) });
     } catch (e) {
       next(e);

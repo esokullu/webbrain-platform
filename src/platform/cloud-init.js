@@ -233,3 +233,110 @@ ${hasProfileVolume ? '  - /usr/local/sbin/webbrain-mount-profile' : ''}
   - systemctl start webbrain-sidecar.service webbrain-xvfb.service webbrain-x11vnc.service webbrain-novnc.service webbrain-droplet.service webbrain-browser.service
 `;
 }
+
+export function renderWarmPoolCloudInit({ pool, config }) {
+  const repoUrl = config.droplet.repoUrl || 'https://github.com/esokullu/webbrain-platform.git';
+  const webbrainRepoUrl = config.droplet.webbrainRepoUrl || 'https://github.com/webbrain-one/webbrain.git';
+  const appDir = '/opt/webbrain-platform';
+  const webbrainDir = '/opt/webbrain3';
+  const extensionDir = `${webbrainDir}/src/chrome`;
+  const poolControlUrl = config.baseUrl.replace(/^http/, 'ws') + '/droplet/pool-control';
+  const sessionControlUrl = config.baseUrl.replace(/^http/, 'ws') + '/droplet/control';
+  const env = {
+    NODE_ENV: 'production',
+    WEBBRAIN_ROLE: 'warm-pool',
+    WEBBRAIN_POOL_ID: pool.id,
+    WEBBRAIN_POOL_TOKEN: pool.pool_token,
+    WEBBRAIN_PLATFORM_URL: config.baseUrl,
+    WEBBRAIN_POOL_CONTROL_WS_URL: poolControlUrl,
+    WEBBRAIN_CONTROL_WS_URL: sessionControlUrl,
+    WEBBRAIN_EXTENSION_DIR: extensionDir,
+    WEBBRAIN_PROVIDER_BASE_URL: config.droplet.providerBaseUrl,
+    WEBBRAIN_PROVIDER_MODEL: config.droplet.providerModel,
+    WEBBRAIN_NOVNC_GATE_PORT: String(config.droplet.noVncGatePort || 6081),
+    WEBBRAIN_EPHEMERAL_GATE_BASE_PORT: String(config.droplet.ephemeralGateBasePort || 6100),
+    WEBBRAIN_EPHEMERAL_MAX_SESSIONS: String(config.droplet.ephemeralMaxSessions || 1),
+    WEBBRAIN_EPHEMERAL_MEMORY_MAX: config.droplet.ephemeralMemoryMax || '2G',
+    WEBBRAIN_EPHEMERAL_DISK_MAX_BYTES: String(config.droplet.ephemeralDiskMaxBytes || 2 * 1024 * 1024 * 1024),
+    WEBBRAIN_EPHEMERAL_DOWNLOAD_LIMIT_BYTES: String(config.droplet.ephemeralDownloadLimitBytes || 512 * 1024 * 1024),
+    WEBBRAIN_EPHEMERAL_DOWNLOAD_TOTAL_LIMIT_BYTES: String(
+      config.droplet.ephemeralDownloadTotalLimitBytes || 1024 * 1024 * 1024
+    ),
+    WEBBRAIN_BROWSER_BIN: '/opt/chrome-linux64/chrome',
+    WEBBRAIN_START_URL: 'https://webbrain.one',
+    WEBBRAIN_PROFILE_MOUNT: config.droplet.profileMount || '/mnt/webbrain-profile',
+    WEBBRAIN_DOWNLOADS_INGEST_URL: `${config.baseUrl}/droplet/downloads`,
+    WEBBRAIN_DOWNLOADS_MAX_UPLOAD_BYTES: String(config.downloads.maxUploadBytes),
+    WEBBRAIN_DOWNLOADS_SPACES_ENABLED: String(config.downloads?.spaces?.enabled === true),
+    WEBBRAIN_BROWSER_PROXY_SERVER: `http://${config.browserProxy.relayHost}:${config.browserProxy.relayPort}`,
+    WEBBRAIN_BROWSER_PROXY_BYPASS_LIST: config.browserProxy.bypassList,
+    WEBBRAIN_PROXY_RELAY_HOST: config.browserProxy.relayHost,
+    WEBBRAIN_PROXY_RELAY_PORT: String(config.browserProxy.relayPort),
+    WEBBRAIN_PROXY_VERIFY_URL: config.browserProxy.verifyUrl,
+    WEBBRAIN_PROXY_VERIFY_TIMEOUT_MS: String(config.browserProxy.verifyTimeoutMs),
+  };
+  const envText = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join('\n');
+  const extensionId = chromeExtensionIdForPath(extensionDir);
+
+  return `#cloud-config
+package_update: true
+package_upgrade: false
+packages:
+  - build-essential
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - debian-archive-keyring
+  - debian-keyring
+  - git
+  - gnupg
+  - unzip
+  - ufw
+  - xvfb
+  - x11vnc
+  - websockify
+write_files:
+  - path: /etc/opt/chrome_for_testing/policies/managed/webbrain.json
+    permissions: '0644'
+    content: |
+      {"PasswordManagerEnabled":false,"ExtensionSettings":{"${extensionId}":{"installation_mode":"allowed","toolbar_pin":"force_pinned"}}}
+  - path: /etc/webbrain-pool.env
+    permissions: '0600'
+    content: |
+${envText.split('\n').map(line => `      ${line}`).join('\n')}
+  - path: /etc/systemd/system/webbrain-pool-agent.service
+    content: |
+      [Unit]
+      Description=WebBrain warm Droplet pool agent
+      After=network-online.target
+      Wants=network-online.target
+      [Service]
+      EnvironmentFile=/etc/webbrain-pool.env
+      WorkingDirectory=${appDir}
+      ExecStart=/usr/bin/npm run start:pool-agent
+      Restart=always
+      RestartSec=3
+      [Install]
+      WantedBy=multi-user.target
+runcmd:
+  - ufw allow OpenSSH
+  - ufw allow ${Number(config.droplet.noVncGatePort || 6081)}/tcp
+  - ufw allow ${Number(config.droplet.ephemeralGateBasePort || 6100)}:${Number(config.droplet.ephemeralGateBasePort || 6100) + Math.max(1, Number(config.droplet.ephemeralMaxSessions || 1)) - 1}/tcp
+  - ufw --force enable
+  - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  - apt-get install -y nodejs
+  - curl -fsSL -o /tmp/google-chrome-stable_current_amd64.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+  - apt-get install -y /tmp/google-chrome-stable_current_amd64.deb
+  - node --input-type=module -e "const r = await fetch('https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json'); const j = await r.json(); console.log(j.channels.Stable.downloads.chrome.find(x => x.platform === 'linux64').url);" > /tmp/chrome-for-testing-url
+  - curl -fsSL -o /tmp/chrome-linux64.zip "$(cat /tmp/chrome-for-testing-url)"
+  - rm -rf /opt/chrome-linux64 && unzip -q /tmp/chrome-linux64.zip -d /opt
+  - git clone ${shellQuote(repoUrl)} ${appDir}
+  - git clone ${shellQuote(webbrainRepoUrl)} ${webbrainDir}
+  - git clone https://github.com/novnc/noVNC.git /opt/noVNC
+  - cd ${appDir} && npm ci --omit=dev
+  - cd ${webbrainDir} && git checkout ${shellQuote(config.droplet.webbrainRef)}
+  - systemctl daemon-reload
+  - systemctl enable webbrain-pool-agent.service
+  - systemctl start webbrain-pool-agent.service
+`;
+}
