@@ -170,6 +170,7 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   assert.equal(sessionRes.status, 201);
   assert.equal(sessionRes.body.browser_session.status, 'ready');
   assert.equal(sessionRes.body.browser_session.display_name, 'Daily research');
+  assert.equal(sessionRes.body.browser_session.expires_at, null);
   assert.deepEqual(sessionRes.body.browser_session.proxy, {
     enabled: true,
     endpoint: 'http://proxy-start.example:8080',
@@ -1071,6 +1072,7 @@ test('always-on browser creation skips the profile volume and keeps local Downlo
     });
     assert.equal(created.status, 201);
     assert.equal(created.body.browser_session.volume, null);
+    assert.equal(created.body.browser_session.expires_at, null);
     assert.equal(ctx.provisioner.createdVolumes.length, 0);
     assert.equal(ctx.provisioner.created.length, 1);
     assert.equal(ctx.provisioner.created[0].volume_id, null);
@@ -1162,6 +1164,7 @@ test('ephemeral browsers reuse running resumable and always-on Droplets and are 
       body: JSON.stringify({ display_name: 'Persistent host', lifecycle: 'resumable' }),
     });
     assert.equal(resumable.status, 201);
+    assert.equal(resumable.body.browser_session.expires_at, null);
     const resumableHost = await attachHost(resumable.body.browser_session.id, 6123);
 
     const provisionedBeforeChild = ctx.provisioner.created.length;
@@ -1179,6 +1182,7 @@ test('ephemeral browsers reuse running resumable and always-on Droplets and are 
     assert.equal(child.status, 201);
     assert.equal(child.body.browser_session.profile_mode, 'ephemeral');
     assert.equal(child.body.browser_session.host_session_id, resumable.body.browser_session.id);
+    assert.equal(new Date(child.body.browser_session.expires_at).getTime() > Date.now(), true);
     assert.equal(child.body.browser_session.volume, null);
     assert.equal(ctx.provisioner.created.length, provisionedBeforeChild);
     assert.equal(ctx.provisioner.createdVolumes.length, volumesBeforeChild);
@@ -1467,6 +1471,41 @@ test('expired ephemeral browsers are stopped and destroyed without touching thei
   const failedRun = await store.getCloudRun('run_expirychild');
   assert.equal(failedRun.status, 'failed');
   assert.match(failedRun.error, /expired/);
+});
+
+test('expired timestamps can never destroy persistent browser infrastructure', async () => {
+  const store = new MemoryStore();
+  const now = new Date().toISOString();
+  const persistent = await store.createBrowserSession({
+    id: 'bs_legacyexpired',
+    user_id: 'usr_legacyexpired',
+    status: 'ready',
+    profile_mode: 'persistent',
+    droplet_id: 'droplet-must-survive',
+    public_ip: '203.0.113.12',
+    volume_id: 'volume-must-survive',
+    connect_secret: 'persistent-secret',
+    expires_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+    created_at: now,
+    updated_at: now,
+  });
+  const provisioner = {
+    destroyDroplet: async () => assert.fail('persistent expiry must never destroy a Droplet'),
+    waitForVolumeDetached: async () => assert.fail('persistent expiry must never detach a volume'),
+    destroyVolume: async () => assert.fail('persistent expiry must never destroy a volume'),
+  };
+
+  assert.deepEqual(await store.listExpiredBrowserSessions(now), []);
+
+  // Also bypass the store-level filter to prove the cleanup routine itself
+  // refuses a legacy persistent row with an expired timestamp.
+  store.listExpiredBrowserSessions = async () => [persistent];
+  const cleaned = await cleanupExpiredBrowserSessions({ store, provisioner });
+  assert.deepEqual(cleaned, []);
+  const preserved = await store.getBrowserSession(persistent.id);
+  assert.equal(preserved.status, 'ready');
+  assert.equal(preserved.droplet_id, 'droplet-must-survive');
+  assert.equal(preserved.volume_id, 'volume-must-survive');
 });
 
 test('pending ephemeral teardown is retried after its host reconnects', async () => {

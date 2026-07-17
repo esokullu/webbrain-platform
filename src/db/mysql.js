@@ -139,6 +139,23 @@ export class MySqlStore {
       );
       if (!rows.length) await this.pool.query(alter);
     }
+    const [browserExpiryColumns] = await this.pool.execute(
+      `SELECT IS_NULLABLE AS is_nullable
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND TABLE_NAME = 'browser_sessions'
+         AND COLUMN_NAME = 'expires_at'
+       LIMIT 1`
+    );
+    if (browserExpiryColumns[0]?.is_nullable !== 'YES') {
+      await this.pool.query('ALTER TABLE browser_sessions MODIFY COLUMN expires_at DATETIME NULL');
+    }
+    await this.pool.query(
+      `UPDATE browser_sessions
+       SET expires_at = NULL
+       WHERE profile_mode <> 'ephemeral'
+         AND expires_at IS NOT NULL`
+    );
     const [hostSessionIndexes] = await this.pool.execute(
       `SELECT 1
        FROM information_schema.STATISTICS
@@ -438,7 +455,10 @@ export class MySqlStore {
   async listExpiredBrowserSessions(now) {
     const [rows] = await this.pool.execute(
       `SELECT * FROM browser_sessions
-       WHERE expires_at <= :now AND status NOT IN ('stopping','stopped','destroyed')`,
+       WHERE profile_mode = 'ephemeral'
+         AND expires_at IS NOT NULL
+         AND expires_at <= :now
+         AND status NOT IN ('stopping','stopped','destroyed')`,
       { now: toMysqlDate(now) }
     );
     return rows.map(normalizeBrowserSession);

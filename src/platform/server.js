@@ -44,7 +44,7 @@ export function createPlatformServer({ store, provisioner, config, downloadsHand
   instanceProxy.attach(server);
   controlChannel.attach(server);
   const cleanupTimer = setInterval(() => {
-    cleanupExpiredBrowserSessions({ store, provisioner, controlChannel }).catch(error => {
+    cleanupExpiredBrowserSessions({ store, controlChannel }).catch(error => {
       console.error('[browser-cleanup]', error.message || error);
     });
   }, config.browserCleanupIntervalMs);

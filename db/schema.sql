@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS browser_sessions (
   paused_at DATETIME NULL,
   ended_at DATETIME NULL,
   end_reason VARCHAR(255) NULL,
-  expires_at DATETIME NOT NULL,
+  expires_at DATETIME NULL,
   created_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id),

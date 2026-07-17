@@ -165,8 +165,11 @@ export class MemoryStore {
   async listExpiredBrowserSessions(now = nowIso()) {
     const cutoff = new Date(now).getTime();
     return clone([...this.browserSessions.values()].filter(s => {
-      const expired = new Date(s.expires_at).getTime() <= cutoff;
-      return expired && !['stopping', 'stopped', 'destroyed'].includes(s.status);
+      const expiresAt = s.expires_at ? new Date(s.expires_at).getTime() : NaN;
+      return s.profile_mode === 'ephemeral'
+        && Number.isFinite(expiresAt)
+        && expiresAt <= cutoff
+        && !['stopping', 'stopped', 'destroyed'].includes(s.status);
     }));
   }
 

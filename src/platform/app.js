@@ -3555,9 +3555,15 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
         ? proxyUrlFromParts(req.body.proxy)
         : normalizeProxyUrl(requestedProxyUrl);
       const proxyEndpoint = publicProxyEndpoint(proxyUrl);
-      const requestedExpiresAt = isoAfterMs(Number(req.body.ttl_ms || config.browserSessionTtlMs));
 
       if (lifecycle === 'ephemeral') {
+        const requestedTtlMs = Number(
+          req.body.ttl_ms ?? config.droplet.ephemeralSessionTtlMs
+        );
+        if (!Number.isFinite(requestedTtlMs) || requestedTtlMs <= 0) {
+          return jsonError(res, 400, '`ttl_ms` must be a positive number for an ephemeral browser');
+        }
+        const requestedExpiresAt = isoAfterMs(requestedTtlMs);
         const hostSessionId = String(
           req.body.host_session_id
           || req.body.placement?.existing_session_id
@@ -3586,9 +3592,12 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
           return jsonError(res, 409, 'The selected Droplet has reached its ephemeral browser capacity');
         }
 
-        const expiresAt = new Date(
-          Math.min(new Date(requestedExpiresAt).getTime(), new Date(refreshedHost.expires_at).getTime())
-        ).toISOString();
+        const hostExpiresAt = refreshedHost.expires_at
+          ? new Date(refreshedHost.expires_at).getTime()
+          : NaN;
+        const expiresAt = Number.isFinite(hostExpiresAt)
+          ? new Date(Math.min(new Date(requestedExpiresAt).getTime(), hostExpiresAt)).toISOString()
+          : requestedExpiresAt;
         const session = await store.createBrowserSession({
           id: randomId('bs'),
           user_id: req.auth.user.id,
@@ -3688,7 +3697,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
         paused_at: null,
         ended_at: null,
         end_reason: null,
-        expires_at: requestedExpiresAt,
+        expires_at: null,
         created_at: now,
         updated_at: now,
       });
@@ -4604,7 +4613,7 @@ async function confirmStoredEphemeralStopped({ store, controlChannel, session })
   ).then(() => true).catch(() => false);
 }
 
-export async function cleanupExpiredBrowserSessions({ store, provisioner, controlChannel = null }) {
+export async function cleanupExpiredBrowserSessions({ store, controlChannel = null }) {
   const cleaned = [];
 
   // Retry user-requested teardown independently of TTL. A temporary control
@@ -4617,67 +4626,21 @@ export async function cleanupExpiredBrowserSessions({ store, provisioner, contro
 
   const expired = await store.listExpiredBrowserSessions(nowIso());
   for (const session of expired) {
+    // Defense in depth: even a buggy/custom store must never turn a
+    // persistent browser timestamp into authority to delete infrastructure.
+    if (!isEphemeralBrowser(session)) continue;
     if (['pausing', 'resuming', 'resetting', 'restarting'].includes(session.status)) continue;
-    if (isEphemeralBrowser(session)) {
-      const reason = 'The ephemeral browser expired and its temporary data was discarded.';
-      const deleting = await store.updateBrowserSessionIfStatus(session.id, session.status, {
-        status: 'stopping',
-        end_reason: reason,
-        updated_at: nowIso(),
-      });
-      if (!deleting) continue;
-      const completedAt = nowIso();
-      await failStoredRunsForSession(store, deleting.id, reason, completedAt);
-      if (!await confirmStoredEphemeralStopped({ store, controlChannel, session: deleting })) continue;
-      const destroyed = await finalizeStoredEphemeralSession(store, deleting, reason, completedAt);
-      if (destroyed) cleaned.push(destroyed);
-      continue;
-    }
-
+    const reason = 'The ephemeral browser expired and its temporary data was discarded.';
     const deleting = await store.updateBrowserSessionIfStatus(session.id, session.status, {
       status: 'stopping',
+      end_reason: reason,
       updated_at: nowIso(),
     });
     if (!deleting) continue;
-    const childReason = 'The host browser expired; this ephemeral browser and its temporary data were discarded.';
-    const children = (await store.listHostedBrowserSessions(deleting.id))
-      .filter(child => !TERMINAL_BROWSER_STATUSES.has(child.status));
-    const stoppingChildren = [];
-    for (const child of children) {
-      const stopping = child.status === 'stopping'
-        ? await store.updateBrowserSession(child.id, { end_reason: childReason, updated_at: nowIso() })
-        : await store.updateBrowserSessionIfStatus(child.id, child.status, {
-          status: 'stopping',
-          end_reason: childReason,
-          updated_at: nowIso(),
-        });
-      if (!stopping) continue;
-      await failStoredRunsForSession(store, stopping.id, childReason);
-      stoppingChildren.push(stopping);
-    }
-    if (stoppingChildren.length && controlChannel?.isConnected(deleting.id)) {
-      await controlChannel.send(deleting.id, 'ephemeral.stop_all', {}, 20_000).catch(() => {});
-    }
-    await provisioner.destroyDroplet(deleting.droplet_id);
-    for (const child of stoppingChildren) {
-      await finalizeStoredEphemeralSession(store, child, childReason);
-    }
-    if (deleting.volume_id) {
-      await provisioner.waitForVolumeDetached(deleting.volume_id);
-      await provisioner.destroyVolume(deleting.volume_id);
-    }
-    const destroyed = await store.updateBrowserSessionIfStatus(session.id, 'stopping', {
-      status: 'destroyed',
-      droplet_id: null,
-      public_ip: null,
-      volume_id: null,
-      volume_name: null,
-      volume_size_gib: null,
-      paused_at: null,
-      ended_at: nowIso(),
-      end_reason: 'The browser session expired.',
-      updated_at: nowIso(),
-    });
+    const completedAt = nowIso();
+    await failStoredRunsForSession(store, deleting.id, reason, completedAt);
+    if (!await confirmStoredEphemeralStopped({ store, controlChannel, session: deleting })) continue;
+    const destroyed = await finalizeStoredEphemeralSession(store, deleting, reason, completedAt);
     if (destroyed) cleaned.push(destroyed);
   }
   return cleaned;

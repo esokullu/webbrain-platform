@@ -29,10 +29,17 @@ test('dashboard columns are present in fresh schema and existing-database migrat
   assert.match(schema, /runtime_generation VARCHAR\(64\) NULL/);
   assert.match(schema, /ended_at DATETIME NULL/);
   assert.match(schema, /end_reason VARCHAR\(255\) NULL/);
+  assert.match(schema, /expires_at DATETIME NULL/);
   assert.match(schema, /INDEX idx_browser_sessions_host \(host_session_id\)/);
   assert.match(storeSource, /ALTER TABLE browser_sessions ADD COLUMN profile_mode VARCHAR\(16\) NOT NULL DEFAULT 'persistent'/);
   assert.match(storeSource, /CREATE INDEX idx_browser_sessions_host ON browser_sessions \(host_session_id\)/);
   assert.match(storeSource, /async listHostedBrowserSessions\(/);
+  assert.match(storeSource, /ALTER TABLE browser_sessions MODIFY COLUMN expires_at DATETIME NULL/);
+  assert.match(storeSource, /SET expires_at = NULL\s+WHERE profile_mode <> 'ephemeral'/);
+  assert.match(
+    storeSource,
+    /async listExpiredBrowserSessions\([\s\S]*?WHERE profile_mode = 'ephemeral'[\s\S]*?expires_at <= :now/
+  );
   assert.match(schema, /updates JSON NULL/);
   assert.match(storeSource, /ALTER TABLE cloud_runs ADD COLUMN updates JSON NULL AFTER error/);
   assert.match(schema, /parent_run_id VARCHAR\(40\) NULL/);

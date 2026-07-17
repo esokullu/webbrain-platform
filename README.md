@@ -46,6 +46,7 @@ Platform:
 - `WEBBRAIN_PROXY_BYPASS_LIST` (optional Chrome bypass list; defaults to the platform hostname)
 - `WEBBRAIN_EPHEMERAL_GATE_BASE_PORT` (defaults to `6100`; first public noVNC gate reserved for hosted ephemeral browsers)
 - `WEBBRAIN_EPHEMERAL_MAX_SESSIONS` (defaults to `1` additional browser per running Droplet)
+- `WEBBRAIN_EPHEMERAL_SESSION_TTL_MS` (defaults to 6 hours; applies only to ephemeral browsers)
 - `WEBBRAIN_EPHEMERAL_MEMORY_MAX` (defaults to `2G` for each transient runtime)
 - `WEBBRAIN_EPHEMERAL_DISK_MAX_BYTES` (defaults to 2 GiB total writable data per temporary browser)
 - `WEBBRAIN_EPHEMERAL_DOWNLOAD_LIMIT_BYTES` (defaults to 512 MiB per uploaded file in a temporary browser)
@@ -131,7 +132,9 @@ browsers receive a fixed 2 GiB profile volume and can be paused once shared
 Downloads storage is configured. Always-on browsers use the classic single
 Droplet layout: Chrome state and Downloads stay on that Droplet, and Pause is
 unavailable. Ephemeral browsers reuse one of the user's running resumable or
-always-on Droplets without mounting or reading its Chrome profile.
+always-on Droplets without mounting or reading its Chrome profile. Resumable
+and always-on browsers do not expire automatically; they remain until explicitly
+deleted. Only ephemeral browsers enforce `ttl_ms`.
 
 The response is `201 Created`:
 
@@ -152,7 +155,7 @@ The response is `201 Created`:
       "size_gib": 2
     },
     "paused_at": null,
-    "expires_at": "2026-07-13T12:00:00.000Z",
+    "expires_at": null,
     "created_at": "2026-07-13T06:00:00.000Z",
     "updated_at": "2026-07-13T06:00:00.000Z",
     "droplet_connected": false,
