@@ -2640,8 +2640,8 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
             : ['resuming', 'provisioning'].includes(session?.status)
               ? 'Starting…'
               : 'Pause';
-      lifecyclePauseIcon.hidden = session?.status === 'paused';
-      lifecycleResumeIcon.hidden = session?.status !== 'paused';
+      lifecyclePauseIcon.toggleAttribute('hidden', session?.status === 'paused');
+      lifecycleResumeIcon.toggleAttribute('hidden', session?.status !== 'paused');
       lifecycleBtn.disabled = !canPause && !canResume;
       const canReset = !!session
         && session.profile_mode !== 'ephemeral'
