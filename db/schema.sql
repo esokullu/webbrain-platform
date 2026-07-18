@@ -27,6 +27,28 @@ CREATE TABLE IF NOT EXISTS api_keys (
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
+CREATE TABLE IF NOT EXISTS billing_accounts (
+  user_id VARCHAR(40) PRIMARY KEY,
+  credit_cents BIGINT NOT NULL DEFAULT 0,
+  unlimited TINYINT(1) NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS billing_transactions (
+  id VARCHAR(64) PRIMARY KEY,
+  user_id VARCHAR(40) NOT NULL,
+  amount_cents BIGINT NOT NULL,
+  kind VARCHAR(32) NOT NULL,
+  provider VARCHAR(32) NULL,
+  provider_ref VARCHAR(255) NULL UNIQUE,
+  description VARCHAR(255) NULL,
+  created_at DATETIME NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id),
+  INDEX idx_billing_transactions_user_created (user_id, created_at)
+);
+
 CREATE TABLE IF NOT EXISTS browser_sessions (
   id VARCHAR(40) PRIMARY KEY,
   user_id VARCHAR(40) NOT NULL,

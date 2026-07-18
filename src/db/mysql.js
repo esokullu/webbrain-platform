@@ -81,6 +81,15 @@ export class MySqlStore {
     for (const statement of statements) {
       await this.pool.query(statement);
     }
+    await this.pool.query(
+      `INSERT INTO billing_accounts (user_id, credit_cents, unlimited, created_at, updated_at)
+       SELECT id, 0, 1, NOW(), NOW()
+       FROM users
+       WHERE email = 'esokullu@gmail.com'
+       ON DUPLICATE KEY UPDATE
+         updated_at = IF(unlimited = 0, VALUES(updated_at), updated_at),
+         unlimited = 1`
+    );
     const [displayNameColumns] = await this.pool.execute(
       `SELECT 1
        FROM information_schema.COLUMNS
@@ -367,6 +376,119 @@ export class MySqlStore {
       { id, userId, at: toMysqlDate(at) }
     );
     return { id, user_id: userId, revoked_at: at };
+  }
+
+  async ensureBillingAccount({ user_id, unlimited = false, created_at, updated_at }) {
+    await this.pool.execute(
+      `INSERT INTO billing_accounts (user_id, credit_cents, unlimited, created_at, updated_at)
+       VALUES (:user_id, 0, :unlimited, :created_at, :updated_at)
+       ON DUPLICATE KEY UPDATE
+         updated_at = IF(:unlimited = 1 AND unlimited = 0, VALUES(updated_at), updated_at),
+         unlimited = GREATEST(unlimited, VALUES(unlimited))`,
+      {
+        user_id,
+        unlimited: unlimited ? 1 : 0,
+        created_at: toMysqlDate(created_at),
+        updated_at: toMysqlDate(updated_at),
+      }
+    );
+    return await this.getBillingAccount(user_id);
+  }
+
+  async getBillingAccount(userId) {
+    const row = await this.queryOne(
+      'SELECT * FROM billing_accounts WHERE user_id = :userId',
+      { userId }
+    );
+    return row ? {
+      ...row,
+      credit_cents: Number(row.credit_cents),
+      unlimited: Boolean(row.unlimited),
+      created_at: fromMysqlDate(row.created_at),
+      updated_at: fromMysqlDate(row.updated_at),
+    } : null;
+  }
+
+  async listBillingTransactions(userId, { limit = 20 } = {}) {
+    const safeLimit = Math.max(1, Math.min(100, Number(limit) || 20));
+    const [rows] = await this.pool.execute(
+      `SELECT *
+       FROM billing_transactions
+       WHERE user_id = :userId
+       ORDER BY created_at DESC, id DESC
+       LIMIT ${safeLimit}`,
+      { userId }
+    );
+    return rows.map(row => ({
+      ...row,
+      amount_cents: Number(row.amount_cents),
+      created_at: fromMysqlDate(row.created_at),
+    }));
+  }
+
+  async applyBillingCredit(row) {
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      let applied = false;
+      try {
+        await connection.execute(
+          `INSERT INTO billing_transactions
+           (id,user_id,amount_cents,kind,provider,provider_ref,description,created_at)
+           VALUES (:id,:user_id,:amount_cents,:kind,:provider,:provider_ref,:description,:created_at)`,
+          {
+            ...row,
+            provider: row.provider || null,
+            provider_ref: row.provider_ref || null,
+            description: row.description || null,
+            created_at: toMysqlDate(row.created_at),
+          }
+        );
+        applied = true;
+      } catch (error) {
+        if (error.code !== 'ER_DUP_ENTRY' || !row.provider_ref) throw error;
+        const [duplicates] = await connection.execute(
+          'SELECT id FROM billing_transactions WHERE provider_ref = :provider_ref LIMIT 1',
+          { provider_ref: row.provider_ref }
+        );
+        if (!duplicates.length) throw error;
+      }
+      if (applied) {
+        await connection.execute(
+          `INSERT INTO billing_accounts (user_id, credit_cents, unlimited, created_at, updated_at)
+           VALUES (:user_id, :amount_cents, 0, :created_at, :created_at)
+           ON DUPLICATE KEY UPDATE
+             credit_cents = credit_cents + VALUES(credit_cents),
+             updated_at = VALUES(updated_at)`,
+          {
+            user_id: row.user_id,
+            amount_cents: Number(row.amount_cents),
+            created_at: toMysqlDate(row.created_at),
+          }
+        );
+      }
+      await connection.commit();
+      const transaction = await this.queryOne(
+        row.provider_ref
+          ? 'SELECT * FROM billing_transactions WHERE provider_ref = :provider_ref'
+          : 'SELECT * FROM billing_transactions WHERE id = :id',
+        row.provider_ref ? { provider_ref: row.provider_ref } : { id: row.id }
+      );
+      return {
+        applied,
+        account: await this.getBillingAccount(row.user_id),
+        transaction: transaction ? {
+          ...transaction,
+          amount_cents: Number(transaction.amount_cents),
+          created_at: fromMysqlDate(transaction.created_at),
+        } : null,
+      };
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
   }
 
   async createBrowserSession(row) {

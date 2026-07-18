@@ -6,6 +6,11 @@ function hostnameFromUrl(value) {
   }
 }
 
+function positiveInteger(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 1 ? Math.trunc(parsed) : fallback;
+}
+
 export function loadConfig(env = process.env) {
   const baseUrl = env.WEBBRAIN_PLATFORM_URL || `http://127.0.0.1:${env.PORT || 3000}`;
   return {
@@ -68,6 +73,17 @@ export function loadConfig(env = process.env) {
     modelProxy: {
       baseUrl: env.WEBBRAIN_MODEL_PROXY_BASE_URL || '',
       apiKey: env.WEBBRAIN_MODEL_PROXY_API_KEY || '',
+    },
+    billing: {
+      browserHourCents: positiveInteger(env.WEBBRAIN_BROWSER_HOUR_CENTS || 10, 10),
+      unlimitedEmails: String(env.WEBBRAIN_UNLIMITED_BILLING_EMAILS || 'esokullu@gmail.com')
+        .split(',')
+        .map(email => email.trim().toLowerCase())
+        .filter(Boolean),
+      stripe: {
+        secretKey: env.STRIPE_SECRET_KEY || '',
+        webhookSecret: env.STRIPE_WEBHOOK_SECRET || '',
+      },
     },
     browserProxy: {
       url: env.WEBBRAIN_BROWSER_PROXY_URL || '',

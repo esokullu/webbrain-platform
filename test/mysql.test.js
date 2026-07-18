@@ -46,6 +46,14 @@ test('dashboard columns are present in fresh schema and existing-database migrat
   assert.match(schema, /tab_id BIGINT NULL/);
   assert.match(schema, /UNIQUE INDEX idx_cloud_runs_parent_run \(parent_run_id\)/);
   assert.match(schema, /CREATE TABLE IF NOT EXISTS warm_droplets/);
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS billing_accounts/);
+  assert.match(schema, /credit_cents BIGINT NOT NULL DEFAULT 0/);
+  assert.match(schema, /unlimited TINYINT\(1\) NOT NULL DEFAULT 0/);
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS billing_transactions/);
+  assert.match(schema, /provider_ref VARCHAR\(255\) NULL UNIQUE/);
+  assert.match(storeSource, /WHERE email = 'esokullu@gmail\.com'/);
+  assert.match(storeSource, /async ensureBillingAccount\(/);
+  assert.match(storeSource, /async applyBillingCredit\(/);
   assert.match(schema, /assigned_session_id VARCHAR\(40\) NULL/);
   assert.match(schema, /INDEX idx_warm_droplets_status \(status, assigned_session_id\)/);
   assert.match(storeSource, /CREATE TABLE IF NOT EXISTS warm_droplets/);

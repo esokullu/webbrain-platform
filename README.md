@@ -45,6 +45,10 @@ Platform:
 - `WEBBRAIN_INSTANCE_DOMAIN` (for example, `webbrain.cloud`; serves each browser session at an HTTPS subdomain)
 - `WEBBRAIN_REGISTRATION_ENABLED=true` only when public account creation should be available (disabled by default)
 - `WEBBRAIN_MODEL_PROXY_BASE_URL`, `WEBBRAIN_MODEL_PROXY_API_KEY`
+- `WEBBRAIN_BROWSER_HOUR_CENTS` (defaults to `10`, or `$0.10` per active browser hour in the pricing and billing UI)
+- `WEBBRAIN_UNLIMITED_BILLING_EMAILS` (comma-separated credit-check bypass list; defaults to `esokullu@gmail.com`)
+- `STRIPE_SECRET_KEY` (enables dashboard credit checkout)
+- `STRIPE_WEBHOOK_SECRET` (verifies `POST /api/billing/stripe-webhook`)
 - `WEBBRAIN_BROWSER_PROXY_URL` (optional default authenticated upstream proxy for new browsers)
 - `WEBBRAIN_PROXY_VERIFY_URL` (HTTP exit-IP endpoint; defaults to `http://api.ipify.org?format=json`)
 - `WEBBRAIN_PROXY_VERIFY_TIMEOUT_MS` (defaults to `10000`)
@@ -65,6 +69,15 @@ DigitalOcean lists the Basic 2 vCPU / 4 GiB Droplet (`s-2vcpu-4gb`) at
 DigitalOcean bills powered-off Droplets because compute remains reserved, so
 unused warm capacity is destroyed rather than powered down:
 [`docs.digitalocean.com/products/droplets/details/pricing/`](https://docs.digitalocean.com/products/droplets/details/pricing/).
+
+The public `/pricing` page and dashboard Billing view use a default customer
+rate of `$0.10` per active browser hour. Against the current `$0.03571` hourly
+Droplet rate, that leaves room for Stripe fees, standard automation services,
+and platform operations. Credit packs are `$10`, `$25`, `$50`, and `$100`.
+Stripe Checkout credits are idempotent by Checkout Session id, so the success
+redirect and webhook can safely process the same payment. The current billing
+surface records balances and payments; browser-time debit metering is not
+enabled by this UI-preview change.
 
 Production uses `WEBBRAIN_MODEL_PROXY_BASE_URL=https://api.webbrain.one/v1`.
 The platform authenticates browser model traffic with the per-session secret,

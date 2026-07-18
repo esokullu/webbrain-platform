@@ -7,6 +7,12 @@ import { instanceHostname } from './instance-proxy.js';
 import { docsPage } from './docs-page.js';
 import { normalizeProxyUrl, proxyUrlFromParts, publicProxyEndpoint, publicProxyState } from '../shared/proxy.js';
 import { DEFAULT_DOWNLOADS_UPLOAD_LIMIT_BYTES, downloadsAccessCredentials } from '../shared/downloads-access.js';
+import { DEFAULT_CREDIT_PACKAGES, pricingPage } from './pricing-page.js';
+import {
+  createStripeCheckoutSession,
+  retrieveStripeCheckoutSession,
+  verifyStripeWebhook,
+} from './stripe-billing.js';
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'aborted']);
 const TERMINAL_BROWSER_STATUSES = new Set(['destroyed']);
@@ -131,6 +137,7 @@ function loginPage(error = '', registrationEnabled = false) {
     .brand { display: flex; align-items: center; gap: 10px; color: var(--accent); font-size: 20px; font-weight: 800; text-decoration: none; }
     .brand img { width: 30px; height: 30px; border-radius: 8px; box-shadow: 0 6px 18px var(--accent-glow); }
     .brand-domain { color: var(--accent2); opacity: .68; font-weight: 400; }
+    .nav-actions { display: flex; align-items: center; gap: 16px; }
     .nav-note { color: var(--text-dim); font-size: 13px; font-weight: 650; text-decoration: none; }
     .nav-note:hover { color: var(--text); }
     main { max-width: 1100px; margin: 0 auto; padding: 84px 24px 72px; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(320px, .9fr); align-items: center; gap: 72px; }
@@ -174,7 +181,10 @@ function loginPage(error = '', registrationEnabled = false) {
       <a class="brand" href="https://webbrain.one/">
         <img src="https://webbrain.one/logo-github.png" alt=""> WebBrain<span class="brand-domain">.cloud</span>
       </a>
-      <a class="nav-note" href="/docs">API documentation →</a>
+      <div class="nav-actions">
+        <a class="nav-note" href="/pricing">Pricing</a>
+        <a class="nav-note" href="/docs">API documentation →</a>
+      </div>
     </div>
   </nav>
   <main>
@@ -243,6 +253,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     .header-nav { display: flex; align-items: center; gap: 4px; padding: 3px; border: 1px solid var(--border); border-radius: 9px; background: rgba(255,253,248,.55); }
     .header-link { min-height: 28px; display: inline-flex; align-items: center; padding: 4px 9px; border-radius: 6px; color: var(--text-dim); font-size: 12px; font-weight: 700; text-decoration: none; }
     .header-link:hover, .header-link[aria-current="page"] { background: var(--card); color: var(--text); box-shadow: 0 2px 8px var(--shadow); }
+    .header-credit { margin-left: 5px; color: var(--accent); font: 750 9px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .account-menu { position: relative; }
     .account-summary { min-height: 38px; max-width: 270px; display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 5px; border: 1px solid var(--border); border-radius: 10px; background: rgba(255,253,248,.65); color: var(--text); cursor: pointer; list-style: none; user-select: none; transition: background .15s ease, border-color .15s ease, box-shadow .15s ease; }
     .account-summary::-webkit-details-marker { display: none; }
@@ -363,6 +374,34 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     .api-key-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
     .api-panel { max-width: 980px; margin: 0 auto; }
     .api-description { margin: 3px 0 0; color: var(--text-dim); font-size: 12px; }
+    .billing-grid { display: grid; grid-template-columns: minmax(300px,.82fr) minmax(0,1.18fr); gap: 18px; align-items: start; }
+    .balance-card { position: relative; overflow: hidden; min-height: 326px; padding: 27px; display: flex; flex-direction: column; justify-content: space-between; border-radius: 16px; background: #251c17; color: #fff8ed; box-shadow: 0 22px 52px rgba(44,24,16,.18); }
+    .balance-card::after { content: ''; position: absolute; width: 270px; height: 270px; right: -110px; bottom: -130px; border-radius: 50%; background: radial-gradient(circle, rgba(124,108,230,.48), transparent 68%); filter: blur(8px); pointer-events: none; }
+    .balance-top { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .balance-label { color: #cfc0ad; font-size: 10px; font-weight: 850; letter-spacing: .11em; text-transform: uppercase; }
+    .billing-mode { min-height: 25px; display: inline-flex; align-items: center; padding: 0 8px; border: 1px solid rgba(255,248,237,.15); border-radius: 999px; color: #d9cdef; font-size: 9px; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; }
+    .balance-value { position: relative; z-index: 1; margin: 30px 0 8px; font: 750 clamp(44px,7vw,68px)/.95 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: -.075em; }
+    .balance-hours { position: relative; z-index: 1; margin: 0; color: #cfc0ad; font-size: 12px; }
+    .balance-rate { position: relative; z-index: 1; margin-top: 38px; padding-top: 15px; display: flex; align-items: end; justify-content: space-between; gap: 18px; border-top: 1px dashed rgba(255,248,237,.18); color: #cfc0ad; font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .balance-rate strong { color: #fff8ed; font-size: 14px; }
+    .billing-stack { display: grid; gap: 18px; }
+    .billing-provider { display: flex; align-items: center; gap: 9px; color: var(--text-dim); font-size: 11px; }
+    .stripe-mark { padding: 4px 7px; border-radius: 6px; background: #635bff; color: white; font-weight: 850; letter-spacing: -.02em; }
+    .topup-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; margin-top: 15px; }
+    .topup-button { min-height: 78px; display: grid; place-items: center; gap: 2px; border-color: rgba(91,82,232,.20); background: rgba(91,82,232,.045); color: var(--text); box-shadow: none; }
+    .topup-button:hover { border-color: rgba(91,82,232,.38); background: rgba(91,82,232,.09); color: var(--accent); }
+    .topup-button strong { font: 800 18px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .topup-button span { color: var(--text-dim); font-size: 9px; font-weight: 650; }
+    .billing-message { margin-top: 12px; min-height: 18px; color: var(--success); font-size: 11px; }
+    .billing-message.error { color: var(--danger); }
+    .billing-history { display: grid; gap: 7px; margin-top: 13px; }
+    .billing-history-empty { min-height: 92px; display: grid; place-items: center; padding: 20px; border: 1px dashed var(--border); border-radius: 9px; color: var(--text-dim); font-size: 11px; text-align: center; }
+    .billing-transaction { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 12px; padding: 10px 11px; border: 1px solid var(--border); border-radius: 9px; background: rgba(89,55,25,.025); }
+    .billing-transaction strong { display: block; font-size: 12px; }
+    .billing-transaction time { display: block; margin-top: 2px; color: var(--text-dim); font-size: 9px; }
+    .billing-transaction-amount { color: var(--success); font: 750 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .billing-footnote { margin: 13px 0 0; color: var(--text-dim); font-size: 10px; line-height: 1.55; }
+    .billing-footnote a { color: var(--accent); font-weight: 750; }
     .docs-link { align-self: center; }
     .secret { display: none; margin-top: 10px; padding: 11px; border: 1px solid var(--border); border-radius: 8px; background: rgba(89,55,25,.04); overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
     .api-key-list { display: grid; gap: 8px; margin-top: 14px; }
@@ -605,6 +644,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       .grid, .grid.sessions-collapsed { grid-template-columns: 1fr; gap: 18px; }
       .console-grid { grid-template-columns: 1fr; }
       .logs-grid { grid-template-columns: 1fr; }
+      .billing-grid { grid-template-columns: 1fr; }
       .logs-detail-panel { order: -1; }
       .logs-list { min-height: 0; max-height: none; padding-right: 0; overflow: visible; }
       .collapse-sessions { display: none; }
@@ -639,6 +679,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       .create-row button { width: 100%; }
       .lifecycle-options, .proxy-route-details { grid-template-columns: 1fr; }
       .api-key-row { grid-template-columns: 1fr; }
+      .topup-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
       .api-key-item { grid-template-columns: 1fr; }
       .api-key-actions { justify-content: space-between; }
       .console-action-row { align-items: stretch; flex-direction: column; }
@@ -675,6 +716,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           <a class="header-link" href="#console" data-view-target="console">Console</a>
           <a class="header-link" href="#api-keys" data-view-target="api-keys">API keys</a>
           <a class="header-link" href="#logs" data-view-target="logs">Logs</a>
+          <a class="header-link" href="#billing" data-view-target="billing">Billing<span class="header-credit" id="headerCredit">—</span></a>
           <a class="header-link" href="/docs">Docs</a>
         </div>
         <details class="account-menu" id="accountMenu">
@@ -940,6 +982,62 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         </section>
       </div>
     </section>
+    <section class="dashboard-view" id="billingView" hidden>
+      <section class="page-intro">
+        <div>
+          <p class="eyebrow">Usage and payments</p>
+          <h1>Billing</h1>
+        </div>
+        <p class="intro-copy">See the credit available to your cloud browsers and add more through Stripe when you need it.</p>
+      </section>
+      <div class="billing-grid">
+        <section class="balance-card" aria-labelledby="billingBalanceLabel">
+          <div>
+            <div class="balance-top">
+              <span class="balance-label" id="billingBalanceLabel">Current credit</span>
+              <span class="billing-mode" id="billingMode">Loading</span>
+            </div>
+            <div class="balance-value" id="billingBalance">—</div>
+            <p class="balance-hours" id="billingHours">Checking your billing account…</p>
+          </div>
+          <div class="balance-rate">
+            <span>ACTIVE BROWSER RATE</span>
+            <strong id="billingRate">—</strong>
+          </div>
+        </section>
+        <div class="billing-stack">
+          <section class="panel" aria-labelledby="topUpTitle">
+            <div class="panel-head">
+              <div>
+                <div class="panel-kicker">Add credit</div>
+                <h2 id="topUpTitle">Choose an amount</h2>
+                <p class="api-description">Stripe handles the card details; WebBrain receives only the completed payment.</p>
+              </div>
+              <div class="billing-provider"><span>Secure checkout by</span><span class="stripe-mark">stripe</span></div>
+            </div>
+            <div class="panel-body">
+              <div class="topup-grid" id="topUpGrid"></div>
+              <div class="billing-message" id="billingMessage" aria-live="polite"></div>
+              <p class="billing-footnote">Credit packs all use the same browser-hour rate. See the public <a href="/pricing">pricing page</a> for what is included.</p>
+            </div>
+          </section>
+          <section class="panel" aria-labelledby="billingHistoryTitle">
+            <div class="panel-head">
+              <div>
+                <div class="panel-kicker">Ledger</div>
+                <h2 id="billingHistoryTitle">Credit history</h2>
+                <p class="api-description">Completed top-ups appear here once, even if Stripe retries its notification.</p>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div class="billing-history" id="billingHistory">
+                <div class="billing-history-empty">Loading credit history…</div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
     <section class="dashboard-view" id="apiKeysView" hidden>
       <section class="page-intro">
         <div>
@@ -976,6 +1074,8 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         <span>Private browser workspaces</span>
         <span aria-hidden="true">·</span>
         <a href="/docs">API docs</a>
+        <span aria-hidden="true">·</span>
+        <a href="/pricing">Pricing</a>
         <span aria-hidden="true">·</span>
         <a href="https://webbrain.one/">webbrain.one</a>
       </div>
@@ -1249,7 +1349,16 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const browserView = document.getElementById('browserView');
     const consoleView = document.getElementById('consoleView');
     const logsView = document.getElementById('logsView');
+    const billingView = document.getElementById('billingView');
     const apiKeysView = document.getElementById('apiKeysView');
+    const headerCredit = document.getElementById('headerCredit');
+    const billingBalance = document.getElementById('billingBalance');
+    const billingMode = document.getElementById('billingMode');
+    const billingHours = document.getElementById('billingHours');
+    const billingRate = document.getElementById('billingRate');
+    const topUpGrid = document.getElementById('topUpGrid');
+    const billingMessage = document.getElementById('billingMessage');
+    const billingHistory = document.getElementById('billingHistory');
     const viewLinks = [...document.querySelectorAll('[data-view-target]')];
     const consoleSessionSelect = document.getElementById('consoleSessionSelect');
     const consoleSessionStatus = document.getElementById('consoleSessionStatus');
@@ -1321,6 +1430,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const state = {
       sessions: [],
       apiKeys: [],
+      billing: null,
       selectedId: null,
       consoleSessionId: null,
       consoleRun: null,
@@ -1352,10 +1462,11 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const sessionsCollapsedKey = 'webbrain.sessionsCollapsed';
 
     function setDashboardView(view, updateUrl) {
-      const nextView = ['api-keys', 'console', 'logs'].includes(view) ? view : 'browsers';
+      const nextView = ['api-keys', 'console', 'logs', 'billing'].includes(view) ? view : 'browsers';
       browserView.hidden = nextView !== 'browsers';
       consoleView.hidden = nextView !== 'console';
       logsView.hidden = nextView !== 'logs';
+      billingView.hidden = nextView !== 'billing';
       apiKeysView.hidden = nextView !== 'api-keys';
       for (const link of viewLinks) {
         if (link.dataset.viewTarget === nextView) link.setAttribute('aria-current', 'page');
@@ -1367,6 +1478,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       if (nextView === 'logs') loadRunLogs({ reset: true }).catch(e => {
         logsMessage.textContent = e.message;
       });
+      if (nextView === 'billing') loadBilling().catch(e => showMessage(billingMessage, e.message, true));
     }
 
     function setSessionsCollapsed(collapsed) {
@@ -2961,6 +3073,93 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       }
     }
 
+    function formatCredit(cents) {
+      return '$' + (Number(cents || 0) / 100).toFixed(2);
+    }
+
+    function renderBilling() {
+      const billing = state.billing;
+      if (!billing) return;
+      const account = billing.account;
+      const unlimited = account.unlimited === true;
+      headerCredit.textContent = unlimited ? '∞' : formatCredit(account.credit_cents);
+      billingBalance.textContent = unlimited ? 'Unlimited' : formatCredit(account.credit_cents);
+      billingMode.textContent = unlimited ? 'Founder account' : 'Pay as you go';
+      billingRate.textContent = formatCredit(billing.browser_hour_cents) + ' / hour';
+      billingHours.textContent = unlimited
+        ? 'Credit checks are bypassed for this account.'
+        : 'About ' + Math.floor(Number(account.credit_cents || 0) / billing.browser_hour_cents) + ' active browser hours available.';
+
+      topUpGrid.innerHTML = '';
+      for (const pack of billing.credit_packages) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'topup-button';
+        button.disabled = unlimited || !billing.stripe_configured;
+        const amount = document.createElement('strong');
+        amount.textContent = formatCredit(pack.amount_cents);
+        const hours = document.createElement('span');
+        hours.textContent = '≈ ' + pack.browser_hours + ' browser hours';
+        button.append(amount, hours);
+        button.addEventListener('click', () => startBillingCheckout(pack.amount_cents, button));
+        topUpGrid.appendChild(button);
+      }
+      if (unlimited) {
+        showMessage(billingMessage, 'No top-up is needed. This account bypasses credit checks.');
+      } else if (!billing.stripe_configured) {
+        showMessage(billingMessage, 'Preview mode: add STRIPE_SECRET_KEY to enable these checkout buttons.');
+      } else {
+        showMessage(billingMessage, 'Choose a credit amount to continue in Stripe.');
+      }
+
+      billingHistory.innerHTML = '';
+      if (!billing.transactions.length) {
+        const empty = document.createElement('div');
+        empty.className = 'billing-history-empty';
+        empty.textContent = unlimited
+          ? 'No credit ledger is needed for this unlimited account.'
+          : 'No credit top-ups yet. Your first completed Stripe payment will appear here.';
+        billingHistory.appendChild(empty);
+        return;
+      }
+      for (const transaction of billing.transactions) {
+        const row = document.createElement('div');
+        row.className = 'billing-transaction';
+        const details = document.createElement('div');
+        const description = document.createElement('strong');
+        description.textContent = transaction.description || 'Credit added';
+        const time = document.createElement('time');
+        time.textContent = formatDate(transaction.created_at);
+        details.append(description, time);
+        const amount = document.createElement('span');
+        amount.className = 'billing-transaction-amount';
+        amount.textContent = (transaction.amount_cents >= 0 ? '+' : '') + formatCredit(transaction.amount_cents);
+        row.append(details, amount);
+        billingHistory.appendChild(row);
+      }
+    }
+
+    async function loadBilling() {
+      state.billing = await api('/api/billing');
+      renderBilling();
+      return state.billing;
+    }
+
+    async function startBillingCheckout(amountCents, button) {
+      button.disabled = true;
+      showMessage(billingMessage, 'Opening secure Stripe checkout…');
+      try {
+        const body = await api('/api/billing/checkout-session', {
+          method: 'POST',
+          body: { amount_cents: amountCents },
+        });
+        location.assign(body.url);
+      } catch (error) {
+        showMessage(billingMessage, error.message, true);
+        button.disabled = false;
+      }
+    }
+
     function renderApiKeys() {
       apiKeysList.innerHTML = '';
       if (!state.apiKeys.length) {
@@ -3064,14 +3263,16 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       refreshBtn.disabled = true;
       label.textContent = 'Refreshing…';
       try {
-        const refreshes = [loadSessions(), loadApiKeys()];
+        const refreshes = [loadSessions(), loadApiKeys(), loadBilling()];
         if (!logsView.hidden) refreshes.push(loadRunLogs({ reset: true }));
         await Promise.all(refreshes);
         accountMenu.removeAttribute('open');
       } catch (e) {
         if (!logsView.hidden) logsMessage.textContent = e.message;
         else {
-          const targetMessage = !consoleView.hidden ? consoleMessage : (browserView.hidden ? apiKeyMessage : sessionMessage);
+          const targetMessage = !consoleView.hidden
+            ? consoleMessage
+            : (!billingView.hidden ? billingMessage : (browserView.hidden ? apiKeyMessage : sessionMessage));
           showMessage(targetMessage, e.message, true);
         }
       } finally {
@@ -3193,12 +3394,18 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       if (location.hash === '#api-keys') return 'api-keys';
       if (location.hash === '#console') return 'console';
       if (location.hash === '#logs') return 'logs';
+      if (location.hash === '#billing') return 'billing';
       return 'browsers';
     }
     window.addEventListener('hashchange', () => setDashboardView(dashboardViewFromHash(), false));
     setDashboardView(dashboardViewFromHash(), false);
     loadSessions().catch(e => showMessage(sessionMessage, e.message, true));
     loadApiKeys().catch(e => showMessage(apiKeyMessage, e.message, true));
+    loadBilling().then(() => {
+      const billingResult = new URLSearchParams(location.search).get('billing');
+      if (billingResult === 'success') showMessage(billingMessage, 'Credit added. Your balance is up to date.');
+      if (billingResult === 'cancelled') showMessage(billingMessage, 'Checkout cancelled. Your balance was not changed.');
+    }).catch(e => showMessage(billingMessage, e.message, true));
     setInterval(() => loadSessions().catch(() => {}), 15000);
   </script>
 </body>
@@ -3234,6 +3441,25 @@ function normalizeRunSnapshot(snapshot, existing = {}) {
 export function createPlatformApp({ store, provisioner, controlChannel, config, downloadsHandler = null, warmPool = null }) {
   const app = express();
   const browserLifecycleOperations = new Set();
+  const billingPackages = new Map(DEFAULT_CREDIT_PACKAGES.map(item => [item.amountCents, item]));
+  const unlimitedBillingEmails = new Set(config.billing?.unlimitedEmails || []);
+
+  app.post('/api/billing/stripe-webhook', express.raw({ type: 'application/json' }), async (req, res, next) => {
+    try {
+      const event = verifyStripeWebhook(
+        req.body,
+        req.headers['stripe-signature'],
+        config.billing?.stripe?.webhookSecret
+      );
+      if (['checkout.session.completed', 'checkout.session.async_payment_succeeded'].includes(event.type)) {
+        await applyPaidStripeCheckout(event.data?.object);
+      }
+      res.json({ received: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: false }));
 
@@ -3282,6 +3508,46 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       metadata,
       ip: req.ip || '',
       user_agent: req.headers?.['user-agent'] || '',
+      created_at: nowIso(),
+    });
+  }
+
+  async function ensureBillingAccount(user) {
+    const now = nowIso();
+    return await store.ensureBillingAccount({
+      user_id: user.id,
+      unlimited: unlimitedBillingEmails.has(String(user.email || '').trim().toLowerCase()),
+      created_at: now,
+      updated_at: now,
+    });
+  }
+
+  async function applyPaidStripeCheckout(checkoutSession) {
+    if (!checkoutSession || checkoutSession.payment_status !== 'paid') {
+      return { applied: false, reason: 'not_paid' };
+    }
+    const userId = String(checkoutSession.metadata?.user_id || '');
+    const amountCents = Number(checkoutSession.metadata?.credit_cents);
+    const stripeSessionId = String(checkoutSession.id || '');
+    const user = userId ? await store.getUser(userId) : null;
+    if (
+      !user
+      || !stripeSessionId
+      || checkoutSession.currency !== 'usd'
+      || !billingPackages.has(amountCents)
+      || Number(checkoutSession.amount_total) !== amountCents
+    ) {
+      throw Object.assign(new Error('Stripe checkout metadata did not match a WebBrain credit pack.'), { status: 400 });
+    }
+    await ensureBillingAccount(user);
+    return await store.applyBillingCredit({
+      id: randomId('btx'),
+      user_id: user.id,
+      amount_cents: amountCents,
+      kind: 'credit_top_up',
+      provider: 'stripe',
+      provider_ref: stripeSessionId,
+      description: `$${(amountCents / 100).toFixed(2)} Stripe top-up`,
       created_at: nowIso(),
     });
   }
@@ -3473,6 +3739,14 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
     res.type('html').send(docsPage());
   });
 
+  app.get('/pricing', (req, res) => {
+    res.type('html').send(pricingPage({
+      signedIn: Boolean(req.auth?.user),
+      browserHourCents: config.billing?.browserHourCents,
+      creditPackages: DEFAULT_CREDIT_PACKAGES,
+    }));
+  });
+
   app.put('/droplet/downloads/*', async (req, res, next) => {
     try {
       if (!downloadsHandler) return jsonError(res, 503, 'Shared Downloads storage is not configured');
@@ -3592,6 +3866,85 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
 
   app.get('/api/me', requireAuth, (req, res) => {
     res.json({ user: { id: req.auth.user.id, email: req.auth.user.email }, auth_type: req.auth.type });
+  });
+
+  app.get('/api/billing', requireAuth, async (req, res, next) => {
+    try {
+      const account = await ensureBillingAccount(req.auth.user);
+      const transactions = await store.listBillingTransactions(req.auth.user.id, { limit: 20 });
+      const browserHourCents = config.billing?.browserHourCents || 10;
+      res.json({
+        account: {
+          credit_cents: Number(account.credit_cents || 0),
+          unlimited: account.unlimited === true,
+        },
+        browser_hour_cents: browserHourCents,
+        stripe_configured: Boolean(config.billing?.stripe?.secretKey),
+        credit_packages: DEFAULT_CREDIT_PACKAGES.map(item => ({
+          amount_cents: item.amountCents,
+          browser_hours: Math.floor(item.amountCents / browserHourCents),
+        })),
+        transactions: transactions.map(transaction => ({
+          id: transaction.id,
+          amount_cents: Number(transaction.amount_cents),
+          kind: transaction.kind,
+          description: transaction.description || '',
+          created_at: transaction.created_at,
+        })),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/billing/checkout-session', requireAuth, async (req, res, next) => {
+    try {
+      if (req.auth.type !== 'cookie') {
+        return jsonError(res, 403, 'Stripe checkout requires a signed-in dashboard session');
+      }
+      const account = await ensureBillingAccount(req.auth.user);
+      if (account.unlimited) {
+        return jsonError(res, 409, 'This account has unlimited billing access and does not need credit.');
+      }
+      const amountCents = Number(req.body.amount_cents);
+      if (!billingPackages.has(amountCents)) {
+        return jsonError(res, 400, 'Choose one of the available credit amounts.');
+      }
+      const checkout = await createStripeCheckoutSession({
+        secretKey: config.billing?.stripe?.secretKey,
+        baseUrl: config.baseUrl,
+        user: req.auth.user,
+        amountCents,
+      });
+      await audit(req, 'billing.checkout.create', 'billing_account', req.auth.user.id, {
+        amount_cents: amountCents,
+        stripe_checkout_session_id: checkout.id,
+      });
+      res.status(201).json({ checkout_session_id: checkout.id, url: checkout.url });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/billing/complete', requireAuth, async (req, res, next) => {
+    try {
+      const sessionId = String(req.query.session_id || '');
+      if (!sessionId) return res.redirect('/?billing=invalid#billing');
+      const checkout = await retrieveStripeCheckoutSession(sessionId, {
+        secretKey: config.billing?.stripe?.secretKey,
+      });
+      if (String(checkout.metadata?.user_id || '') !== req.auth.user.id) {
+        return jsonError(res, 403, 'This Stripe checkout belongs to another account.');
+      }
+      const credited = await applyPaidStripeCheckout(checkout);
+      await audit(req, 'billing.checkout.complete', 'billing_account', req.auth.user.id, {
+        stripe_checkout_session_id: sessionId,
+        credit_applied: credited.applied === true,
+      });
+      res.redirect(credited.reason === 'not_paid' ? '/?billing=pending#billing' : '/?billing=success#billing');
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.patch('/api/me', requireAuth, async (req, res, next) => {
