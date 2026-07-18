@@ -87,7 +87,11 @@ export class MySqlStore {
        FROM users
        WHERE email = 'esokullu@gmail.com'
        ON DUPLICATE KEY UPDATE
-         updated_at = IF(unlimited = 0, VALUES(updated_at), updated_at),
+         updated_at = IF(
+           billing_accounts.unlimited = 0,
+           VALUES(updated_at),
+           billing_accounts.updated_at
+         ),
          unlimited = 1`
     );
     const [displayNameColumns] = await this.pool.execute(

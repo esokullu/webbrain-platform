@@ -52,6 +52,10 @@ test('dashboard columns are present in fresh schema and existing-database migrat
   assert.match(schema, /CREATE TABLE IF NOT EXISTS billing_transactions/);
   assert.match(schema, /provider_ref VARCHAR\(255\) NULL UNIQUE/);
   assert.match(storeSource, /WHERE email = 'esokullu@gmail\.com'/);
+  assert.match(
+    storeSource,
+    /updated_at = IF\(\s+billing_accounts\.unlimited = 0,\s+VALUES\(updated_at\),\s+billing_accounts\.updated_at\s+\)/
+  );
   assert.match(storeSource, /async ensureBillingAccount\(/);
   assert.match(storeSource, /async applyBillingCredit\(/);
   assert.match(schema, /assigned_session_id VARCHAR\(40\) NULL/);
