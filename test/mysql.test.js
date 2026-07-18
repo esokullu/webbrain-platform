@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { normalizeCloudRun } from '../src/db/mysql.js';
+import { MySqlStore, normalizeCloudRun } from '../src/db/mysql.js';
 
 test('dashboard columns are present in fresh schema and existing-database migrations', async () => {
   const schema = await readFile(new URL('../db/schema.sql', import.meta.url), 'utf8');
@@ -82,6 +82,35 @@ test('dashboard columns are present in fresh schema and existing-database migrat
   assert.match(storeSource, /SET email = :email, password_hash = :password_hash, updated_at = :updated_at/);
   assert.match(storeSource, /async deleteOtherWebSessions\(/);
   assert.match(storeSource, /DELETE FROM web_sessions WHERE user_id = :userId AND token_hash <> :keepTokenHash/);
+});
+
+test('MySQL browser session updates normalize billing timestamps for DATETIME columns', async () => {
+  const calls = [];
+  const store = {
+    pool: {
+      async execute(sql, values) {
+        calls.push({ sql, values });
+        return [{ affectedRows: 1 }];
+      },
+    },
+    async getBrowserSession(id) {
+      return { id, status: 'resuming' };
+    },
+  };
+  const meteredAt = '2026-07-18T13:18:36.391Z';
+
+  await MySqlStore.prototype.updateBrowserSessionIfStatus.call(store, 'bs_resume', 'paused', {
+    status: 'resuming',
+    paused_at: null,
+    billing_metered_at: meteredAt,
+    updated_at: meteredAt,
+  });
+
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].sql, /WHERE id = :id AND status = :expectedStatus/);
+  assert.equal(calls[0].values.paused_at, null);
+  assert.equal(calls[0].values.billing_metered_at, '2026-07-18 13:18:36');
+  assert.equal(calls[0].values.updated_at, '2026-07-18 13:18:36');
 });
 
 test('MySQL cloud-run normalization preserves unstructured string results', () => {
