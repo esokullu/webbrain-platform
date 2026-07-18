@@ -21,6 +21,8 @@ export class MemoryStore {
     this.users = new Map();
     this.webSessions = new Map();
     this.apiKeys = new Map();
+    this.billingAccounts = new Map();
+    this.billingTransactions = new Map();
     this.browserSessions = new Map();
     this.warmDroplets = new Map();
     this.cloudRuns = new Map();
@@ -115,6 +117,65 @@ export class MemoryStore {
     if (!row || row.user_id !== userId) throw notFound('API key not found');
     row.revoked_at = at;
     return clone(row);
+  }
+
+  async ensureBillingAccount({ user_id, unlimited = false, created_at = nowIso(), updated_at = created_at }) {
+    const existing = this.billingAccounts.get(user_id);
+    if (existing) {
+      if (unlimited && !existing.unlimited) {
+        existing.unlimited = true;
+        existing.updated_at = updated_at;
+      }
+      return clone(existing);
+    }
+    const row = {
+      user_id,
+      credit_cents: 0,
+      unlimited: Boolean(unlimited),
+      created_at,
+      updated_at,
+    };
+    this.billingAccounts.set(user_id, row);
+    return clone(row);
+  }
+
+  async getBillingAccount(userId) {
+    return clone(this.billingAccounts.get(userId) || null);
+  }
+
+  async listBillingTransactions(userId, { limit = 20 } = {}) {
+    return clone([...this.billingTransactions.values()]
+      .filter(transaction => transaction.user_id === userId)
+      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+      .slice(0, limit));
+  }
+
+  async applyBillingCredit(row) {
+    const duplicate = [...this.billingTransactions.values()].find(transaction => (
+      row.provider_ref && transaction.provider_ref === row.provider_ref
+    ));
+    if (duplicate) {
+      return {
+        applied: false,
+        account: await this.getBillingAccount(row.user_id),
+        transaction: clone(duplicate),
+      };
+    }
+    const account = await this.ensureBillingAccount({ user_id: row.user_id });
+    const transaction = {
+      ...clone(row),
+      amount_cents: Number(row.amount_cents),
+      created_at: row.created_at || nowIso(),
+    };
+    this.billingTransactions.set(transaction.id, transaction);
+    const storedAccount = this.billingAccounts.get(row.user_id);
+    storedAccount.credit_cents = Number(storedAccount.credit_cents) + transaction.amount_cents;
+    storedAccount.updated_at = transaction.created_at;
+    return {
+      applied: true,
+      account: clone(storedAccount),
+      transaction: clone(transaction),
+    };
   }
 
   async createBrowserSession(row) {

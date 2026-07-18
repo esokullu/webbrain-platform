@@ -2052,6 +2052,13 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /id="browserView"/);
     assert.match(res.text, /id="consoleView" hidden/);
     assert.match(res.text, /id="logsView" hidden/);
+    assert.match(res.text, /id="billingView" hidden/);
+    assert.match(res.text, /data-view-target="billing">Billing/);
+    assert.match(res.text, /id="billingBalance"/);
+    assert.match(res.text, /id="topUpGrid"/);
+    assert.match(res.text, /Secure checkout by/);
+    assert.match(res.text, /function loadBilling\(\)/);
+    assert.match(res.text, /\/api\/billing\/checkout-session/);
     const dashboardScript = [...res.text.matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)?.[1] || '';
     assert.doesNotThrow(() => new Function(dashboardScript));
     assert.match(res.text, /id="apiKeysView" hidden/);
@@ -2114,6 +2121,7 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /bs_your_session/);
     assert.match(res.text, /copyConsoleCode/);
     assert.match(res.text, /href="\/docs"/);
+    assert.match(res.text, /href="\/pricing"/);
     assert.match(res.text, /API documentation/);
     assert.match(res.text, /class="site-footer"/);
     assert.match(res.text, /Private browser workspaces/);
@@ -2127,6 +2135,73 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.doesNotMatch(res.text, /id="sizeInput"/);
     assert.doesNotMatch(res.text, /session\.region/);
     assert.doesNotMatch(res.text, /session\.size/);
+  } finally {
+    await ctx.platform.close();
+  }
+});
+
+test('pricing and billing expose credit packs and bypass the founder account', async () => {
+  const ctx = await startPlatform();
+  try {
+    const pricing = await requestText(ctx.base, '/pricing');
+    assert.equal(pricing.status, 200);
+    assert.match(pricing.text, /Pricing · WebBrain Cloud/);
+    assert.match(pricing.text, /\$0\.10/);
+    assert.match(pricing.text, /100 browser hours/);
+    assert.match(pricing.text, /Top up the balance, not a subscription/);
+
+    const normalCookie = await register(ctx.base, 'billing@example.com');
+    const normalBilling = await request(ctx.base, '/api/billing', {
+      headers: { cookie: normalCookie },
+    });
+    assert.equal(normalBilling.status, 200);
+    assert.deepEqual(normalBilling.body.account, { credit_cents: 0, unlimited: false });
+    assert.equal(normalBilling.body.browser_hour_cents, 10);
+    assert.equal(normalBilling.body.stripe_configured, false);
+    assert.deepEqual(
+      normalBilling.body.credit_packages.map(pack => pack.amount_cents),
+      [1000, 2500, 5000, 10000]
+    );
+    const normalUser = await ctx.store.findUserByEmail('billing@example.com');
+    const topUp = {
+      id: 'btx_test_1',
+      user_id: normalUser.id,
+      amount_cents: 1000,
+      kind: 'credit_top_up',
+      provider: 'stripe',
+      provider_ref: 'cs_test_once',
+      description: '$10.00 Stripe top-up',
+      created_at: new Date().toISOString(),
+    };
+    assert.equal((await ctx.store.applyBillingCredit(topUp)).applied, true);
+    assert.equal((await ctx.store.applyBillingCredit({ ...topUp, id: 'btx_test_2' })).applied, false);
+    assert.equal((await ctx.store.getBillingAccount(normalUser.id)).credit_cents, 1000);
+    assert.equal((await ctx.store.listBillingTransactions(normalUser.id)).length, 1);
+
+    const unavailableCheckout = await request(ctx.base, '/api/billing/checkout-session', {
+      method: 'POST',
+      headers: { cookie: normalCookie },
+      body: JSON.stringify({ amount_cents: 1000 }),
+    });
+    assert.equal(unavailableCheckout.status, 503);
+    assert.equal(unavailableCheckout.body.error, 'Stripe checkout is not configured yet.');
+
+    const founderCookie = await register(ctx.base, 'esokullu@gmail.com');
+    const founderBilling = await request(ctx.base, '/api/billing', {
+      headers: { cookie: founderCookie },
+    });
+    assert.equal(founderBilling.status, 200);
+    assert.equal(founderBilling.body.account.unlimited, true);
+    const founder = await ctx.store.findUserByEmail('esokullu@gmail.com');
+    assert.equal((await ctx.store.getBillingAccount(founder.id)).unlimited, true);
+
+    const founderCheckout = await request(ctx.base, '/api/billing/checkout-session', {
+      method: 'POST',
+      headers: { cookie: founderCookie },
+      body: JSON.stringify({ amount_cents: 1000 }),
+    });
+    assert.equal(founderCheckout.status, 409);
+    assert.match(founderCheckout.body.error, /unlimited billing access/);
   } finally {
     await ctx.platform.close();
   }
@@ -2147,6 +2222,7 @@ test('login page uses the WebBrain visual identity', async () => {
     assert.match(res.text, /type="submit" disabled>Create account/);
     assert.match(res.text, /Registration is currently closed\./);
     assert.match(res.text, /href="\/docs"/);
+    assert.match(res.text, /href="\/pricing"/);
 
     const registerRes = await request(ctx.base, '/auth/register', {
       method: 'POST',
