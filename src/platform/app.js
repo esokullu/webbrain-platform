@@ -5,7 +5,7 @@ import { publicBrowserSession, publicRun, jsonError } from '../shared/http.js';
 import { signNoVncToken } from '../shared/novnc-token.js';
 import { instanceHostname } from './instance-proxy.js';
 import { docsPage } from './docs-page.js';
-import { normalizeProxyUrl, proxyUrlFromParts, publicProxyEndpoint, publicProxyState } from '../shared/proxy.js';
+import { normalizeProxyUrl, publicProxyEndpoint, publicProxyState } from '../shared/proxy.js';
 import { DEFAULT_DOWNLOADS_UPLOAD_LIMIT_BYTES, downloadsAccessCredentials } from '../shared/downloads-access.js';
 import { DEFAULT_CREDIT_PACKAGES, pricingPage } from './pricing-page.js';
 import {
@@ -51,14 +51,33 @@ function normalizeBrowserLifecycle(value) {
   return lifecycle;
 }
 
-function resolveBrowserProxyUrl(body, config, { defaultToConfigured = true } = {}) {
-  if (Object.prototype.hasOwnProperty.call(body, 'proxy')) {
-    return proxyUrlFromParts(body.proxy);
+function browserLifecycleFromRequest(body) {
+  if (Object.prototype.hasOwnProperty.call(body, 'type')) {
+    const type = String(body.type ?? '').trim().toLowerCase();
+    if (!['normal', 'incognito'].includes(type)) {
+      throw Object.assign(new Error('Browser type must be `normal` or `incognito`'), { status: 400 });
+    }
+    return type === 'incognito' ? 'always_on' : 'resumable';
   }
-  if (Object.prototype.hasOwnProperty.call(body, 'proxy_url')) {
-    return normalizeProxyUrl(body.proxy_url);
+  // Deprecated compatibility for existing callers. The public contract uses
+  // `type`; new clients never send infrastructure lifecycle names.
+  return normalizeBrowserLifecycle(body.lifecycle);
+}
+
+function configuredBrowserProxyUrl(body, config, { defaultToConfigured = true } = {}) {
+  if (
+    Object.prototype.hasOwnProperty.call(body, 'proxy')
+    || Object.prototype.hasOwnProperty.call(body, 'proxy_url')
+  ) {
+    throw Object.assign(
+      new Error('Custom proxy routes are not accepted; use `proxy_enabled` with the server-configured proxy'),
+      { status: 400 }
+    );
   }
   if (Object.prototype.hasOwnProperty.call(body, 'proxy_enabled')) {
+    if (typeof body.proxy_enabled !== 'boolean') {
+      throw Object.assign(new Error('`proxy_enabled` must be a boolean'), { status: 400 });
+    }
     if (body.proxy_enabled === true) {
       if (!config.browserProxy.url) {
         throw Object.assign(new Error('Configured browser proxy is unavailable.'), { status: 503 });
@@ -67,7 +86,7 @@ function resolveBrowserProxyUrl(body, config, { defaultToConfigured = true } = {
     }
     return '';
   }
-  return defaultToConfigured ? normalizeProxyUrl(config.browserProxy.url) : null;
+  return defaultToConfigured ? normalizeProxyUrl(config.browserProxy.url) : '';
 }
 
 function isEphemeralBrowser(session) {
@@ -1200,14 +1219,14 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           <legend>Profile</legend>
           <div class="lifecycle-options">
             <label class="lifecycle-option">
-              <input type="radio" name="newSessionLifecycle" value="resumable" checked>
+              <input type="radio" name="newSessionType" value="normal" checked>
               <span>
                 <strong>Saved browser</strong>
                 <span>Keeps a private Chrome profile and can be paused when shared Downloads are available.</span>
               </span>
             </label>
             <label class="lifecycle-option">
-              <input type="radio" name="newSessionLifecycle" value="always_on">
+              <input type="radio" name="newSessionType" value="incognito">
               <span>
                 <strong>Incognito</strong>
                 <span>Uses the classic always-on browser with Chrome state and Downloads kept on its Droplet.</span>
@@ -2804,10 +2823,10 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
 
     async function createSession(event) {
       event.preventDefault();
-      const lifecycle = createBrowserForm.elements.newSessionLifecycle.value;
+      const type = createBrowserForm.elements.newSessionType.value;
       state.creatingSession = true;
       syncCreateBrowserControls();
-      showMessage(createBrowserMessage, lifecycle === 'always_on'
+      showMessage(createBrowserMessage, type === 'incognito'
         ? 'Opening an incognito browser…'
         : 'Opening a saved browser…');
       try {
@@ -2815,7 +2834,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           method: 'POST',
           body: {
             display_name: newSessionName.value.trim() || null,
-            lifecycle,
+            type,
             proxy_enabled: newProxyEnabled.checked,
           },
         });
@@ -4283,8 +4302,8 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
     try {
       await requireAvailableCredit(req.auth.user);
       const now = nowIso();
-      const lifecycle = normalizeBrowserLifecycle(req.body.lifecycle);
-      const proxyUrl = resolveBrowserProxyUrl(req.body, config);
+      const lifecycle = browserLifecycleFromRequest(req.body);
+      const proxyUrl = configuredBrowserProxyUrl(req.body, config);
       const proxyEndpoint = publicProxyEndpoint(proxyUrl);
 
       if (lifecycle === 'ephemeral') {
@@ -4362,7 +4381,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
           runtime = await controlChannel.send(refreshedHost.id, 'ephemeral.start', {
             session_id: session.id,
             session_token: session.connect_secret,
-            provider_api_key: req.body.provider_api_key || session.connect_secret,
+            provider_api_key: session.connect_secret,
             proxy_url: proxyUrl,
             expires_at: session.expires_at,
           }, 30_000);
@@ -4420,8 +4439,8 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
         host_session_id: null,
         runtime_port: null,
         runtime_generation: null,
-        region: req.body.region || config.digitalOcean.region,
-        size: req.body.size || config.digitalOcean.size,
+        region: config.digitalOcean.region,
+        size: config.digitalOcean.size,
         connect_secret: randomSecret(32),
         proxy_enabled: Boolean(proxyEndpoint),
         proxy_endpoint: proxyEndpoint,
@@ -4456,10 +4475,10 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
           }
         }
         provisioned = await warmPool?.tryAssignSession(sessionForDroplet, {
-          providerApiKey: req.body.provider_api_key || session.connect_secret,
+          providerApiKey: session.connect_secret,
           proxyUrl,
         }) || await provisioner.createBrowserDroplet(sessionForDroplet, {
-          providerApiKey: req.body.provider_api_key || session.connect_secret,
+          providerApiKey: session.connect_secret,
           proxyUrl,
         });
       } catch (e) {
@@ -4560,10 +4579,8 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       if (!session) return;
       if (session.status !== 'ready') return jsonError(res, 409, 'Browser must be ready before changing its proxy.');
       if (!clear
-          && !Object.prototype.hasOwnProperty.call(req.body, 'proxy_url')
-          && !Object.prototype.hasOwnProperty.call(req.body, 'proxy')
           && !Object.prototype.hasOwnProperty.call(req.body, 'proxy_enabled')) {
-        return jsonError(res, 400, '`proxy_url`, `proxy`, or `proxy_enabled` is required; use an empty value for direct mode');
+        return jsonError(res, 400, '`proxy_enabled` is required');
       }
       const activeRuns = await activeRunsForSession(session);
       if (activeRuns.length) {
@@ -4578,7 +4595,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
 
       const proxyUrl = clear
         ? ''
-        : resolveBrowserProxyUrl(req.body, config, { defaultToConfigured: false });
+        : configuredBrowserProxyUrl(req.body, config, { defaultToConfigured: false });
       const proxy = await controlChannel.send(session.id, 'proxy.update', {
         proxy_url: proxyUrl,
         verify: true,

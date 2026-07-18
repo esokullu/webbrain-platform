@@ -96,6 +96,9 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
     WEBBRAIN_SPACES_ACCESS_KEY: 'access',
     WEBBRAIN_SPACES_SECRET_KEY: 'secret',
     WEBBRAIN_SPACES_BUCKET: 'downloads',
+    WEBBRAIN_BROWSER_PROXY_URL: 'http://configured-user:configured-pass@proxy-config.example:9000',
+    DO_REGION: 'ams3',
+    DO_SIZE: 's-2vcpu-4gb',
   }, { downloadsHandler: {} });
   let ws = null;
   try {
@@ -165,13 +168,9 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
     body: JSON.stringify({
       region: 'nyc3',
       size: 's-1vcpu-1gb',
+      type: 'normal',
       display_name: 'Daily research',
-      proxy: {
-        domain: 'proxy-start.example',
-        port: 8080,
-        username: 'startup-user',
-        password: 'startup-p@ss',
-      },
+      proxy_enabled: true,
     }),
   });
   assert.equal(sessionRes.status, 201);
@@ -180,13 +179,17 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   assert.equal(sessionRes.body.browser_session.expires_at, null);
   assert.deepEqual(sessionRes.body.browser_session.proxy, {
     enabled: true,
-    endpoint: 'http://proxy-start.example:8080',
+    endpoint: 'http://proxy-config.example:9000',
     updated_at: sessionRes.body.browser_session.proxy.updated_at,
   });
   assert.equal(sessionRes.body.browser_session.proxy.updated_at !== null, true);
-  assert.equal(ctx.provisioner.createdOptions[0].proxyUrl, 'http://startup-user:startup-p%40ss@proxy-start.example:8080/');
+  assert.equal(ctx.provisioner.createdOptions[0].proxyUrl, 'http://configured-user:configured-pass@proxy-config.example:9000/');
   const sessionId = sessionRes.body.browser_session.id;
   const storedSession = await ctx.store.getBrowserSession(sessionId);
+  assert.equal(storedSession.region, 'ams3');
+  assert.equal(storedSession.size, 's-2vcpu-4gb');
+  assert.equal(Object.prototype.hasOwnProperty.call(sessionRes.body.browser_session, 'region'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(sessionRes.body.browser_session, 'size'), false);
   assert.equal(storedSession.connect_secret.length > 20, true);
 
   const renamed = await request(ctx.base, `/api/browser-sessions/${sessionId}`, {
@@ -252,7 +255,7 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
         ok: true,
         result: {
           enabled: true,
-          endpoint: 'http://proxy-start.example:8080',
+          endpoint: 'http://proxy-config.example:9000',
           exit_ip: '198.51.100.10',
           updated_at: '2026-07-15T06:00:00.000Z',
           verified_at: '2026-07-15T06:00:01.000Z',
@@ -276,13 +279,13 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
         }));
         return;
       }
-      assert.equal(msg.payload.proxy_url, 'http://next-user:next-p%40ss@proxy-next.example:9000/');
+      assert.equal(msg.payload.proxy_url, 'http://configured-user:configured-pass@proxy-config.example:9000/');
       ws.send(JSON.stringify({
         id: msg.id,
         ok: true,
         result: {
           enabled: true,
-          endpoint: 'http://proxy-next.example:9000',
+          endpoint: 'http://proxy-config.example:9000',
           exit_ip: '198.51.100.20',
           updated_at: '2026-07-15T06:10:00.000Z',
           verified_at: '2026-07-15T06:10:01.000Z',
@@ -433,26 +436,18 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   });
   assert.equal(proxyStatus.status, 200);
   assert.equal(proxyStatus.body.proxy.exit_ip, '198.51.100.10');
-  assert.equal(proxyStatus.body.proxy.endpoint, 'http://proxy-start.example:8080');
+  assert.equal(proxyStatus.body.proxy.endpoint, 'http://proxy-config.example:9000');
 
   const proxyUpdated = await request(ctx.base, `/api/browser-sessions/${sessionId}/proxy`, {
     method: 'PATCH',
     headers: { cookie },
-    body: JSON.stringify({
-      proxy: {
-        domain: 'proxy-next.example',
-        port: 9000,
-        username: 'next-user',
-        password: 'next-p@ss',
-      },
-    }),
+    body: JSON.stringify({ proxy_enabled: true }),
   });
   assert.equal(proxyUpdated.status, 200);
-  assert.equal(proxyUpdated.body.proxy.endpoint, 'http://proxy-next.example:9000');
-  assert.equal(JSON.stringify(proxyUpdated.body).includes('next-p@ss'), false);
-  assert.equal(JSON.stringify(proxyUpdated.body).includes('next-p%40ss'), false);
+  assert.equal(proxyUpdated.body.proxy.endpoint, 'http://proxy-config.example:9000');
+  assert.equal(JSON.stringify(proxyUpdated.body).includes('configured-pass'), false);
   const proxyStored = await ctx.store.getBrowserSession(sessionId);
-  assert.equal(proxyStored.proxy_endpoint, 'http://proxy-next.example:9000');
+  assert.equal(proxyStored.proxy_endpoint, 'http://proxy-config.example:9000');
   assert.equal(proxyStored.proxy_enabled, true);
 
   const waited = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs`, {
@@ -595,7 +590,7 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   const proxyBlockedDuringRun = await request(ctx.base, `/api/browser-sessions/${sessionId}/proxy`, {
     method: 'PATCH',
     headers: { cookie },
-    body: JSON.stringify({ proxy_url: null }),
+    body: JSON.stringify({ proxy_enabled: false }),
   });
   assert.equal(proxyBlockedDuringRun.status, 409);
   assert.deepEqual(proxyBlockedDuringRun.body.active_run_ids, [created.body.run_id]);
@@ -1211,15 +1206,15 @@ test('always-on browser creation skips the profile volume and keeps local Downlo
     const invalid = await request(ctx.base, '/api/browser-sessions', {
       method: 'POST',
       headers: { cookie },
-      body: JSON.stringify({ lifecycle: 'sometimes' }),
+      body: JSON.stringify({ type: 'sometimes' }),
     });
     assert.equal(invalid.status, 400);
-    assert.match(invalid.body.error, /resumable.*always_on/);
+    assert.match(invalid.body.error, /normal.*incognito/);
 
     const created = await request(ctx.base, '/api/browser-sessions', {
       method: 'POST',
       headers: { cookie },
-      body: JSON.stringify({ display_name: 'Classic', lifecycle: 'always_on' }),
+      body: JSON.stringify({ display_name: 'Classic', type: 'incognito' }),
     });
     assert.equal(created.status, 201);
     assert.equal(created.body.browser_session.volume, null);
@@ -2041,9 +2036,9 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /createSessionBtn\.addEventListener\('click', openCreateBrowserDialog\)/);
     assert.match(res.text, /createBrowserForm\.addEventListener\('submit', createSession\)/);
     assert.doesNotMatch(res.text, /id="createIncognitoBtn"/);
-    assert.match(res.text, /name="newSessionLifecycle" value="resumable" checked/);
-    assert.match(res.text, /name="newSessionLifecycle" value="always_on"/);
-    assert.match(res.text, /createBrowserForm\.elements\.newSessionLifecycle\.value/);
+    assert.match(res.text, /name="newSessionType" value="normal" checked/);
+    assert.match(res.text, /name="newSessionType" value="incognito"/);
+    assert.match(res.text, /createBrowserForm\.elements\.newSessionType\.value/);
     assert.doesNotMatch(res.text, /id="newProxyDomain"/);
     assert.doesNotMatch(res.text, /id="newProxyPort"/);
     assert.doesNotMatch(res.text, /id="newProxyUsername"/);
@@ -2319,7 +2314,7 @@ test('credit enforcement blocks new and resumed browsers at an empty balance', a
     const blockedCreate = await request(ctx.base, '/api/browser-sessions', {
       method: 'POST',
       headers: { cookie },
-      body: JSON.stringify({ lifecycle: 'always_on' }),
+      body: JSON.stringify({ type: 'incognito' }),
     });
     assert.equal(blockedCreate.status, 402);
     assert.match(blockedCreate.body.error, /Add credit before starting a browser/);
@@ -2366,7 +2361,7 @@ test('credit enforcement blocks new and resumed browsers at an empty balance', a
     const founderCreate = await request(ctx.base, '/api/browser-sessions', {
       method: 'POST',
       headers: { cookie: founderCookie },
-      body: JSON.stringify({ lifecycle: 'always_on' }),
+      body: JSON.stringify({ type: 'incognito' }),
     });
     assert.equal(founderCreate.status, 201);
   } finally {
@@ -2434,6 +2429,12 @@ test('public API documentation provides accessible REST and client tabs', async 
     assert.match(res.text, /Accept: application\/json/);
     assert.match(res.text, /--upload-file/);
     assert.match(res.text, /Range: bytes=0-1023/);
+    assert.match(res.text, /<code>sha256<\/code>/);
+    assert.match(res.text, /<code>storage_backend<\/code>/);
+    assert.match(res.text, /<code>browser_path<\/code>/);
+    assert.match(res.text, /<code>browser_ready<\/code>/);
+    assert.match(res.text, /browser_local/);
+    assert.match(res.text, /shared_object/);
     assert.match(res.text, /class="command-block language-shell"/);
     assert.match(res.text, /class="command-block language-shell"><code><span class="tok-comment"># Obtain access/);
     assert.match(res.text, /<span class="tok-variable">DOWNLOADS_ACCESS<\/span>=\$\(<span class="tok-function">curl<\/span>/);
@@ -2448,12 +2449,13 @@ test('public API documentation provides accessible REST and client tabs', async 
     assert.match(res.text, /POST \/api\/browser-sessions<\/span> request body/);
     assert.match(res.text, /An empty JSON object is valid/);
     assert.match(res.text, /<code>display_name<\/code>/);
-    assert.match(res.text, /<code>lifecycle<\/code>/);
+    assert.match(res.text, /<code>type<\/code>/);
     assert.match(res.text, /<code>proxy_enabled<\/code>/);
-    assert.match(res.text, /<code>host_session_id<\/code>/);
-    assert.match(res.text, /<code>ttl_ms<\/code>/);
-    assert.match(res.text, /<code>provider_api_key<\/code>/);
-    assert.match(res.text, /placement\.existing_session_id/);
+    assert.doesNotMatch(res.text, /<code>lifecycle<\/code>/);
+    assert.doesNotMatch(res.text, /<code>host_session_id<\/code>/);
+    assert.doesNotMatch(res.text, /<code>ttl_ms<\/code>/);
+    assert.doesNotMatch(res.text, /<code>provider_api_key<\/code>/);
+    assert.doesNotMatch(res.text, /<code>proxy_url<\/code>/);
     assert.match(res.text, /tree\/main\/clients\/node/);
     assert.match(res.text, /tree\/main\/clients\/python/);
     assert.match(res.text, /tree\/main\/clients\/php/);

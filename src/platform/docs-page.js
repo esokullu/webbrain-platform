@@ -5,7 +5,7 @@ const EXAMPLES = {
 SESSION_ID=$(curl -sS -X POST https://webbrain.cloud/api/browser-sessions \\
   -H "Authorization: Bearer $WEBBRAIN_API_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{"lifecycle":"resumable"}' | jq -r '.browser_session.id')
+  -d '{"type":"normal"}' | jq -r '.browser_session.id')
 
 # 2. Wait for the extension bridge
 until [ "$(curl -sS \\
@@ -80,7 +80,7 @@ const client = new WebBrainClient({
 
 const session = await client.createBrowserSession({
   display_name: 'Research browser',
-  lifecycle: 'resumable',
+  type: 'normal',
   proxy_enabled: false,
 });
 
@@ -99,7 +99,7 @@ client = WebBrainClient(os.environ["WEBBRAIN_API_KEY"])
 
 session = client.create_browser_session(
     display_name="Research browser",
-    lifecycle="resumable",
+    type="normal",
     proxy_enabled=False,
 )
 
@@ -120,7 +120,7 @@ $client = new WebBrainClient(getenv('WEBBRAIN_API_KEY') ?: '');
 
 $session = $client->createBrowserSession([
     'display_name' => 'Research browser',
-    'lifecycle' => 'resumable',
+    'type' => 'normal',
     'proxy_enabled' => false,
 ]);
 
@@ -151,6 +151,15 @@ curl --fail-with-body -sS -X PUT -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" -H 'Co
 # Full download and a byte-range download
 curl --fail-with-body -sS -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" --output './report.pdf' "\${DOWNLOADS_URL}\${REMOTE_NAME}"
 curl --fail-with-body -sS -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" -H 'Range: bytes=0-1023' --output './report.first-1KiB' "\${DOWNLOADS_URL}\${REMOTE_NAME}"`;
+
+const DOWNLOADS_UPLOAD_RESPONSE_EXAMPLE = `{
+  "name": "github-avatar-test.jpg",
+  "size": 38564,
+  "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+  "storage_backend": "browser_local",
+  "browser_path": "/root/Downloads/github-avatar-test.jpg",
+  "browser_ready": true
+}`;
 
 const TABS = [
   ['rest', 'REST'],
@@ -417,37 +426,30 @@ export function docsPage() {
         <section class="docs-section" id="sessions">
           <p class="section-kicker">Lifecycle</p>
           <h2>Browser sessions</h2>
-          <p>Resumable sessions keep Chrome on a fixed private 2 GiB volume and can be paused after shared Downloads storage is configured. Always-on sessions keep Chrome and Downloads on one running Droplet and cannot be paused. Neither persistent lifecycle expires automatically; it remains until explicitly deleted. Ephemeral sessions pass <span class="inline-code">lifecycle: "ephemeral"</span> plus a same-owner running <span class="inline-code">host_session_id</span>; their blank profile, cache, and Downloads live in a bounded systemd-private <span class="inline-code">/tmp</span> namespace and are discarded on any stop, crash, host restart, or expiry. Poll until <span class="inline-code">runtime_ready</span> is true before starting runs.</p>
+          <p><span class="inline-code">normal</span> sessions keep Chrome on a fixed private profile volume and can be paused after shared Downloads storage is configured. <span class="inline-code">incognito</span> sessions use the dashboard's always-on browser mode: Chrome and Downloads stay on one running Droplet and Pause is unavailable. Both remain until explicitly destroyed. Poll until <span class="inline-code">runtime_ready</span> is true before starting runs.</p>
           <h3><span class="inline-code">POST /api/browser-sessions</span> request body</h3>
-          <p>An empty JSON object is valid and creates a resumable browser with server defaults. Add only the fields you need:</p>
+          <p>An empty JSON object is valid and creates a normal browser. Infrastructure placement, Droplet size, proxy credentials, and provider credentials are private server configuration and cannot be overridden by this request.</p>
           <table class="field-table">
             <thead><tr><th>Field</th><th>Type</th><th>Default</th><th>Applies to</th><th>Purpose</th></tr></thead>
             <tbody>
-              <tr><td><code>display_name</code></td><td>string</td><td>None</td><td>All</td><td>A dashboard label up to 120 characters. <code>name</code> is accepted as a compatibility alias.</td></tr>
-              <tr><td><code>lifecycle</code></td><td>string enum</td><td><code>resumable</code></td><td>All</td><td><code>resumable</code>, <code>always_on</code>, or <code>ephemeral</code>.</td></tr>
-              <tr><td><code>region</code></td><td>string</td><td>Server <code>DO_REGION</code></td><td>Persistent</td><td>DigitalOcean region used when WebBrain creates a new Droplet.</td></tr>
-              <tr><td><code>size</code></td><td>string</td><td>Server <code>DO_SIZE</code></td><td>Persistent</td><td>DigitalOcean size slug used for a new Droplet.</td></tr>
-              <tr><td><code>proxy</code></td><td>object or null</td><td>Server route</td><td>All</td><td>Proxy parts: <code>domain</code> or <code>host</code>, <code>port</code>, <code>username</code>, <code>password</code>, and optional <code>protocol</code>.</td></tr>
-              <tr><td><code>proxy_url</code></td><td>string or null</td><td>Server route</td><td>All</td><td>An HTTP, HTTPS, SOCKS4, or SOCKS5 proxy URL. Credentials are accepted but never returned by the API.</td></tr>
-              <tr><td><code>proxy_enabled</code></td><td>boolean</td><td>Server route</td><td>All</td><td><code>true</code> selects the server-managed proxy; <code>false</code> forces a direct connection.</td></tr>
-              <tr><td><code>host_session_id</code></td><td>string</td><td>Required</td><td>Ephemeral</td><td>A same-owner, running persistent browser whose Droplet will host the ephemeral runtime.</td></tr>
-              <tr><td><code>ttl_ms</code></td><td>positive number</td><td>6 hours</td><td>Ephemeral</td><td>Maximum lifetime in milliseconds, capped by the host browser's own expiry when it has one.</td></tr>
-              <tr><td><code>provider_api_key</code></td><td>string</td><td>Scoped session key</td><td>Advanced</td><td>Overrides the browser runtime provider credential. Most clients should omit this field.</td></tr>
+              <tr><td><code>display_name</code></td><td>string</td><td>None</td><td>Both</td><td>An optional dashboard label up to 120 characters.</td></tr>
+              <tr><td><code>type</code></td><td>string enum</td><td><code>normal</code></td><td>Both</td><td><code>normal</code> or <code>incognito</code>, matching the dashboard.</td></tr>
+              <tr><td><code>proxy_enabled</code></td><td>boolean</td><td>Server default</td><td>Both</td><td><code>true</code> uses the server-configured proxy; <code>false</code> uses a direct connection.</td></tr>
             </tbody>
           </table>
-          <p class="field-note">Send only one of <span class="inline-code">proxy</span>, <span class="inline-code">proxy_url</span>, or <span class="inline-code">proxy_enabled</span>. For compatibility, ephemeral placement also accepts <span class="inline-code">placement.existing_session_id</span> or <span class="inline-code">placement.host_session_id</span> as aliases for <span class="inline-code">host_session_id</span>. Persistent requests ignore <span class="inline-code">ttl_ms</span> and ephemeral requests inherit region and size from their host.</p>
+          <p class="field-note">DigitalOcean region and size come only from <span class="inline-code">DO_REGION</span> and <span class="inline-code">DO_SIZE</span>. Proxy routing and credentials come only from the server's proxy environment. They are intentionally absent from the public request body.</p>
           <div class="endpoint-list">
-            <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions</code><span>Create a resumable, always-on, or hosted ephemeral browser.</span></div>
+            <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions</code><span>Create a normal or incognito browser.</span></div>
             <div class="endpoint"><span class="method">GET</span><code>/api/browser-sessions</code><span>List your sessions.</span></div>
             <div class="endpoint"><span class="method">GET</span><code>/api/browser-sessions/:sessionId</code><span>Read readiness.</span></div>
             <div class="endpoint"><span class="method">PATCH</span><code>/api/browser-sessions/:sessionId</code><span>Set its display name.</span></div>
             <div class="endpoint"><span class="method">GET</span><code>/api/browser-sessions/:sessionId/proxy</code><span>Read proxy and exit IP.</span></div>
-            <div class="endpoint"><span class="method">PATCH</span><code>/api/browser-sessions/:sessionId/proxy</code><span>Switch proxy without restart.</span></div>
+            <div class="endpoint"><span class="method">PATCH</span><code>/api/browser-sessions/:sessionId/proxy</code><span>Enable or disable the server-configured proxy without restart.</span></div>
             <div class="endpoint"><span class="method">DELETE</span><code>/api/browser-sessions/:sessionId/proxy</code><span>Return to a direct connection.</span></div>
-            <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/reset</code><span>Restart a persistent host or terminate an ephemeral browser.</span></div>
+            <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/reset</code><span>Restart the running browser.</span></div>
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/pause</code><span>Stop the Droplet and retain the profile.</span></div>
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/resume</code><span>Attach the profile to a new Droplet.</span></div>
-            <div class="endpoint"><span class="method">DELETE</span><code>/api/browser-sessions/:sessionId</code><span>Destroy persistent infrastructure or stop an ephemeral runtime.</span></div>
+            <div class="endpoint"><span class="method">DELETE</span><code>/api/browser-sessions/:sessionId</code><span>Destroy the browser and its infrastructure.</span></div>
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/connect-token</code><span>Create a noVNC link.</span></div>
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/downloads-access</code><span>Create private Downloads credentials.</span></div>
           </div>
@@ -456,7 +458,7 @@ export function docsPage() {
         <section class="docs-section" id="examples">
           <p class="section-kicker">Copy and adapt</p>
           <h2>Create and run in your language</h2>
-          <p>These examples create a named resumable browser with a direct connection, wait until its runtime is ready, run one visible task, and print the result. The bundled clients have no third-party runtime dependencies.</p>
+          <p>These examples create a named normal browser with a direct connection, wait until its runtime is ready, run one visible task, and print the result. The bundled clients have no third-party runtime dependencies.</p>
           <div class="code-card compact" data-code-group="language-examples">
             <div class="code-toolbar">
               <div class="code-tabs" role="tablist" aria-label="Choose a language example">${languageTabButtons}</div>
@@ -471,7 +473,22 @@ export function docsPage() {
           <h2>Upload and download files</h2>
           <p>For a ready or paused browser, request access metadata from <span class="inline-code">POST /api/browser-sessions/:sessionId/downloads-access</span>. The response contains an HTTPS <span class="inline-code">url</span>, <span class="inline-code">username</span>, <span class="inline-code">password</span>, <span class="inline-code">upload_limit_bytes</span>, and <span class="inline-code">expires_at</span>. It is returned with <span class="inline-code">Cache-Control: no-store</span>; do not log it.</p>
           <pre class="command-block language-shell"><code>${highlightedCode(DOWNLOADS_SHELL_EXAMPLE, 'rest')}</code></pre>
-          <p>Downloads are shared by all browsers owned by the same user, remain online while Droplets are paused, and have a default 25 GiB fair-use allowance per user. Directory requests return the file tray by default and JSON when sent <span class="inline-code">Accept: application/json</span>. Files support <span class="inline-code">GET</span>, <span class="inline-code">HEAD</span>, one HTTP byte range, and raw streaming <span class="inline-code">PUT</span> uploads. Existing names receive a numbered suffix. Delete, rename, and folder creation are not available.</p>
+          <h3>Upload response</h3>
+          <p>A successful <span class="inline-code">PUT</span> returns the final collision-safe filename, byte size, SHA-256 digest, storage backend, and whether the file is already available at an absolute path inside the cloud browser.</p>
+          <pre class="command-block"><code>${escapeHtml(DOWNLOADS_UPLOAD_RESPONSE_EXAMPLE)}</code></pre>
+          <table class="field-table">
+            <thead><tr><th>Field</th><th>Type</th><th>Meaning</th></tr></thead>
+            <tbody>
+              <tr><td><code>name</code></td><td>string</td><td>Final filename after any collision suffix is applied.</td></tr>
+              <tr><td><code>size</code></td><td>number</td><td>Stored byte count.</td></tr>
+              <tr><td><code>sha256</code></td><td>string</td><td>Lowercase SHA-256 hex digest of the uploaded content.</td></tr>
+              <tr><td><code>storage_backend</code></td><td>string</td><td><code>browser_local</code> or <code>shared_object</code>.</td></tr>
+              <tr><td><code>browser_path</code></td><td>string or null</td><td>Absolute browser-visible filesystem path when locally materialized; otherwise <code>null</code>.</td></tr>
+              <tr><td><code>browser_ready</code></td><td>boolean</td><td><code>true</code> only when the browser can open <code>browser_path</code> immediately.</td></tr>
+            </tbody>
+          </table>
+          <p class="field-note">Incognito browser-local uploads return their real absolute Downloads path and <span class="inline-code">browser_ready: true</span>. Normal shared-storage uploads remain available while paused but are not mounted into the browser filesystem, so they return <span class="inline-code">storage_backend: "shared_object"</span>, <span class="inline-code">browser_path: null</span>, and <span class="inline-code">browser_ready: false</span>. Existing <span class="inline-code">path</span>, <span class="inline-code">url</span>, <span class="inline-code">etag</span>, and <span class="inline-code">idempotent</span> fields may also be present for compatibility and shared-storage bookkeeping.</p>
+          <p>For normal browsers, shared Downloads are scoped to the user, remain online while Droplets are paused, and have a default 25 GiB fair-use allowance per user. Directory requests return the file tray by default and JSON when sent <span class="inline-code">Accept: application/json</span>. Files support <span class="inline-code">GET</span>, <span class="inline-code">HEAD</span>, one HTTP byte range, and raw streaming <span class="inline-code">PUT</span> uploads. Existing names receive a numbered suffix. Delete, rename, and folder creation are not available.</p>
           <p>Chrome writes downloads to temporary Droplet staging. After Chrome reports completion, WebBrain uploads the file to shared storage and removes the local copy only after confirmation. Pause is refused while staging or sync work remains.</p>
           <h3>Client helpers</h3>
           <p>Node.js and PHP expose <span class="inline-code">listDownloads</span>, <span class="inline-code">uploadDownloadsFile</span>, and <span class="inline-code">downloadDownloadsFile</span>. Python exposes <span class="inline-code">list_downloads</span>, <span class="inline-code">upload_downloads_file</span>, and <span class="inline-code">download_downloads_file</span>. All transfer file bodies as streams and protect existing local files unless overwrite is explicitly enabled.</p>

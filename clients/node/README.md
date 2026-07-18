@@ -23,19 +23,13 @@ const client = new WebBrainClient({
 
 const session = await client.createBrowserSession({
   display_name: 'Research',
-  lifecycle: 'resumable', // or 'always_on' for a classic single-Droplet browser
+  type: 'normal', // or 'incognito', matching the dashboard
+  proxy_enabled: false,
 });
 const ready = await client.waitForBrowserSession(session.id);
 const downloads = await client.createDownloadsAccess(ready.id);
 // downloads contains the private URL, username, password, limit, and expiry.
-await client.updateBrowserProxy(ready.id, {
-  proxy: {
-    domain: 'p.webshare.io',
-    port: 80,
-    username: 'webshare-user',
-    password: 'webshare-password',
-  },
-});
+await client.updateBrowserProxy(ready.id, { enabled: true });
 const run = await client.createRun(ready.id, {
   task: 'Open example.com and return the page title',
 });
@@ -92,7 +86,9 @@ const uploaded = await client.uploadDownloadsFile(
   './report.pdf',
   { remotePath: 'report.pdf', access },
 );
-console.log(uploaded.name); // May be "report (1).pdf" on a collision.
+console.log(uploaded.name);         // May be "report (1).pdf" on a collision.
+console.log(uploaded.browser_path); // Absolute path, or null for shared storage.
+console.log(uploaded.browser_ready);
 
 const listing = await client.listDownloads(ready.id, { access });
 console.log(listing.entries);
@@ -136,7 +132,7 @@ const run = await client.createRun(session.id, {
 - `getBrowserSession(sessionId)`
 - `updateBrowserSession(sessionId, { displayName })`
 - `getBrowserProxy(sessionId)`
-- `updateBrowserProxy(sessionId, { proxyUrl })` or `{ proxy: { domain, port, username, password } }`
+- `updateBrowserProxy(sessionId, { enabled })`
 - `deleteBrowserProxy(sessionId)`
 - `waitForBrowserSession(sessionId, options)`
 - `deleteBrowserSession(sessionId)`

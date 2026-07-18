@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -161,7 +162,15 @@ test('downloads service safely lists, downloads, ranges, and uploads files', asy
 
     const firstUpload = await request(address.port, '/downloads/upload.txt', { method: 'PUT', body: 'first' });
     assert.equal(firstUpload.status, 201);
-    assert.equal(JSON.parse(firstUpload.body).name, 'upload.txt');
+    assert.deepEqual(JSON.parse(firstUpload.body), {
+      name: 'upload.txt',
+      size: 5,
+      sha256: createHash('sha256').update('first').digest('hex'),
+      storage_backend: 'browser_local',
+      browser_path: path.join(root, 'upload.txt'),
+      browser_ready: true,
+      url: '/downloads/upload.txt',
+    });
     const secondUpload = await request(address.port, '/downloads/upload.txt', { method: 'PUT', body: 'second' });
     assert.equal(secondUpload.status, 201);
     assert.equal(JSON.parse(secondUpload.body).name, 'upload (1).txt');

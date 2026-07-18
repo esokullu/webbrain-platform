@@ -88,13 +88,12 @@ final class WebBrainClient
         return $this->request('GET', '/api/browser-sessions/' . self::id($sessionId) . '/proxy')['proxy'];
     }
 
-    public function updateBrowserProxy(string $sessionId, string|array|null $proxy): array
+    public function updateBrowserProxy(string $sessionId, bool $enabled = true): array
     {
-        $body = is_array($proxy) ? ['proxy' => $proxy] : ['proxy_url' => $proxy];
         return $this->request(
             'PATCH',
             '/api/browser-sessions/' . self::id($sessionId) . '/proxy',
-            $body,
+            ['proxy_enabled' => $enabled],
         )['proxy'];
     }
 

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import http from 'node:http';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -59,7 +60,15 @@ async function startDownloadsFixture() {
       files.set(storedName, body);
       res.statusCode = 201;
       res.setHeader('content-type', 'application/json');
-      return res.end(JSON.stringify({ name: storedName, size: body.length, url: `/downloads/${encodeURIComponent(storedName)}` }));
+      return res.end(JSON.stringify({
+        name: storedName,
+        size: body.length,
+        sha256: createHash('sha256').update(body).digest('hex'),
+        storage_backend: 'browser_local',
+        browser_path: `/root/Downloads/${storedName}`,
+        browser_ready: true,
+        url: `/downloads/${encodeURIComponent(storedName)}`,
+      }));
     }
     if (name && req.method === 'GET' && files.has(name)) {
       const body = files.get(name);
@@ -203,7 +212,7 @@ test('Node.js client sends authenticated session and run requests', async () => 
     assert.equal(renamed.display_name, 'Research');
     const directProxy = await client.getBrowserProxy(ready.id);
     assert.equal(directProxy.enabled, false);
-    const proxy = await client.updateBrowserProxy(ready.id, { proxyUrl: 'http://user:pass@proxy.example:8080' });
+    const proxy = await client.updateBrowserProxy(ready.id, { enabled: true });
     assert.equal(proxy.endpoint, 'http://proxy.example:8080');
     const clearedProxy = await client.deleteBrowserProxy(ready.id);
     assert.equal(clearedProxy.enabled, false);
@@ -237,6 +246,9 @@ test('Node.js client sends authenticated session and run requests', async () => 
       wait: false,
       tab_id: 42,
       output_schema: { title: 'string' },
+    });
+    assert.deepEqual(requests.find(entry => entry.method === 'PATCH' && entry.path.endsWith('/proxy')).body, {
+      proxy_enabled: true,
     });
     assert.deepEqual(requests.find(entry => entry.method === 'DELETE' && entry.path.endsWith('/proxy')).body, null);
     assert.deepEqual(requests.find(entry => entry.path.endsWith('/pause')).body, {});
@@ -275,6 +287,10 @@ test('Node.js client streams Downloads listing, upload, full download, and range
     const first = await client.uploadDownloadsFile('bs_test', source, { remotePath: 'node sample.txt', access });
     const second = await client.uploadDownloadsFile('bs_test', source, { remotePath: 'node sample.txt', access });
     assert.equal(first.name, 'node sample.txt');
+    assert.equal(first.sha256, createHash('sha256').update('abcdefghij').digest('hex'));
+    assert.equal(first.storage_backend, 'browser_local');
+    assert.equal(first.browser_path, '/root/Downloads/node sample.txt');
+    assert.equal(first.browser_ready, true);
     assert.equal(second.name, 'node sample (1).txt');
     assert.deepEqual((await client.listDownloads('bs_test', { access })).entries.map(entry => entry.name), [
       'node sample (1).txt',
@@ -355,6 +371,8 @@ print(json.dumps({'uploaded': uploaded, 'names': [entry['name'] for entry in lis
       const { stdout } = await execFileAsync('python3', ['-c', pythonSource], { env: environment });
       const result = JSON.parse(stdout);
       assert.equal(result.uploaded.name, 'python sample.txt');
+      assert.equal(result.uploaded.browser_path, '/root/Downloads/python sample.txt');
+      assert.equal(result.uploaded.browser_ready, true);
       assert.equal(result.names.includes('python sample.txt'), true);
       assert.equal(await readFile(path.join(directory, 'python-full.txt'), 'utf8'), 'abcdefghij');
       assert.equal(await readFile(path.join(directory, 'python-partial.txt'), 'utf8'), 'defg');
@@ -377,6 +395,8 @@ echo json_encode(['uploaded' => $uploaded, 'names' => array_column($listing['ent
       const { stdout } = await execFileAsync('php', ['-r', phpSource], { env: environment });
       const result = JSON.parse(stdout);
       assert.equal(result.uploaded.name, 'php sample.txt');
+      assert.equal(result.uploaded.browser_path, '/root/Downloads/php sample.txt');
+      assert.equal(result.uploaded.browser_ready, true);
       assert.equal(result.names.includes('php sample.txt'), true);
       assert.equal(await readFile(path.join(directory, 'php-full.txt'), 'utf8'), 'abcdefghij');
       assert.equal(await readFile(path.join(directory, 'php-partial.txt'), 'utf8'), 'bcde');

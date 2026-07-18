@@ -6,8 +6,6 @@ export function publicBrowserSession(row) {
     status: row.status,
     droplet_id: row.droplet_id || null,
     public_ip: row.public_ip || null,
-    region: row.region,
-    size: row.size,
     profile_mode: row.profile_mode || 'persistent',
     host_session_id: row.host_session_id || null,
     volume: row.volume_id ? {

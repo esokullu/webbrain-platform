@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import http from 'node:http';
 import { Readable } from 'node:stream';
 import { createObjectDownloadsHandler } from '../src/platform/object-downloads.js';
@@ -58,7 +59,17 @@ test('shared Downloads streams uploads, isolates users, suffixes collisions, and
       body: 'hello',
     });
     assert.equal(response.status, 201);
-    assert.equal((await response.json()).path, 'report.txt');
+    assert.deepEqual(await response.json(), {
+      name: 'report.txt',
+      size: 5,
+      sha256: createHash('sha256').update('hello').digest('hex'),
+      storage_backend: 'shared_object',
+      browser_path: null,
+      browser_ready: false,
+      path: 'report.txt',
+      url: '/downloads/report.txt',
+      etag: 'etag-users/user-a/report.txt',
+    });
 
     response = await fetch(`${ctx.base}/downloads/report.txt`, {
       method: 'PUT',
@@ -139,9 +150,14 @@ test('Chrome upload idempotency reuses the reserved final name after an uncertai
       upload_id: 'chrome-guid-1',
       expected_size: 10,
       size: 10,
+      sha256: createHash('sha256').update('first-copy').digest('hex'),
       etag: 'etag-users/user-a/report.pdf',
     },
   );
+  assert.equal(second.sha256, first.sha256);
+  assert.equal(second.storage_backend, 'shared_object');
+  assert.equal(second.browser_path, null);
+  assert.equal(second.browser_ready, false);
 });
 
 test('idempotency survives a failed committed-marker write after object publication', async () => {

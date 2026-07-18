@@ -21,20 +21,13 @@ from webbrain_client import WebBrainClient
 client = WebBrainClient(os.environ["WEBBRAIN_API_KEY"])
 session = client.create_browser_session(
     display_name="Research",
-    lifecycle="resumable",  # or "always_on" for a classic single-Droplet browser
+    type="normal",  # or "incognito", matching the dashboard
+    proxy_enabled=False,
 )
 ready = client.wait_for_browser_session(session["id"])
 downloads = client.create_downloads_access(ready["id"])
 # downloads contains the private URL, username, password, limit, and expiry.
-client.update_browser_proxy(
-    ready["id"],
-    proxy={
-        "domain": "p.webshare.io",
-        "port": 80,
-        "username": "webshare-user",
-        "password": "webshare-password",
-    },
-)
+client.update_browser_proxy(ready["id"], enabled=True)
 run = client.create_run(
     ready["id"],
     "Open example.com and return the page title",
@@ -95,6 +88,8 @@ uploaded = client.upload_downloads_file(
     access=access,
 )
 print(uploaded["name"])  # May be "report (1).pdf" on a collision.
+print(uploaded["browser_path"])  # Absolute path, or None for shared storage.
+print(uploaded["browser_ready"])
 
 listing = client.list_downloads(ready["id"], access=access)
 print(listing["entries"])
@@ -136,7 +131,7 @@ run = client.create_run(
 - `get_browser_session(session_id)`
 - `update_browser_session(session_id, display_name=...)`
 - `get_browser_proxy(session_id)`
-- `update_browser_proxy(session_id, proxy_url=...)` or `proxy={...}`
+- `update_browser_proxy(session_id, enabled=...)`
 - `delete_browser_proxy(session_id)`
 - `wait_for_browser_session(session_id, ...)`
 - `delete_browser_session(session_id)`

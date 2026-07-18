@@ -84,14 +84,12 @@ class WebBrainClient:
         self,
         session_id: str,
         *,
-        proxy_url: Optional[str] = None,
-        proxy: Optional[Dict[str, Any]] = None,
+        enabled: bool = True,
     ):
-        body = {"proxy": proxy} if proxy is not None else {"proxy_url": proxy_url}
         return self._request(
             "PATCH",
             f"/api/browser-sessions/{self._id(session_id)}/proxy",
-            body,
+            {"proxy_enabled": bool(enabled)},
         )["proxy"]
 
     def delete_browser_proxy(self, session_id: str):

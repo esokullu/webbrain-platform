@@ -69,9 +69,10 @@ export class WebBrainClient {
     return (await this.request('GET', `/api/browser-sessions/${encodeURIComponent(sessionId)}/proxy`)).proxy;
   }
 
-  async updateBrowserProxy(sessionId, { proxyUrl, proxy } = {}) {
-    const body = proxy === undefined ? { proxy_url: proxyUrl ?? null } : { proxy };
-    return (await this.request('PATCH', `/api/browser-sessions/${encodeURIComponent(sessionId)}/proxy`, body)).proxy;
+  async updateBrowserProxy(sessionId, { enabled = true } = {}) {
+    return (await this.request('PATCH', `/api/browser-sessions/${encodeURIComponent(sessionId)}/proxy`, {
+      proxy_enabled: Boolean(enabled),
+    })).proxy;
   }
 
   async deleteBrowserProxy(sessionId) {

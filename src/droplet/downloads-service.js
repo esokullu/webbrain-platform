@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import http from 'node:http';
@@ -237,12 +237,18 @@ async function receiveUpload(req, res, { root, uploadLimit, storageLimit }, rout
   const tempPath = path.join(parent.path, tempName);
   let bytesWritten = 0;
   try {
-    bytesWritten = await streamUpload(req, tempPath, streamLimit, limitErrorCode);
+    const uploaded = await streamUpload(req, tempPath, streamLimit, limitErrorCode);
+    bytesWritten = uploaded.size;
     const final = await linkWithAvailableName(tempPath, parent.path, requestedName);
     await fs.unlink(tempPath);
+    const browserPath = path.join(parent.path, final.name);
     const body = JSON.stringify({
       name: final.name,
       size: bytesWritten,
+      sha256: uploaded.sha256,
+      storage_backend: 'browser_local',
+      browser_path: browserPath,
+      browser_ready: true,
       url: buildDownloadsUrl([...parentSegments, final.name], false),
     });
     res.writeHead(201, {
@@ -271,6 +277,7 @@ async function receiveUpload(req, res, { root, uploadLimit, storageLimit }, rout
 function streamUpload(req, tempPath, uploadLimit, limitErrorCode = 'UPLOAD_TOO_LARGE') {
   return new Promise((resolve, reject) => {
     const output = createWriteStream(tempPath, { flags: 'wx', mode: 0o600 });
+    const hash = createHash('sha256');
     let bytes = 0;
     let settled = false;
 
@@ -291,6 +298,7 @@ function streamUpload(req, tempPath, uploadLimit, limitErrorCode = 'UPLOAD_TOO_L
         fail(error);
         return;
       }
+      hash.update(chunk);
       if (!output.write(chunk)) {
         req.pause();
         output.once('drain', () => {
@@ -311,7 +319,10 @@ function streamUpload(req, tempPath, uploadLimit, limitErrorCode = 'UPLOAD_TOO_L
     output.once('finish', () => {
       if (settled) return;
       settled = true;
-      resolve(bytes);
+      resolve({
+        size: bytes,
+        sha256: hash.digest('hex'),
+      });
     });
   });
 }

@@ -157,17 +157,19 @@ curl -sS -X POST \
   https://webbrain.cloud/api/browser-sessions \
   -H "Authorization: Bearer $WEBBRAIN_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"display_name":"Research","lifecycle":"resumable"}'
+  -d '{"display_name":"Research","type":"normal","proxy_enabled":false}'
 ```
 
-`lifecycle` accepts `resumable` (the default), `always_on`, or `ephemeral`. Resumable
-browsers receive a fixed 2 GiB profile volume and can be paused once shared
-Downloads storage is configured. Always-on browsers use the classic single
+`type` accepts `normal` (the default) or `incognito`, matching the dashboard.
+Normal browsers receive a fixed profile volume and can be paused once shared
+Downloads storage is configured. Incognito browsers use the classic always-on
 Droplet layout: Chrome state and Downloads stay on that Droplet, and Pause is
-unavailable. Ephemeral browsers reuse one of the user's running resumable or
-always-on Droplets without mounting or reading its Chrome profile. Resumable
-and always-on browsers do not expire automatically; they remain until explicitly
-deleted. Only ephemeral browsers enforce `ttl_ms`.
+unavailable. Both remain until explicitly destroyed.
+
+DigitalOcean region and size are fixed by the server's `DO_REGION` and
+`DO_SIZE`. Browser requests cannot override them. Likewise,
+`proxy_enabled: true` selects the proxy configured in the server environment;
+clients never submit proxy hosts, URLs, usernames, or passwords.
 
 The response is `201 Created`:
 
@@ -178,10 +180,7 @@ The response is `201 Created`:
     "status": "provisioning",
     "droplet_id": "123456789",
     "public_ip": null,
-    "region": "nyc3",
-    "size": "s-2vcpu-4gb",
     "profile_mode": "persistent",
-    "host_session_id": null,
     "volume": {
       "id": "volume-id",
       "name": "wb-profile-bs-0123456789abcdef",
@@ -204,9 +203,7 @@ Save the returned `id`:
 export WEBBRAIN_SESSION_ID='bs_0123456789abcdef'
 ```
 
-To create an always-on browser, set `lifecycle` to `always_on`. You can also
-assign a Webshare upstream while the Droplet is created by including its four
-connection values in `proxy`:
+To create an incognito browser and use the server-configured proxy:
 
 ```bash
 curl -sS -X POST https://webbrain.cloud/api/browser-sessions \
@@ -214,55 +211,15 @@ curl -sS -X POST https://webbrain.cloud/api/browser-sessions \
   -H "Content-Type: application/json" \
   -d '{
     "display_name": "Research",
-    "lifecycle": "always_on",
-    "proxy": {
-      "domain": "p.webshare.io",
-      "port": 80,
-      "username": "webshare-user",
-      "password": "webshare-password"
-    }
+    "type": "incognito",
+    "proxy_enabled": true
   }'
 ```
 
 Chrome always connects to a loopback-only relay. The relay handles upstream
 authentication, while API and session responses expose only the credential-free
-endpoint and verified exit IP. The initial URL is written to the root-only
-Droplet environment by cloud-init; live replacements are stored in a root-only
-state file and survive service restarts.
-
-To start a blank ephemeral browser on a running browser's Droplet, pass that
-browser as `host_session_id`:
-
-```bash
-export WEBBRAIN_HOST_SESSION_ID='bs_existing_host'
-
-curl -sS -X POST https://webbrain.cloud/api/browser-sessions \
-  -H "Authorization: Bearer $WEBBRAIN_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"display_name\": \"Private research\",
-    \"lifecycle\": \"ephemeral\",
-    \"host_session_id\": \"$WEBBRAIN_HOST_SESSION_ID\",
-    \"ttl_ms\": 3600000
-  }"
-```
-
-The host must belong to the same user and be running with its Droplet control
-channel connected. A paused resumable browser cannot host a child because its
-Droplet no longer exists. New Droplets support hosted ephemeral browsers;
-older already-running Droplets must be upgraded or recreated once so their
-runtime manager is installed.
-
-An ephemeral browser gets a separate control channel, display, proxy relay,
-noVNC gate, Downloads service, and blank Chrome profile. All writable browser
-state lives in the service's private, disk-backed `/tmp` namespace; `/run`
-holds only the systemd lifetime marker. The runtime uses a dynamic unprivileged
-user, cannot access the host's loopback services or persistent profile paths,
-and never attaches the host's profile volume. systemd removes the private
-temporary namespace after a normal stop or crash. Browser crashes, runtime
-manager restarts, host pause/reset/delete, Droplet reboot, and TTL expiry all
-end the session instead of restoring it. Downloads are temporary and have a
-separate aggregate quota.
+endpoint and verified exit IP. The upstream URL and credentials stay in
+root-only server configuration.
 
 Provisioning takes time. Poll the session until `runtime_ready` is `true`:
 
@@ -355,6 +312,15 @@ and `downloadDownloadsFile`/`download_downloads_file` helpers. Pass a previously
 returned access object to several calls to avoid requesting the same session
 credential repeatedly; clients do not cache it on their own.
 
+Successful uploads return `name`, `size`, the lowercase `sha256` digest,
+`storage_backend`, `browser_path`, and `browser_ready`. Browser-local uploads
+use `storage_backend: "browser_local"` and return the real absolute path visible
+to that browser. Shared object-backed uploads use
+`storage_backend: "shared_object"`, `browser_path: null`, and
+`browser_ready: false` because they are durable and accessible while paused but
+are not mounted into the browser filesystem. Existing `path`, `url`, `etag`,
+and `idempotent` fields remain available where applicable.
+
 Chrome downloads first stream to the Droplet's ephemeral root disk. When Chrome
 reports completion, the launcher uploads the file to shared storage, verifies
 the platform response, and then removes the staged copy. A browser cannot be
@@ -365,7 +331,7 @@ limit is corrected, restart the browser service to retry the retained file.
 
 ### Pause and resume a browser
 
-For resumable browsers, pausing cleanly stops Chrome, flushes and unmounts its
+For normal browsers, pausing cleanly stops Chrome, flushes and unmounts its
 fixed 2 GiB profile volume, and destroys the billable Droplet while retaining
 the volume. Resuming creates a new Droplet, attaches the same volume, and
 restores the Chrome profile and saved proxy configuration. Downloads remain
@@ -375,10 +341,6 @@ so destroying a Droplet can never discard local-only Downloads.
 The running Droplet must also report that sync was enabled when it booted.
 Turning on Spaces later does not migrate an existing Droplet's local Downloads
 or make that Droplet safe to pause.
-
-Pausing, resetting, deleting, or expiring a host first terminates all of its
-ephemeral children and marks their unfinished runs failed. Their volatile
-profiles and Downloads cannot be resumed.
 
 ```bash
 curl -sS -X POST \
@@ -405,27 +367,19 @@ curl -sS \
   -H "Authorization: Bearer $WEBBRAIN_API_KEY"
 ```
 
-Switch upstreams without restarting Chrome or recreating the Droplet:
+Enable the server-configured proxy without restarting Chrome or recreating the
+Droplet:
 
 ```bash
 curl -sS -X PATCH \
   "https://webbrain.cloud/api/browser-sessions/$WEBBRAIN_SESSION_ID/proxy" \
   -H "Authorization: Bearer $WEBBRAIN_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{
-    "proxy": {
-      "domain": "p.webshare.io",
-      "port": 80,
-      "username": "next-user",
-      "password": "next-password"
-    }
-  }'
+  -d '{"proxy_enabled":true}'
 ```
 
-The structured form defaults to an HTTP upstream and safely URL-encodes the
-Webshare credentials. Generic HTTP, HTTPS, SOCKS4, and SOCKS5 integrations may
-send a complete `proxy_url` instead. The relay closes existing connections,
-verifies the replacement's exit IP, and rolls back if verification fails.
+The relay closes existing connections, verifies the configured proxy's exit
+IP, and rolls back if verification fails.
 
 Delete the proxy configuration to return to a direct connection:
 
@@ -435,9 +389,8 @@ curl -sS -X DELETE \
   -H "Authorization: Bearer $WEBBRAIN_API_KEY"
 ```
 
-`PATCH` with `{"proxy_url":null}` remains equivalent. Proxy changes return
-`409 Conflict` while a browser run is active; abort or finish the run first so
-one task cannot span two network identities.
+Proxy changes return `409 Conflict` while a browser run is active; abort or
+finish the run first so one task cannot span two network identities.
 
 ### 2. Start a browser run
 
@@ -640,14 +593,14 @@ Abort is cooperative. A run can briefly report `aborting` before becoming
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/browser-sessions` | Create a resumable browser by default, an always-on browser, or an ephemeral browser on a running `host_session_id`. |
+| `POST` | `/api/browser-sessions` | Create a `normal` browser by default or an `incognito` browser. |
 | `GET` | `/api/browser-sessions` | List the authenticated user's browser sessions. |
 | `GET` | `/api/browser-sessions/:sessionId` | Read provisioning and runtime readiness. |
 | `PATCH` | `/api/browser-sessions/:sessionId` | Set or clear the browser's `display_name`. |
-| `POST` | `/api/browser-sessions/:sessionId/reset` | Force-restart a persistent browser's Droplet, ending hosted ephemeral children. Resetting an ephemeral browser ends it. |
+| `POST` | `/api/browser-sessions/:sessionId/reset` | Force-restart the running browser's Droplet. |
 | `POST` | `/api/browser-sessions/:sessionId/pause` | Safely stop Chrome, retain its 2 GiB profile volume, and destroy the Droplet. |
 | `POST` | `/api/browser-sessions/:sessionId/resume` | Create a new Droplet and attach the saved profile volume. |
-| `DELETE` | `/api/browser-sessions/:sessionId` | Destroy a persistent browser and its infrastructure, or stop only an ephemeral runtime while retaining its host Droplet. |
+| `DELETE` | `/api/browser-sessions/:sessionId` | Destroy the browser and its infrastructure. |
 | `POST` | `/api/browser-sessions/:sessionId/connect-token` | Create a short-lived signed noVNC URL. |
 | `POST` | `/api/browser-sessions/:sessionId/downloads-access` | Create private Downloads URL and Basic Auth credentials. |
 

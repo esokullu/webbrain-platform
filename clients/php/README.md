@@ -22,17 +22,13 @@ require_once __DIR__ . '/WebBrainClient.php';
 $client = new WebBrainClient(getenv('WEBBRAIN_API_KEY') ?: '');
 $session = $client->createBrowserSession([
     'display_name' => 'Research',
-    'lifecycle' => 'resumable', // or 'always_on' for a classic single-Droplet browser
+    'type' => 'normal', // or 'incognito', matching the dashboard
+    'proxy_enabled' => false,
 ]);
 $ready = $client->waitForBrowserSession($session['id']);
 $downloads = $client->createDownloadsAccess($ready['id']);
 // $downloads contains the private URL, username, password, limit, and expiry.
-$client->updateBrowserProxy($ready['id'], [
-    'domain' => 'p.webshare.io',
-    'port' => 80,
-    'username' => 'webshare-user',
-    'password' => 'webshare-password',
-]);
+$client->updateBrowserProxy($ready['id'], true);
 $run = $client->createRun(
     $ready['id'],
     'Open example.com and return the page title',
@@ -94,6 +90,8 @@ $uploaded = $client->uploadDownloadsFile(
     $access,
 );
 echo $uploaded['name']; // May be "report (1).pdf" on a collision.
+var_dump($uploaded['browser_path']); // Absolute path, or null for shared storage.
+var_dump($uploaded['browser_ready']);
 
 $listing = $client->listDownloads($ready['id'], '', $access);
 print_r($listing['entries']);
@@ -136,7 +134,7 @@ $run = $client->createRun($session['id'], 'Return the title and visible links', 
 - `getBrowserSession($sessionId)`
 - `updateBrowserSession($sessionId, $displayName)`
 - `getBrowserProxy($sessionId)`
-- `updateBrowserProxy($sessionId, $proxyUrlOrParts)`
+- `updateBrowserProxy($sessionId, $enabled)`
 - `deleteBrowserProxy($sessionId)`
 - `waitForBrowserSession($sessionId, ...)`
 - `deleteBrowserSession($sessionId)`

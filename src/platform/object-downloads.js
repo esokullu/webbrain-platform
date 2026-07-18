@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
 
@@ -74,10 +75,16 @@ export function createObjectDownloadsHandler({
           && reservationSizeMatch;
         if (existing && (committedMatch || reservationMatch)) {
           stream.resume?.();
+          const sha256 = validMarker.sha256
+            || await sha256StoredObject(objectStore, prefix + finalPath);
           return {
             name: path.posix.basename(finalPath),
-            path: finalPath,
             size: Number(existing.size || 0),
+            sha256,
+            storage_backend: 'shared_object',
+            browser_path: null,
+            browser_ready: false,
+            path: finalPath,
             url: downloadsUrl(finalPath),
             etag: existing.etag || null,
             idempotent: true,
@@ -113,6 +120,7 @@ export function createObjectDownloadsHandler({
       stream.pipe(limiter);
       try {
         const result = await upload;
+        const sha256 = limiter.digestSha256();
         if (markerKey) {
           await writeUploadMarker(objectStore, markerKey, {
             committed: true,
@@ -121,6 +129,7 @@ export function createObjectDownloadsHandler({
             upload_id: normalizedIdempotencyKey,
             expected_size: declared,
             size: limiter.bytesRead,
+            sha256,
             etag: result?.etag || null,
           }).catch(error => {
             console.error('[downloads] object published but idempotency marker finalization failed:', error.message || error);
@@ -128,8 +137,12 @@ export function createObjectDownloadsHandler({
         }
         return {
           name: path.posix.basename(finalPath),
-          path: finalPath,
           size: limiter.bytesRead,
+          sha256,
+          storage_backend: 'shared_object',
+          browser_path: null,
+          browser_ready: false,
+          path: finalPath,
           url: downloadsUrl(finalPath),
           etag: result?.etag || null,
         };
@@ -314,6 +327,8 @@ function renderDirectoryPage({ segments, entries, uploadLimit, quota, usedBytes 
 }
 
 function limitStream(limit) {
+  const hash = createHash('sha256');
+  let digest = null;
   const stream = new Transform({
     transform(chunk, encoding, callback) {
       this.bytesRead += chunk.length;
@@ -324,11 +339,24 @@ function limitStream(limit) {
         callback(error);
         return;
       }
+      hash.update(chunk);
       callback(null, chunk);
     },
   });
   stream.bytesRead = 0;
+  stream.digestSha256 = () => {
+    digest ||= hash.digest('hex');
+    return digest;
+  };
   return stream;
+}
+
+async function sha256StoredObject(objectStore, key) {
+  const result = await objectStore.get(key);
+  const stream = bodyToNodeReadable(result?.body);
+  const hash = createHash('sha256');
+  for await (const chunk of stream) hash.update(chunk);
+  return hash.digest('hex');
 }
 
 function availableObjectName(requested, occupied) {
