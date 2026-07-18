@@ -46,6 +46,8 @@ Platform:
 - `WEBBRAIN_REGISTRATION_ENABLED=true` only when public account creation should be available (disabled by default)
 - `WEBBRAIN_MODEL_PROXY_BASE_URL`, `WEBBRAIN_MODEL_PROXY_API_KEY`
 - `WEBBRAIN_BROWSER_HOUR_CENTS` (defaults to `10`, or `$0.10` per active browser hour in the pricing and billing UI)
+- `WEBBRAIN_BILLING_METER_INTERVAL_MS` (defaults to `60000`; active Droplet-backed browsers are prorated with sub-cent carry)
+- `WEBBRAIN_BILLING_ENFORCE_CREDIT=false` (optional emergency override; credit enforcement is enabled by default)
 - `WEBBRAIN_UNLIMITED_BILLING_EMAILS` (comma-separated credit-check bypass list; defaults to `esokullu@gmail.com`)
 - `STRIPE_SECRET_KEY` (enables dashboard credit checkout)
 - `STRIPE_WEBHOOK_SECRET` (verifies `POST /api/billing/stripe-webhook`)
@@ -75,9 +77,14 @@ rate of `$0.10` per active browser hour. Against the current `$0.03571` hourly
 Droplet rate, that leaves room for Stripe fees, standard automation services,
 and platform operations. Credit packs are `$10`, `$25`, `$50`, and `$100`.
 Stripe Checkout credits are idempotent by Checkout Session id, so the success
-redirect and webhook can safely process the same payment. The current billing
-surface records balances and payments; browser-time debit metering is not
-enabled by this UI-preview change.
+redirect and webhook can safely process the same payment. Active Droplet-backed
+browsers are prorated against the configured hourly rate; fractional cents carry
+forward instead of being rounded away. Empty balances block new browsers and
+resume attempts. Customers can explicitly consent to save the card from a
+credit purchase and configure an automatic Stripe top-up threshold and amount.
+Off-session attempts use a stable idempotency key, retry after one hour on
+failure, and surface their status in the Billing view. Running browsers are not
+automatically destroyed when a balance is exhausted.
 
 Production uses `WEBBRAIN_MODEL_PROXY_BASE_URL=https://api.webbrain.one/v1`.
 The platform authenticates browser model traffic with the per-session secret,

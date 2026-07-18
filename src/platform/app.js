@@ -11,11 +11,14 @@ import { DEFAULT_CREDIT_PACKAGES, pricingPage } from './pricing-page.js';
 import {
   createStripeCheckoutSession,
   retrieveStripeCheckoutSession,
+  retrieveStripePaymentIntent,
   verifyStripeWebhook,
 } from './stripe-billing.js';
+import { attemptAutoTopUp } from './billing.js';
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'aborted']);
 const TERMINAL_BROWSER_STATUSES = new Set(['destroyed']);
+const AUTO_TOP_UP_THRESHOLDS = new Set([500, 1000, 2500]);
 
 function parseCookies(header = '') {
   const out = {};
@@ -302,7 +305,22 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     .action-group-danger { border-color: rgba(164,59,50,.18); background: rgba(164,59,50,.025); }
     .action-button { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
     .action-button svg { width: 15px; height: 15px; flex: 0 0 15px; }
+    .action-button svg[hidden] { display: none; }
     .action-button-primary { padding-inline: 13px; }
+    .browser-actions-menu { position: relative; }
+    .browser-actions-menu > summary { position: relative; width: 36px; min-height: 34px; display: grid; place-items: center; padding: 0; border: 1px solid var(--border); border-radius: 7px; background: rgba(255,253,248,.65); color: var(--text); cursor: pointer; list-style: none; }
+    .browser-actions-menu > summary::-webkit-details-marker { display: none; }
+    .browser-actions-menu > summary:hover, .browser-actions-menu[open] > summary { border-color: rgba(91,82,232,.28); background: var(--card-hover); color: var(--accent); }
+    .browser-actions-menu.is-disabled > summary { opacity: .48; cursor: not-allowed; }
+    .browser-actions-menu > summary svg { width: 17px; height: 17px; }
+    .browser-actions-menu > summary .route-dot { position: absolute; right: 4px; bottom: 4px; width: 5px; height: 5px; }
+    .browser-actions-popover { position: absolute; top: calc(100% + 7px); right: 0; z-index: 30; width: 206px; padding: 5px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); box-shadow: 0 18px 44px rgba(44,24,16,.18); }
+    button.browser-menu-action { width: 100%; min-height: 39px; display: flex; align-items: center; justify-content: flex-start; gap: 10px; padding: 8px 9px; border: 0; border-radius: 7px; background: transparent; color: var(--text); box-shadow: none; font-size: 12px; text-align: left; }
+    button.browser-menu-action:hover { background: var(--card-hover); color: var(--text); transform: none; }
+    button.browser-menu-action svg { width: 16px; height: 16px; flex: 0 0 16px; color: var(--text-dim); }
+    button.browser-menu-action.is-danger { color: var(--danger); }
+    button.browser-menu-action.is-danger svg { color: currentColor; }
+    button.browser-menu-action.is-danger:hover { background: rgba(164,59,50,.08); color: var(--danger); }
     .route-dot { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: #9a8d7d; box-shadow: 0 0 0 3px rgba(107,91,71,.09); }
     .route-dot.is-enabled { background: var(--success); box-shadow: 0 0 0 3px rgba(45,136,102,.10); }
     .route-dot.is-unavailable { background: #b56b22; box-shadow: 0 0 0 3px rgba(181,107,34,.10); }
@@ -346,7 +364,12 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     .viewer-wrap { min-height: 680px; display: grid; grid-template-rows: auto 1fr; }
     .viewer-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--border); }
     .viewer-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; }
-    .viewer-title-display { min-width: 0; max-width: 52%; display: inline-flex; align-items: center; padding-inline: 4px 7px; color: var(--text); }
+    .viewer-title-display { min-width: 0; max-width: 45%; display: inline-flex; align-items: center; gap: 3px; padding-inline: 4px 7px; color: var(--text); }
+    .rename-browser-button { width: 28px; min-height: 28px; flex: 0 0 28px; display: grid; place-items: center; padding: 0; border-color: transparent; background: transparent; color: var(--text-dim); box-shadow: none; }
+    .rename-browser-button:hover { border-color: var(--border); background: var(--card-hover); color: var(--accent); }
+    .rename-browser-button svg, .viewer-external-link svg { width: 14px; height: 14px; }
+    .viewer-external-link { width: 28px; height: 28px; flex: 0 0 28px; display: grid; place-items: center; border-radius: 7px; color: var(--text-dim); }
+    .viewer-external-link:hover { background: var(--card-hover); color: var(--accent); }
     .viewer-frames { min-height: 640px; display: none; }
     iframe { width: 100%; height: 640px; display: none; border: 0; background: #0b0e17; border-radius: 0 0 16px 16px; }
     .empty { min-height: 640px; display: grid; place-items: center; color: var(--text-dim); text-align: center; padding: 20px; }
@@ -392,6 +415,20 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     .topup-button:hover { border-color: rgba(91,82,232,.38); background: rgba(91,82,232,.09); color: var(--accent); }
     .topup-button strong { font: 800 18px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .topup-button span { color: var(--text-dim); font-size: 9px; font-weight: 650; }
+    .auto-topup-card { margin-top: 14px; padding: 13px; border: 1px solid rgba(91,82,232,.17); border-radius: 11px; background: rgba(91,82,232,.035); }
+    .auto-topup-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+    .auto-topup-title { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 800; }
+    .auto-topup-title svg { width: 16px; height: 16px; color: var(--accent); }
+    .auto-topup-switch { display: inline-flex; align-items: center; gap: 7px; color: var(--text); font-size: 11px; font-weight: 750; cursor: pointer; }
+    .auto-topup-switch input { width: 16px; min-height: 16px; margin: 0; accent-color: var(--accent); }
+    .auto-topup-copy { margin: 4px 0 0; color: var(--text-dim); font-size: 10px; line-height: 1.5; }
+    .auto-topup-fields { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) auto; gap: 8px; align-items: end; margin-top: 12px; }
+    .auto-topup-fields label { display: grid; gap: 5px; color: var(--text-dim); font-size: 9px; font-weight: 750; }
+    .auto-topup-fields select { min-height: 34px; font-size: 11px; }
+    .auto-topup-fields button { min-height: 34px; }
+    .auto-topup-status { min-height: 17px; margin-top: 9px; color: var(--text-dim); font-size: 10px; line-height: 1.45; }
+    .auto-topup-status.is-on { color: var(--success); }
+    .auto-topup-status.is-error { color: var(--danger); }
     .billing-message { margin-top: 12px; min-height: 18px; color: var(--success); font-size: 11px; }
     .billing-message.error { color: var(--danger); }
     .billing-history { display: grid; gap: 7px; margin-top: 13px; }
@@ -400,6 +437,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     .billing-transaction strong { display: block; font-size: 12px; }
     .billing-transaction time { display: block; margin-top: 2px; color: var(--text-dim); font-size: 9px; }
     .billing-transaction-amount { color: var(--success); font: 750 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .billing-transaction-amount.is-debit { color: var(--text-dim); }
     .billing-footnote { margin: 13px 0 0; color: var(--text-dim); font-size: 10px; line-height: 1.55; }
     .billing-footnote a { color: var(--accent); font-weight: 750; }
     .docs-link { align-self: center; }
@@ -680,6 +718,8 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       .lifecycle-options, .proxy-route-details { grid-template-columns: 1fr; }
       .api-key-row { grid-template-columns: 1fr; }
       .topup-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+      .auto-topup-fields { grid-template-columns: 1fr 1fr; }
+      .auto-topup-fields button { grid-column: 1 / -1; }
       .api-key-item { grid-template-columns: 1fr; }
       .api-key-actions { justify-content: space-between; }
       .console-action-row { align-items: stretch; flex-direction: column; }
@@ -791,40 +831,49 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         <div class="workspace-column">
           <section class="panel viewer-wrap">
             <div class="viewer-actions">
-              <div class="viewer-title-display"><span class="viewer-title" id="viewerTitle">Browser preview</span></div>
+              <div class="viewer-title-display">
+                <span class="viewer-title" id="viewerTitle">Browser preview</span>
+                <button class="rename-browser-button" id="renameSessionBtn" type="button" disabled aria-label="Rename browser" title="Rename browser">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 20 4.5-1 10-10a2.12 2.12 0 0 0-3-3l-10 10Z"/><path d="m14 7 3 3"/></svg>
+                </button>
+                <a class="viewer-external-link" id="externalLink" href="#" target="_blank" rel="noopener" style="display:none" aria-label="Open browser separately" title="Open separately">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9"/><path d="M19 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h6"/></svg>
+                </a>
+              </div>
               <div class="toolbar">
                 <button class="action-button action-button-primary" id="connectBtn" type="button" disabled>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
                   <span id="connectBtnLabel">Connect</span>
                 </button>
-                <a class="button-link" id="externalLink" href="#" target="_blank" rel="noopener" style="display:none">Open separately</a>
-                <div class="action-group" aria-label="Browser tools">
-                  <button class="secondary action-button" id="downloadsBtn" type="button" disabled>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5h6l2 2h10v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M12 12v5m0 0-2-2m2 2 2-2"/></svg>
-                    <span>Downloads</span>
-                  </button>
-                  <button class="secondary action-button" id="browserSettingsBtn" type="button" disabled>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10m4 0h2M4 17h2m4 0h10M14 4v6M6 14v6"/></svg>
-                    <span>Settings</span>
+                <button class="secondary action-button" id="downloadsBtn" type="button" disabled>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5h6l2 2h10v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M12 12v5m0 0-2-2m2 2 2-2"/></svg>
+                  <span>Downloads</span>
+                </button>
+                <button class="secondary action-button" id="lifecycleBtn" type="button" disabled>
+                  <svg id="lifecyclePauseIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5v14M15 5v14"/></svg>
+                  <svg id="lifecycleResumeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="m8 5 11 7-11 7Z"/></svg>
+                  <span id="lifecycleBtnLabel">Pause</span>
+                </button>
+                <details class="browser-actions-menu" id="browserActionsMenu">
+                  <summary aria-label="Browser settings" title="Browser settings">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h14"/></svg>
                     <span class="route-dot" id="toolbarProxyDot" aria-hidden="true"></span>
-                  </button>
-                </div>
-                <div class="action-group" aria-label="Browser lifecycle">
-                  <button class="secondary action-button" id="lifecycleBtn" type="button" disabled>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5v14M15 5v14"/></svg>
-                    <span id="lifecycleBtnLabel">Pause</span>
-                  </button>
-                  <button class="secondary action-button" id="resetSessionBtn" type="button" disabled title="Force-restart this browser's Droplet">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5"/><path d="M4 17v-5h5"/><path d="M6.1 8.2a7 7 0 0 1 11.5-2.6L20 8M4 16l2.4 2.4a7 7 0 0 0 11.5-2.6"/></svg>
-                    <span id="resetSessionBtnLabel">Reset</span>
-                  </button>
-                </div>
-                <div class="action-group action-group-danger">
-                  <button class="danger action-button" id="deleteSessionBtn" type="button" disabled>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>
-                    <span id="deleteSessionBtnLabel">Delete</span>
-                  </button>
-                </div>
+                  </summary>
+                  <div class="browser-actions-popover" role="menu">
+                    <button class="browser-menu-action" id="proxyMenuBtn" type="button" role="menuitem" disabled>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+                      <span id="proxyMenuBtnLabel">Enable proxy…</span>
+                    </button>
+                    <button class="browser-menu-action" id="restartSessionBtn" type="button" role="menuitem" disabled>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5"/><path d="M4 17v-5h5"/><path d="M6.1 8.2a7 7 0 0 1 11.5-2.6L20 8M4 16l2.4 2.4a7 7 0 0 0 11.5-2.6"/></svg>
+                      <span id="restartSessionBtnLabel">Restart</span>
+                    </button>
+                    <button class="browser-menu-action is-danger" id="destroySessionBtn" type="button" role="menuitem" disabled>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>
+                      <span id="destroySessionBtnLabel">Destroy</span>
+                    </button>
+                  </div>
+                </details>
               </div>
             </div>
             <div id="viewerEmpty" class="viewer-state" aria-live="polite">
@@ -1017,6 +1066,42 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
             </div>
             <div class="panel-body">
               <div class="topup-grid" id="topUpGrid"></div>
+              <form class="auto-topup-card" id="autoTopUpForm">
+                <div class="auto-topup-head">
+                  <div>
+                    <div class="auto-topup-title">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v6h-6"/></svg>
+                      <span>Automatic top-up</span>
+                    </div>
+                    <p class="auto-topup-copy">With your consent, Stripe saves the card from this purchase and charges it off-session when credit reaches your trigger.</p>
+                  </div>
+                  <label class="auto-topup-switch" for="autoTopUpEnabled">
+                    <input id="autoTopUpEnabled" type="checkbox">
+                    <span>Enable</span>
+                  </label>
+                </div>
+                <div class="auto-topup-fields">
+                  <label for="autoTopUpThreshold">
+                    <span>When credit falls below</span>
+                    <select id="autoTopUpThreshold">
+                      <option value="500">$5.00</option>
+                      <option value="1000">$10.00</option>
+                      <option value="2500">$25.00</option>
+                    </select>
+                  </label>
+                  <label for="autoTopUpAmount">
+                    <span>Add</span>
+                    <select id="autoTopUpAmount">
+                      <option value="1000">$10.00</option>
+                      <option value="2500" selected>$25.00</option>
+                      <option value="5000">$50.00</option>
+                      <option value="10000">$100.00</option>
+                    </select>
+                  </label>
+                  <button class="secondary" id="saveAutoTopUpBtn" type="submit">Save</button>
+                </div>
+                <div class="auto-topup-status" id="autoTopUpStatus" aria-live="polite"></div>
+              </form>
               <div class="billing-message" id="billingMessage" aria-live="polite"></div>
               <p class="billing-footnote">Credit packs all use the same browser-hour rate. See the public <a href="/pricing">pricing page</a> for what is included.</p>
             </div>
@@ -1026,7 +1111,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
               <div>
                 <div class="panel-kicker">Ledger</div>
                 <h2 id="billingHistoryTitle">Credit history</h2>
-                <p class="api-description">Completed top-ups appear here once, even if Stripe retries its notification.</p>
+                <p class="api-description">Metered browser usage and completed top-ups appear here once.</p>
               </div>
             </div>
             <div class="panel-body">
@@ -1173,85 +1258,20 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       </div>
     </form>
   </dialog>
-  <dialog class="settings-dialog" id="browserSettingsDialog">
-    <div class="dialog-body">
-      <div class="settings-dialog-head">
-        <div class="settings-dialog-title">
-          <span class="settings-dialog-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10m4 0h2M4 17h2m4 0h10M14 4v6M6 14v6"/></svg>
-          </span>
-          <div>
-            <h2 id="browserSettingsTitle">Browser settings</h2>
-            <p id="browserSettingsMeta">Select a browser to manage it.</p>
-          </div>
-        </div>
-        <button class="secondary settings-dialog-close" type="button" id="closeBrowserSettingsBtn" aria-label="Close browser settings">×</button>
+  <dialog id="renameBrowserDialog">
+    <form class="dialog-body" id="browserNameForm">
+      <h2>Rename browser</h2>
+      <p>Use the name you recognize in the dashboard and destructive confirmations.</p>
+      <label class="form-field" for="browserNameInput">
+        <span class="form-label">Browser name</span>
+        <input id="browserNameInput" aria-label="Browser name" maxlength="120" placeholder="Research, Personal, Client work…">
+      </label>
+      <div class="message" id="browserNameMessage" aria-live="polite"></div>
+      <div class="dialog-actions">
+        <button class="secondary" type="button" id="cancelRenameBrowserBtn">Cancel</button>
+        <button type="submit" id="saveBrowserNameBtn">Save name</button>
       </div>
-      <div class="settings-sections">
-        <form class="settings-section" id="browserNameForm">
-          <div class="settings-section-head">
-            <span class="settings-section-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18M8 6.5h.01M12 6.5h.01M16 6.5h.01"/></svg>
-            </span>
-            <div>
-              <span class="settings-section-kicker">Identity</span>
-              <h3>Browser name</h3>
-            </div>
-          </div>
-          <p class="settings-section-copy">Use the name you recognize in the dashboard and destructive confirmations.</p>
-          <label class="form-field" for="browserNameInput">
-            <span class="form-label">Name</span>
-            <input id="browserNameInput" aria-label="Browser name" maxlength="120" placeholder="Research, Personal, Client work…">
-          </label>
-          <div class="message" id="browserNameMessage" aria-live="polite"></div>
-          <div class="dialog-actions">
-            <button type="submit" id="saveBrowserNameBtn">Save name</button>
-          </div>
-        </form>
-        <form class="settings-section" id="proxyForm">
-          <div class="settings-section-head">
-            <span class="settings-section-icon network" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
-            </span>
-            <div>
-              <span class="settings-section-kicker">Network route</span>
-              <h3>Proxy</h3>
-            </div>
-          </div>
-          <p class="settings-section-copy" id="proxyAvailability">Switch the browser between direct traffic and the configured proxy route.</p>
-          <div class="proxy-route-card" id="proxyRouteCard">
-            <div class="proxy-route-summary">
-              <div>
-                <span class="proxy-route-label">Current route</span>
-                <strong class="proxy-current" id="proxyCurrent">Loading current route…</strong>
-              </div>
-              <span class="proxy-state-badge" id="proxyStateBadge">Checking</span>
-            </div>
-            <div class="proxy-route-details">
-              <div class="proxy-route-detail">
-                <span>Proxy endpoint</span>
-                <code id="proxyEndpoint">Checking…</code>
-              </div>
-              <div class="proxy-route-detail">
-                <span>Verified exit IP</span>
-                <code id="proxyExitIp">Checking…</code>
-              </div>
-            </div>
-          </div>
-          <fieldset class="settings-fieldset" id="proxyFieldsGroup">
-            <label class="proxy-toggle" for="proxyEnabled">
-              <input id="proxyEnabled" type="checkbox">
-              <span>Use proxy</span>
-            </label>
-          </fieldset>
-          <span class="field-hint">Credentials are managed by the server environment.</span>
-          <div class="message" id="proxyMessage" aria-live="polite"></div>
-          <div class="dialog-actions">
-            <button type="submit" id="saveProxyBtn">Save route</button>
-          </div>
-        </form>
-      </div>
-    </div>
+    </form>
   </dialog>
   <dialog class="downloads-dialog" id="downloadsDialog">
     <div class="dialog-body">
@@ -1285,13 +1305,13 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
   </dialog>
   <dialog id="deleteDialog">
     <div class="dialog-body">
-      <h2>Delete this browser?</h2>
+      <h2>Destroy this browser?</h2>
       <p id="deleteDialogDescription">This permanently destroys the cloud browser and cannot be undone.</p>
       <p>Type <span class="confirm-phrase" id="deleteConfirmName">the browser name</span> to continue.</p>
-      <input id="deleteConfirmInput" aria-label="Type the browser name to delete" autocomplete="off" placeholder="Browser name">
+      <input id="deleteConfirmInput" aria-label="Type the browser name to destroy" autocomplete="off" placeholder="Browser name">
       <div class="dialog-actions">
         <button class="secondary" type="button" id="cancelDeleteBtn">Cancel</button>
-        <button class="danger" type="button" id="confirmDeleteBtn" disabled>Delete browser</button>
+        <button class="danger" type="button" id="confirmDeleteBtn" disabled>Destroy browser</button>
       </div>
     </div>
   </dialog>
@@ -1321,17 +1341,22 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const refreshBtn = document.getElementById('refreshBtn');
     const connectBtn = document.getElementById('connectBtn');
     const connectBtnLabel = document.getElementById('connectBtnLabel');
-    const browserSettingsBtn = document.getElementById('browserSettingsBtn');
+    const renameSessionBtn = document.getElementById('renameSessionBtn');
+    const browserActionsMenu = document.getElementById('browserActionsMenu');
     const toolbarProxyDot = document.getElementById('toolbarProxyDot');
+    const proxyMenuBtn = document.getElementById('proxyMenuBtn');
+    const proxyMenuBtnLabel = document.getElementById('proxyMenuBtnLabel');
     const downloadsBtn = document.getElementById('downloadsBtn');
     const downloadsDialogDescription = document.getElementById('downloadsDialogDescription');
     const downloadsDialogNote = document.getElementById('downloadsDialogNote');
     const lifecycleBtn = document.getElementById('lifecycleBtn');
     const lifecycleBtnLabel = document.getElementById('lifecycleBtnLabel');
-    const resetSessionBtn = document.getElementById('resetSessionBtn');
-    const resetSessionBtnLabel = document.getElementById('resetSessionBtnLabel');
-    const deleteSessionBtn = document.getElementById('deleteSessionBtn');
-    const deleteSessionBtnLabel = document.getElementById('deleteSessionBtnLabel');
+    const lifecyclePauseIcon = document.getElementById('lifecyclePauseIcon');
+    const lifecycleResumeIcon = document.getElementById('lifecycleResumeIcon');
+    const restartSessionBtn = document.getElementById('restartSessionBtn');
+    const restartSessionBtnLabel = document.getElementById('restartSessionBtnLabel');
+    const destroySessionBtn = document.getElementById('destroySessionBtn');
+    const destroySessionBtnLabel = document.getElementById('destroySessionBtnLabel');
     const viewerTitle = document.getElementById('viewerTitle');
     const viewerEmpty = document.getElementById('viewerEmpty');
     const viewerStateVisual = document.getElementById('viewerStateVisual');
@@ -1357,6 +1382,12 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const billingHours = document.getElementById('billingHours');
     const billingRate = document.getElementById('billingRate');
     const topUpGrid = document.getElementById('topUpGrid');
+    const autoTopUpForm = document.getElementById('autoTopUpForm');
+    const autoTopUpEnabled = document.getElementById('autoTopUpEnabled');
+    const autoTopUpThreshold = document.getElementById('autoTopUpThreshold');
+    const autoTopUpAmount = document.getElementById('autoTopUpAmount');
+    const saveAutoTopUpBtn = document.getElementById('saveAutoTopUpBtn');
+    const autoTopUpStatus = document.getElementById('autoTopUpStatus');
     const billingMessage = document.getElementById('billingMessage');
     const billingHistory = document.getElementById('billingHistory');
     const viewLinks = [...document.querySelectorAll('[data-view-target]')];
@@ -1391,25 +1422,12 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const accountMessage = document.getElementById('accountMessage');
     const cancelAccountBtn = document.getElementById('cancelAccountBtn');
     const saveAccountBtn = document.getElementById('saveAccountBtn');
-    const browserSettingsDialog = document.getElementById('browserSettingsDialog');
-    const browserSettingsTitle = document.getElementById('browserSettingsTitle');
-    const browserSettingsMeta = document.getElementById('browserSettingsMeta');
-    const closeBrowserSettingsBtn = document.getElementById('closeBrowserSettingsBtn');
+    const renameBrowserDialog = document.getElementById('renameBrowserDialog');
+    const cancelRenameBrowserBtn = document.getElementById('cancelRenameBrowserBtn');
     const browserNameForm = document.getElementById('browserNameForm');
     const browserNameInput = document.getElementById('browserNameInput');
     const browserNameMessage = document.getElementById('browserNameMessage');
     const saveBrowserNameBtn = document.getElementById('saveBrowserNameBtn');
-    const proxyForm = document.getElementById('proxyForm');
-    const proxyRouteCard = document.getElementById('proxyRouteCard');
-    const proxyCurrent = document.getElementById('proxyCurrent');
-    const proxyStateBadge = document.getElementById('proxyStateBadge');
-    const proxyEndpoint = document.getElementById('proxyEndpoint');
-    const proxyExitIp = document.getElementById('proxyExitIp');
-    const proxyAvailability = document.getElementById('proxyAvailability');
-    const proxyFieldsGroup = document.getElementById('proxyFieldsGroup');
-    const proxyEnabled = document.getElementById('proxyEnabled');
-    const proxyMessage = document.getElementById('proxyMessage');
-    const saveProxyBtn = document.getElementById('saveProxyBtn');
     const downloadsDialog = document.getElementById('downloadsDialog');
     const downloadsTicket = document.getElementById('downloadsTicket');
     const downloadsUrl = document.getElementById('downloadsUrl');
@@ -1449,7 +1467,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       logsStatusFilter: 'all',
       showDestroyed: false,
       deleteTargetId: null,
-      settingsTargetId: null,
+      renameTargetId: null,
       downloadsTargetId: null,
       codeClient: 'rest',
       creatingSession: false,
@@ -2599,12 +2617,17 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
 
       connectBtnLabel.textContent = isConnected ? 'Disconnect' : (isConnecting ? 'Connecting…' : 'Connect');
       connectBtn.disabled = isConnecting || (!isConnected && !canConnect);
-      browserSettingsBtn.disabled = !session || session.status === 'destroyed';
+      renameSessionBtn.disabled = !session || session.status === 'destroyed';
+      const menuDisabled = !session || session.status === 'destroyed';
+      browserActionsMenu.classList.toggle('is-disabled', menuDisabled);
+      browserActionsMenu.querySelector('summary').setAttribute('aria-disabled', String(menuDisabled));
+      if (menuDisabled) browserActionsMenu.open = false;
       toolbarProxyDot.classList.toggle('is-enabled', session?.proxy?.enabled === true);
       toolbarProxyDot.classList.toggle('is-unavailable', !!session && session.droplet_connected !== true);
-      browserSettingsBtn.title = session
-        ? 'Settings · ' + proxyStatusText(session.proxy)
-        : 'Browser settings';
+      proxyMenuBtnLabel.textContent = session?.proxy?.enabled ? 'Disable proxy…' : 'Enable proxy…';
+      proxyMenuBtn.disabled = !session
+        || session.status !== 'ready'
+        || session.droplet_connected !== true;
       downloadsBtn.disabled = !session
         || !['ready', 'paused'].includes(session.status)
         || (session.status === 'paused' && !sharedDownloadsEnabled);
@@ -2617,15 +2640,17 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
             : ['resuming', 'provisioning'].includes(session?.status)
               ? 'Starting…'
               : 'Pause';
+      lifecyclePauseIcon.hidden = session?.status === 'paused';
+      lifecycleResumeIcon.hidden = session?.status !== 'paused';
       lifecycleBtn.disabled = !canPause && !canResume;
       const canReset = !!session
         && session.profile_mode !== 'ephemeral'
         && !!session.droplet_id
         && ['ready', 'provisioning', 'failed'].includes(session.status);
-      resetSessionBtnLabel.textContent = session && resettingSessionIds.has(session.id) ? 'Resetting…' : 'Reset';
-      resetSessionBtn.disabled = !canReset || resettingSessionIds.has(session?.id);
-      deleteSessionBtnLabel.textContent = session && !session.volume ? 'Stop' : 'Delete';
-      deleteSessionBtn.disabled = !session || session.status === 'destroyed';
+      restartSessionBtnLabel.textContent = session && resettingSessionIds.has(session.id) ? 'Restarting…' : 'Restart';
+      restartSessionBtn.disabled = !canReset || resettingSessionIds.has(session?.id);
+      destroySessionBtnLabel.textContent = 'Destroy';
+      destroySessionBtn.disabled = !session || session.status === 'destroyed';
       viewerTitle.textContent = session ? browserName(session) + ' · ' + session.status : 'Browser preview';
 
       viewerConnectBtn.style.display = 'none';
@@ -2672,7 +2697,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           viewerConnectBtn.style.display = '';
         } else if (session.status === 'failed') {
           viewerStateTitle.textContent = 'Browser setup failed';
-          viewerStateDescription.textContent = 'Delete this browser and create a new one to try again.';
+          viewerStateDescription.textContent = 'Destroy this browser and create a new one to try again.';
         } else if (session.status === 'destroyed') {
           viewerStateTitle.textContent = 'Browser unavailable';
           viewerStateDescription.textContent = session.end_reason || 'This browser has been destroyed.';
@@ -2702,67 +2727,24 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       return next;
     }
 
-    function settingsTarget() {
-      return state.sessions.find(item => item.id === state.settingsTargetId) || null;
+    function renameTarget() {
+      return state.sessions.find(item => item.id === state.renameTargetId) || null;
     }
 
-    function clearProxyInputs() {
-      proxyEnabled.checked = false;
-    }
-
-    function updateProxyPresentation(proxy, available = true) {
-      const enabled = available && proxy?.enabled === true;
-      proxyRouteCard.classList.toggle('is-enabled', enabled);
-      proxyRouteCard.classList.toggle('is-unavailable', !available);
-      proxyCurrent.textContent = !available
-        ? 'Browser connection unavailable'
-        : enabled ? 'Proxy' : 'Direct connection';
-      proxyStateBadge.textContent = !available ? 'Offline' : enabled ? 'Enabled' : 'Direct';
-      proxyEndpoint.textContent = !available
-        ? 'Available when connected'
-        : enabled ? (proxy?.endpoint || 'Configured by server') : 'Not in use';
-      proxyExitIp.textContent = !available
-        ? 'Unavailable'
-        : (proxy?.exit_ip || (enabled ? 'Awaiting verification' : 'Browser public IP'));
-    }
-
-    async function openBrowserSettings() {
+    function openRenameBrowser() {
       const session = selectedSession();
       if (!session || session.status === 'destroyed') return;
-      const proxyAvailable = session.droplet_connected === true;
-      state.settingsTargetId = session.id;
-      browserSettingsTitle.textContent = browserName(session) + ' settings';
-      browserSettingsMeta.textContent = session.id + ' · ' + session.status;
+      state.renameTargetId = session.id;
       browserNameInput.value = session.display_name || '';
-      proxyEnabled.checked = session.proxy?.enabled === true;
-      proxyFieldsGroup.disabled = !proxyAvailable;
-      saveProxyBtn.disabled = !proxyAvailable;
-      proxyAvailability.textContent = proxyAvailable
-        ? 'Switching routes closes existing browser connections while the new exit is verified.'
-        : 'Network routing becomes available when this browser is running and connected.';
-      updateProxyPresentation(session.proxy, proxyAvailable);
       showMessage(browserNameMessage, '');
-      showMessage(proxyMessage, '');
-      browserSettingsDialog.showModal();
+      renameBrowserDialog.showModal();
       browserNameInput.focus();
       browserNameInput.select();
-      if (!proxyAvailable) return;
-      try {
-        const body = await api('/api/browser-sessions/' + encodeURIComponent(session.id) + '/proxy');
-        if (state.settingsTargetId === session.id && browserSettingsDialog.open) {
-          updateProxyPresentation(body.proxy);
-          proxyEnabled.checked = body.proxy?.enabled === true;
-        }
-      } catch (error) {
-        if (state.settingsTargetId === session.id && browserSettingsDialog.open) {
-          showMessage(proxyMessage, error.message, true);
-        }
-      }
     }
 
     async function saveBrowserName(event) {
       event.preventDefault();
-      const session = settingsTarget();
+      const session = renameTarget();
       if (!session) return;
       saveBrowserNameBtn.disabled = true;
       try {
@@ -2771,10 +2753,9 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           body: { display_name: browserNameInput.value.trim() || null },
         });
         state.sessions = state.sessions.map(item => item.id === body.browser_session.id ? body.browser_session : item);
-        browserSettingsTitle.textContent = browserName(body.browser_session) + ' settings';
         renderSessions();
-        showMessage(browserNameMessage, 'Name saved.');
         showMessage(sessionMessage, 'Browser name saved.');
+        renameBrowserDialog.close();
       } catch (e) {
         showMessage(browserNameMessage, e.message, true);
       } finally {
@@ -2824,17 +2805,18 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       return route + (proxy?.exit_ip ? ' · exit ' + proxy.exit_ip : '');
     }
 
-    async function saveBrowserProxy(event) {
-      event.preventDefault();
-      const session = settingsTarget();
+    async function toggleBrowserProxy() {
+      const session = selectedSession();
       if (!session || session.droplet_connected !== true) return;
       const sessionId = session.id;
-      saveProxyBtn.disabled = true;
-      showMessage(proxyMessage, 'Closing old connections and verifying the new exit…');
+      const enable = session.proxy?.enabled !== true;
+      proxyMenuBtn.disabled = true;
+      browserActionsMenu.open = false;
+      showMessage(sessionMessage, (enable ? 'Enabling' : 'Disabling') + ' proxy and verifying the new route…');
       try {
         const body = await api('/api/browser-sessions/' + encodeURIComponent(sessionId) + '/proxy', {
           method: 'PATCH',
-          body: { proxy_enabled: proxyEnabled.checked },
+          body: { proxy_enabled: enable },
         });
         state.sessions = state.sessions.map(session => session.id === sessionId ? {
           ...session,
@@ -2845,15 +2827,12 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
             updated_at: body.proxy.updated_at || null,
           },
         } : session);
-        updateProxyPresentation(body.proxy);
-        proxyEnabled.checked = body.proxy.enabled === true;
         renderSessions();
-        showMessage(proxyMessage, 'Network route saved.');
         showMessage(sessionMessage, 'Network route updated: ' + proxyStatusText(body.proxy) + '.');
       } catch (error) {
-        showMessage(proxyMessage, error.message, true);
+        showMessage(sessionMessage, error.message, true);
       } finally {
-        saveProxyBtn.disabled = false;
+        renderViewer();
       }
     }
 
@@ -2922,14 +2901,14 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       }
     }
 
-    async function resetSession() {
+    async function restartBrowserSession() {
       const session = selectedSession();
       if (!session
           || !session.droplet_id
           || !['ready', 'provisioning', 'failed'].includes(session.status)
           || resettingSessionIds.has(session.id)) return;
       const confirmed = window.confirm(
-        'Force-restart “' + browserName(session) + '”? This power-cycles its Droplet and any browser task in progress will fail.'
+        'Restart “' + browserName(session) + '”? This power-cycles its Droplet and any browser task in progress will fail.'
       );
       if (!confirmed) return;
       resettingSessionIds.add(session.id);
@@ -2943,7 +2922,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         runtime_ready: false,
       } : item);
       renderSessions();
-      showMessage(sessionMessage, 'Force-restarting the Droplet…');
+      showMessage(sessionMessage, 'Restarting the Droplet…');
       try {
         const body = await api('/api/browser-sessions/' + encodeURIComponent(session.id) + '/reset', {
           method: 'POST',
@@ -2951,7 +2930,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         });
         state.sessions = state.sessions.map(item => item.id === session.id ? body.browser_session : item);
         renderSessions();
-        showMessage(sessionMessage, 'Droplet force-restarted. The browser is starting again.');
+        showMessage(sessionMessage, 'Droplet restarted. The browser is starting again.');
       } catch (error) {
         showMessage(sessionMessage, error.message, true);
         await refreshOne(session.id).catch(() => {});
@@ -3033,10 +3012,10 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         ? 'This permanently destroys “' + confirmationName + '” and its private 2 GB Chrome session disk.'
           + (sharedDownloadsEnabled ? ' Shared Downloads remain in your account.' : ' Local Downloads will also be lost.')
         : 'This stops “' + confirmationName + '” and permanently discards its Chrome state and local Downloads.';
-      confirmDeleteBtn.textContent = session.volume ? 'Delete browser' : 'Stop browser';
+      confirmDeleteBtn.textContent = 'Destroy browser';
       deleteConfirmName.textContent = confirmationName;
       deleteConfirmInput.placeholder = confirmationName;
-      deleteConfirmInput.setAttribute('aria-label', 'Type ' + confirmationName + ' to delete');
+      deleteConfirmInput.setAttribute('aria-label', 'Type ' + confirmationName + ' to destroy');
       deleteConfirmInput.value = '';
       confirmDeleteBtn.disabled = true;
       deleteDialog.showModal();
@@ -3051,9 +3030,9 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     async function deleteSession() {
       const session = state.sessions.find(item => item.id === state.deleteTargetId);
       if (!session || !deleteConfirmationMatches()) return;
-      deleteSessionBtn.disabled = true;
+      destroySessionBtn.disabled = true;
       confirmDeleteBtn.disabled = true;
-      showMessage(sessionMessage, 'Deleting session...');
+      showMessage(sessionMessage, 'Destroying browser…');
       try {
         await api('/api/browser-sessions/' + encodeURIComponent(session.id), { method: 'DELETE' });
         deleteDialog.close();
@@ -3064,17 +3043,29 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           state.selectedId = null;
         }
         await loadSessions();
-        showMessage(sessionMessage, 'Session deleted.');
+        showMessage(sessionMessage, 'Browser destroyed.');
       } catch (e) {
         showMessage(sessionMessage, e.message, true);
       } finally {
-        deleteSessionBtn.disabled = false;
+        destroySessionBtn.disabled = false;
         confirmDeleteBtn.disabled = !deleteConfirmationMatches();
       }
     }
 
     function formatCredit(cents) {
-      return '$' + (Number(cents || 0) / 100).toFixed(2);
+      const amount = Number(cents || 0) / 100;
+      return amount < 0 ? '-$' + Math.abs(amount).toFixed(2) : '$' + amount.toFixed(2);
+    }
+
+    function syncAutoTopUpOptions() {
+      const threshold = Number(autoTopUpThreshold.value);
+      for (const option of autoTopUpAmount.options) {
+        option.disabled = Number(option.value) <= threshold;
+      }
+      if (autoTopUpAmount.selectedOptions[0]?.disabled) {
+        const next = [...autoTopUpAmount.options].find(option => !option.disabled);
+        if (next) autoTopUpAmount.value = next.value;
+      }
     }
 
     function renderBilling() {
@@ -3088,7 +3079,35 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       billingRate.textContent = formatCredit(billing.browser_hour_cents) + ' / hour';
       billingHours.textContent = unlimited
         ? 'Credit checks are bypassed for this account.'
-        : 'About ' + Math.floor(Number(account.credit_cents || 0) / billing.browser_hour_cents) + ' active browser hours available.';
+        : 'About ' + Math.max(0, Math.floor(Number(account.credit_cents || 0) / billing.browser_hour_cents)) + ' active browser hours available.';
+      autoTopUpEnabled.checked = account.auto_top_up_enabled === true;
+      autoTopUpThreshold.value = String(account.auto_top_up_threshold_cents || 500);
+      autoTopUpAmount.value = String(account.auto_top_up_amount_cents || 2500);
+      syncAutoTopUpOptions();
+      autoTopUpEnabled.disabled = unlimited || !billing.stripe_configured;
+      autoTopUpThreshold.disabled = unlimited || !billing.stripe_configured;
+      autoTopUpAmount.disabled = unlimited || !billing.stripe_configured;
+      saveAutoTopUpBtn.disabled = unlimited
+        || !billing.stripe_configured
+        || (!account.payment_method_saved && !account.auto_top_up_enabled);
+      autoTopUpStatus.className = 'auto-topup-status';
+      if (unlimited) {
+        autoTopUpStatus.textContent = 'Unlimited accounts never need an automatic payment.';
+      } else if (!billing.stripe_configured) {
+        autoTopUpStatus.textContent = 'Preview only until Stripe is configured.';
+      } else if (account.auto_top_up_status === 'failed') {
+        autoTopUpStatus.classList.add('is-error');
+        autoTopUpStatus.textContent = account.auto_top_up_last_error
+          || 'The last automatic payment failed. Update the saved card by enabling auto top-up with a new credit purchase.';
+      } else if (account.auto_top_up_enabled) {
+        autoTopUpStatus.classList.add('is-on');
+        autoTopUpStatus.textContent = 'On · adds ' + formatCredit(account.auto_top_up_amount_cents)
+          + ' at ' + formatCredit(account.auto_top_up_threshold_cents) + '.';
+      } else if (account.payment_method_saved) {
+        autoTopUpStatus.textContent = 'A saved payment method is ready. Enable and save when you want automatic credit.';
+      } else {
+        autoTopUpStatus.textContent = 'Enable this, then choose a credit pack. Stripe will save that card for future top-ups.';
+      }
 
       topUpGrid.innerHTML = '';
       for (const pack of billing.credit_packages) {
@@ -3118,7 +3137,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         empty.className = 'billing-history-empty';
         empty.textContent = unlimited
           ? 'No credit ledger is needed for this unlimited account.'
-          : 'No credit top-ups yet. Your first completed Stripe payment will appear here.';
+          : 'No credit activity yet. Browser usage and completed Stripe payments will appear here.';
         billingHistory.appendChild(empty);
         return;
       }
@@ -3133,7 +3152,10 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         details.append(description, time);
         const amount = document.createElement('span');
         amount.className = 'billing-transaction-amount';
-        amount.textContent = (transaction.amount_cents >= 0 ? '+' : '') + formatCredit(transaction.amount_cents);
+        amount.classList.toggle('is-debit', transaction.amount_cents < 0);
+        amount.textContent = transaction.amount_cents < 0
+          ? '-' + formatCredit(Math.abs(transaction.amount_cents))
+          : '+' + formatCredit(transaction.amount_cents);
         row.append(details, amount);
         billingHistory.appendChild(row);
       }
@@ -3151,12 +3173,50 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       try {
         const body = await api('/api/billing/checkout-session', {
           method: 'POST',
-          body: { amount_cents: amountCents },
+          body: {
+            amount_cents: amountCents,
+            enable_auto_top_up: autoTopUpEnabled.checked,
+            auto_top_up_threshold_cents: Number(autoTopUpThreshold.value),
+            auto_top_up_amount_cents: Number(autoTopUpAmount.value),
+          },
         });
         location.assign(body.url);
       } catch (error) {
         showMessage(billingMessage, error.message, true);
         button.disabled = false;
+      }
+    }
+
+    async function saveAutoTopUp(event) {
+      event.preventDefault();
+      const account = state.billing?.account;
+      if (!account || account.unlimited) return;
+      if (autoTopUpEnabled.checked && !account.payment_method_saved) {
+        showMessage(
+          billingMessage,
+          'Choose a credit pack to save its card and enable automatic top-up.',
+          true
+        );
+        return;
+      }
+      saveAutoTopUpBtn.disabled = true;
+      try {
+        const body = await api('/api/billing/auto-top-up', {
+          method: 'PATCH',
+          body: {
+            enabled: autoTopUpEnabled.checked,
+            auto_top_up_threshold_cents: Number(autoTopUpThreshold.value),
+            auto_top_up_amount_cents: Number(autoTopUpAmount.value),
+          },
+        });
+        state.billing.account = body.account;
+        renderBilling();
+        showMessage(billingMessage, autoTopUpEnabled.checked
+          ? 'Automatic top-up enabled.'
+          : 'Automatic top-up disabled.');
+      } catch (error) {
+        showMessage(billingMessage, error.message, true);
+        saveAutoTopUpBtn.disabled = false;
       }
     }
 
@@ -3282,11 +3342,16 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     });
     document.addEventListener('click', event => {
       if (accountMenu.open && !accountMenu.contains(event.target)) accountMenu.removeAttribute('open');
+      if (browserActionsMenu.open && !browserActionsMenu.contains(event.target)) browserActionsMenu.open = false;
     });
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape' && accountMenu.open) {
         accountMenu.removeAttribute('open');
         accountMenu.querySelector('summary').focus();
+      }
+      if (event.key === 'Escape' && browserActionsMenu.open) {
+        browserActionsMenu.open = false;
+        browserActionsMenu.querySelector('summary').focus();
       }
     });
     connectBtn.addEventListener('click', () => {
@@ -3294,21 +3359,21 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       if (session && viewerConnections.has(session.id)) disconnectNoVnc();
       else openNoVnc();
     });
-    browserSettingsBtn.addEventListener('click', openBrowserSettings);
-    browserNameForm.addEventListener('submit', saveBrowserName);
-    proxyForm.addEventListener('submit', saveBrowserProxy);
-    closeBrowserSettingsBtn.addEventListener('click', () => browserSettingsDialog.close());
-    browserSettingsDialog.addEventListener('close', () => {
-      state.settingsTargetId = null;
-      browserNameInput.value = '';
-      clearProxyInputs();
-      proxyFieldsGroup.disabled = false;
-      showMessage(browserNameMessage, '');
-      showMessage(proxyMessage, '');
+    browserActionsMenu.querySelector('summary').addEventListener('click', event => {
+      if (browserActionsMenu.classList.contains('is-disabled')) event.preventDefault();
     });
+    renameSessionBtn.addEventListener('click', openRenameBrowser);
+    browserNameForm.addEventListener('submit', saveBrowserName);
+    cancelRenameBrowserBtn.addEventListener('click', () => renameBrowserDialog.close());
+    renameBrowserDialog.addEventListener('close', () => {
+      state.renameTargetId = null;
+      browserNameInput.value = '';
+      showMessage(browserNameMessage, '');
+    });
+    proxyMenuBtn.addEventListener('click', toggleBrowserProxy);
     downloadsBtn.addEventListener('click', openDownloadsDialog);
     lifecycleBtn.addEventListener('click', toggleBrowserLifecycle);
-    resetSessionBtn.addEventListener('click', resetSession);
+    restartSessionBtn.addEventListener('click', restartBrowserSession);
     closeDownloadsBtn.addEventListener('click', () => downloadsDialog.close());
     copyDownloadsUrlBtn.addEventListener('click', () => copyDownloadsValue(downloadsUrl, copyDownloadsUrlBtn));
     copyDownloadsUsernameBtn.addEventListener('click', () => copyDownloadsValue(downloadsUsername, copyDownloadsUsernameBtn));
@@ -3323,7 +3388,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       downloadsTicket.setAttribute('aria-busy', 'false');
     });
     viewerConnectBtn.addEventListener('click', openNoVnc);
-    deleteSessionBtn.addEventListener('click', openDeleteDialog);
+    destroySessionBtn.addEventListener('click', openDeleteDialog);
     deleteConfirmInput.addEventListener('input', () => {
       confirmDeleteBtn.disabled = !deleteConfirmationMatches();
     });
@@ -3334,10 +3399,12 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       deleteConfirmInput.value = '';
       deleteConfirmName.textContent = 'the browser name';
       deleteConfirmInput.placeholder = 'Browser name';
-      deleteConfirmInput.setAttribute('aria-label', 'Type the browser name to delete');
-      confirmDeleteBtn.textContent = 'Delete browser';
+      deleteConfirmInput.setAttribute('aria-label', 'Type the browser name to destroy');
+      confirmDeleteBtn.textContent = 'Destroy browser';
       confirmDeleteBtn.disabled = true;
     });
+    autoTopUpForm.addEventListener('submit', saveAutoTopUp);
+    autoTopUpThreshold.addEventListener('change', syncAutoTopUpOptions);
     createApiKeyBtn.addEventListener('click', createApiKey);
     for (const link of viewLinks) {
       link.addEventListener('click', event => {
@@ -3522,6 +3589,34 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
     });
   }
 
+  function publicBillingAccount(account) {
+    return {
+      credit_cents: Number(account.credit_cents || 0),
+      unlimited: account.unlimited === true,
+      auto_top_up_enabled: account.auto_top_up_enabled === true,
+      auto_top_up_threshold_cents: Number(account.auto_top_up_threshold_cents || 500),
+      auto_top_up_amount_cents: Number(account.auto_top_up_amount_cents || 2500),
+      auto_top_up_status: account.auto_top_up_status || 'disabled',
+      auto_top_up_last_error: account.auto_top_up_last_error || '',
+      payment_method_saved: Boolean(account.stripe_customer_id && account.stripe_payment_method_id),
+    };
+  }
+
+  function normalizeAutoTopUpSettings(body) {
+    const thresholdCents = Number(body.auto_top_up_threshold_cents);
+    const amountCents = Number(body.auto_top_up_amount_cents);
+    if (!AUTO_TOP_UP_THRESHOLDS.has(thresholdCents)) {
+      throw Object.assign(new Error('Choose an available automatic top-up threshold.'), { status: 400 });
+    }
+    if (!billingPackages.has(amountCents)) {
+      throw Object.assign(new Error('Choose an available automatic top-up amount.'), { status: 400 });
+    }
+    if (thresholdCents >= amountCents) {
+      throw Object.assign(new Error('Automatic top-up amount must be greater than its trigger balance.'), { status: 400 });
+    }
+    return { thresholdCents, amountCents };
+  }
+
   async function applyPaidStripeCheckout(checkoutSession) {
     if (!checkoutSession || checkoutSession.payment_status !== 'paid') {
       return { applied: false, reason: 'not_paid' };
@@ -3540,7 +3635,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       throw Object.assign(new Error('Stripe checkout metadata did not match a WebBrain credit pack.'), { status: 400 });
     }
     await ensureBillingAccount(user);
-    return await store.applyBillingCredit({
+    const credited = await store.applyBillingCredit({
       id: randomId('btx'),
       user_id: user.id,
       amount_cents: amountCents,
@@ -3550,6 +3645,66 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       description: `$${(amountCents / 100).toFixed(2)} Stripe top-up`,
       created_at: nowIso(),
     });
+    if (checkoutSession.metadata?.auto_top_up_enabled === 'true') {
+      const { thresholdCents, amountCents: autoTopUpAmountCents } = normalizeAutoTopUpSettings({
+        auto_top_up_threshold_cents: checkoutSession.metadata.auto_top_up_threshold_cents,
+        auto_top_up_amount_cents: checkoutSession.metadata.auto_top_up_amount_cents,
+      });
+      const customerId = String(checkoutSession.customer || '');
+      const paymentIntentId = String(checkoutSession.payment_intent || '');
+      if (!customerId.startsWith('cus_') || !paymentIntentId.startsWith('pi_')) {
+        throw Object.assign(new Error('Stripe did not return a reusable payment method.'), { status: 400 });
+      }
+      const paymentIntent = await retrieveStripePaymentIntent(paymentIntentId, {
+        secretKey: config.billing?.stripe?.secretKey,
+      });
+      const paymentMethodId = String(paymentIntent.payment_method || '');
+      if (!paymentMethodId.startsWith('pm_')) {
+        throw Object.assign(new Error('Stripe did not save a reusable payment method.'), { status: 400 });
+      }
+      await store.updateBillingAutoTopUp(user.id, {
+        stripe_customer_id: customerId,
+        stripe_payment_method_id: paymentMethodId,
+        auto_top_up_enabled: true,
+        auto_top_up_threshold_cents: thresholdCents,
+        auto_top_up_amount_cents: autoTopUpAmountCents,
+        auto_top_up_status: 'idle',
+        auto_top_up_attempt_id: null,
+        auto_top_up_next_attempt_at: null,
+        auto_top_up_last_error: null,
+        updated_at: nowIso(),
+      });
+    }
+    return credited;
+  }
+
+  async function requireAvailableCredit(user) {
+    let account = await ensureBillingAccount(user);
+    if (config.billing?.enforceCredit === false) return account;
+    if (account.unlimited || Number(account.credit_cents) > 0) return account;
+    if (account.auto_top_up_enabled) {
+      await attemptAutoTopUp({ store, config, account });
+      account = await store.getBillingAccount(user.id);
+    }
+    if (Number(account?.credit_cents || 0) <= 0) {
+      throw Object.assign(
+        new Error('Add credit before starting a browser. Automatic top-up could not restore the balance.'),
+        { status: 402 }
+      );
+    }
+    return account;
+  }
+
+  async function meterBrowserSessionNow(session) {
+    if (!session || session.profile_mode === 'ephemeral' || !session.droplet_id) return null;
+    const metered = await store.meterBrowserSessionUsage(session.id, {
+      metered_at: nowIso(),
+      rate_cents: config.billing?.browserHourCents || 10,
+    });
+    if (metered.account?.auto_top_up_enabled) {
+      await attemptAutoTopUp({ store, config, account: metered.account });
+    }
+    return metered;
   }
 
   async function ownedBrowserSession(req, res) {
@@ -3874,10 +4029,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       const transactions = await store.listBillingTransactions(req.auth.user.id, { limit: 20 });
       const browserHourCents = config.billing?.browserHourCents || 10;
       res.json({
-        account: {
-          credit_cents: Number(account.credit_cents || 0),
-          unlimited: account.unlimited === true,
-        },
+        account: publicBillingAccount(account),
         browser_hour_cents: browserHourCents,
         stripe_configured: Boolean(config.billing?.stripe?.secretKey),
         credit_packages: DEFAULT_CREDIT_PACKAGES.map(item => ({
@@ -3910,17 +4062,63 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       if (!billingPackages.has(amountCents)) {
         return jsonError(res, 400, 'Choose one of the available credit amounts.');
       }
+      const enableAutoTopUp = req.body.enable_auto_top_up === true;
+      const autoTopUp = enableAutoTopUp ? normalizeAutoTopUpSettings(req.body) : null;
       const checkout = await createStripeCheckoutSession({
         secretKey: config.billing?.stripe?.secretKey,
         baseUrl: config.baseUrl,
         user: req.auth.user,
         amountCents,
+        customerId: account.stripe_customer_id || '',
+        saveForAutoTopUp: enableAutoTopUp,
+        autoTopUpThresholdCents: autoTopUp?.thresholdCents || 0,
+        autoTopUpAmountCents: autoTopUp?.amountCents || 0,
       });
       await audit(req, 'billing.checkout.create', 'billing_account', req.auth.user.id, {
         amount_cents: amountCents,
+        enable_auto_top_up: enableAutoTopUp,
         stripe_checkout_session_id: checkout.id,
       });
       res.status(201).json({ checkout_session_id: checkout.id, url: checkout.url });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.patch('/api/billing/auto-top-up', requireAuth, async (req, res, next) => {
+    try {
+      if (req.auth.type !== 'cookie') {
+        return jsonError(res, 403, 'Automatic top-up settings require a signed-in dashboard session');
+      }
+      const account = await ensureBillingAccount(req.auth.user);
+      if (account.unlimited) {
+        return jsonError(res, 409, 'This account has unlimited billing access and does not need automatic top-up.');
+      }
+      const enabled = req.body.enabled === true;
+      const autoTopUp = normalizeAutoTopUpSettings(req.body);
+      if (enabled && (!account.stripe_customer_id || !account.stripe_payment_method_id)) {
+        return jsonError(
+          res,
+          409,
+          'Choose a credit pack with “Save card and enable auto top-up” first.'
+        );
+      }
+      const updated = await store.updateBillingAutoTopUp(req.auth.user.id, {
+        auto_top_up_enabled: enabled,
+        auto_top_up_threshold_cents: autoTopUp.thresholdCents,
+        auto_top_up_amount_cents: autoTopUp.amountCents,
+        auto_top_up_status: enabled ? 'idle' : 'disabled',
+        auto_top_up_attempt_id: null,
+        auto_top_up_next_attempt_at: null,
+        auto_top_up_last_error: null,
+        updated_at: nowIso(),
+      });
+      await audit(req, 'billing.auto_top_up.update', 'billing_account', req.auth.user.id, {
+        enabled,
+        threshold_cents: autoTopUp.thresholdCents,
+        amount_cents: autoTopUp.amountCents,
+      });
+      res.json({ account: publicBillingAccount(updated) });
     } catch (error) {
       next(error);
     }
@@ -4051,6 +4249,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
 
   app.post('/api/browser-sessions', requireAuth, async (req, res, next) => {
     try {
+      await requireAvailableCredit(req.auth.user);
       const now = nowIso();
       const lifecycle = normalizeBrowserLifecycle(req.body.lifecycle);
       const proxyUrl = resolveBrowserProxyUrl(req.body, config);
@@ -4119,6 +4318,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
           proxy_endpoint: proxyEndpoint,
           proxy_updated_at: proxyEndpoint ? now : null,
           paused_at: null,
+          billing_metered_at: now,
           ended_at: null,
           end_reason: null,
           expires_at: expiresAt,
@@ -4195,6 +4395,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
         proxy_endpoint: proxyEndpoint,
         proxy_updated_at: proxyEndpoint ? now : null,
         paused_at: null,
+        billing_metered_at: now,
         ended_at: null,
         end_reason: null,
         expires_at: null,
@@ -4584,6 +4785,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
         return jsonError(res, 503, 'Shared Downloads storage must be configured before browsers can be paused.');
       }
       if (!['ready', 'pausing'].includes(session.status)) return jsonError(res, 409, 'Only a ready browser can be paused');
+      await meterBrowserSessionNow(session);
       if (controlChannel.isConnected(session.id)) {
         const health = await controlChannel.send(session.id, 'health', {}, 2000).catch(() => null);
         if (health?.downloads_sync_enabled !== true) {
@@ -4693,6 +4895,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       if (!session) return;
       if (session.status !== 'paused') return jsonError(res, 409, 'Only a paused browser can be resumed');
       if (!session.volume_id) return jsonError(res, 409, 'Browser profile storage is missing');
+      await requireAvailableCredit(req.auth.user);
       releaseLifecycle = claimBrowserLifecycleOperation(session.id);
       if (!releaseLifecycle) return jsonError(res, 409, 'A browser lifecycle change is already in progress');
 
@@ -4701,6 +4904,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       const resuming = await store.updateBrowserSessionIfStatus(session.id, 'paused', {
         status: 'resuming',
         paused_at: null,
+        billing_metered_at: nowIso(),
         updated_at: nowIso(),
       });
       if (!resuming) return jsonError(res, 409, 'Only a paused browser can be resumed');
@@ -4763,6 +4967,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       if (['pausing', 'resuming', 'resetting', 'restarting'].includes(session.status)) {
         return jsonError(res, 409, 'Wait for the current browser lifecycle change to finish before deleting');
       }
+      await meterBrowserSessionNow(session);
       releaseLifecycle = claimBrowserLifecycleOperation(session.id);
       if (!releaseLifecycle) return jsonError(res, 409, 'A browser lifecycle change is already in progress');
       if (isEphemeralBrowser(session)) {

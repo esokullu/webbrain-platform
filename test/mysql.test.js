@@ -48,7 +48,12 @@ test('dashboard columns are present in fresh schema and existing-database migrat
   assert.match(schema, /CREATE TABLE IF NOT EXISTS warm_droplets/);
   assert.match(schema, /CREATE TABLE IF NOT EXISTS billing_accounts/);
   assert.match(schema, /credit_cents BIGINT NOT NULL DEFAULT 0/);
+  assert.match(schema, /usage_remainder_units BIGINT NOT NULL DEFAULT 0/);
   assert.match(schema, /unlimited TINYINT\(1\) NOT NULL DEFAULT 0/);
+  assert.match(schema, /stripe_payment_method_id VARCHAR\(255\) NULL/);
+  assert.match(schema, /auto_top_up_enabled TINYINT\(1\) NOT NULL DEFAULT 0/);
+  assert.match(schema, /auto_top_up_threshold_cents BIGINT NOT NULL DEFAULT 500/);
+  assert.match(schema, /auto_top_up_amount_cents BIGINT NOT NULL DEFAULT 2500/);
   assert.match(schema, /CREATE TABLE IF NOT EXISTS billing_transactions/);
   assert.match(schema, /provider_ref VARCHAR\(255\) NULL UNIQUE/);
   assert.match(storeSource, /WHERE email = 'esokullu@gmail\.com'/);
@@ -58,6 +63,10 @@ test('dashboard columns are present in fresh schema and existing-database migrat
   );
   assert.match(storeSource, /async ensureBillingAccount\(/);
   assert.match(storeSource, /async applyBillingCredit\(/);
+  assert.match(storeSource, /async meterBrowserSessionUsage\(/);
+  assert.match(storeSource, /async beginAutoTopUpAttempt\(/);
+  assert.match(schema, /billing_metered_at DATETIME NULL/);
+  assert.match(storeSource, /ALTER TABLE browser_sessions ADD COLUMN billing_metered_at DATETIME NULL/);
   assert.match(schema, /assigned_session_id VARCHAR\(40\) NULL/);
   assert.match(schema, /INDEX idx_warm_droplets_status \(status, assigned_session_id\)/);
   assert.match(storeSource, /CREATE TABLE IF NOT EXISTS warm_droplets/);

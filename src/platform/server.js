@@ -5,6 +5,7 @@ import { createInstanceProxy } from './instance-proxy.js';
 import { createObjectDownloadsHandler } from './object-downloads.js';
 import { createSpacesObjectStore } from './spaces-object-store.js';
 import { WarmDropletPool } from './warm-pool.js';
+import { reconcileBilling } from './billing.js';
 
 export function createPlatformServer({ store, provisioner, config, downloadsHandler: injectedDownloadsHandler = null }) {
   const spacesObjectStore = injectedDownloadsHandler ? null : createSpacesObjectStore(config.downloads?.spaces);
@@ -60,6 +61,15 @@ export function createPlatformServer({ store, provisioner, config, downloadsHand
   warmPool.reconcile().catch(error => {
     console.error('[warm-pool]', error.message || error);
   });
+  const billingTimer = setInterval(() => {
+    reconcileBilling({ store, config }).catch(error => {
+      console.error('[billing-reconcile]', error.message || error);
+    });
+  }, config.billing.meterIntervalMs);
+  billingTimer.unref();
+  reconcileBilling({ store, config }).catch(error => {
+    console.error('[billing-reconcile]', error.message || error);
+  });
 
   return {
     app,
@@ -71,6 +81,7 @@ export function createPlatformServer({ store, provisioner, config, downloadsHand
     close() {
       clearInterval(cleanupTimer);
       clearInterval(warmPoolTimer);
+      clearInterval(billingTimer);
       return new Promise(resolve => {
         Promise.all([controlChannel.close(), instanceProxy.close()]).then(() => {
           spacesObjectStore?.close();
