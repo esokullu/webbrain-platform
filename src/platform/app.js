@@ -286,7 +286,15 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     input::placeholder, textarea::placeholder { color: #8a7964; }
     select { width: 100%; background-color: rgba(89,55,25,.04); }
     textarea { width: 100%; resize: vertical; }
-    .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .toolbar { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+    .action-group { display: flex; align-items: center; gap: 5px; padding: 3px; border: 1px solid var(--border); border-radius: 10px; background: rgba(89,55,25,.025); }
+    .action-group-danger { border-color: rgba(164,59,50,.18); background: rgba(164,59,50,.025); }
+    .action-button { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+    .action-button svg { width: 15px; height: 15px; flex: 0 0 15px; }
+    .action-button-primary { padding-inline: 13px; }
+    .route-dot { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: #9a8d7d; box-shadow: 0 0 0 3px rgba(107,91,71,.09); }
+    .route-dot.is-enabled { background: var(--success); box-shadow: 0 0 0 3px rgba(45,136,102,.10); }
+    .route-dot.is-unavailable { background: #b56b22; box-shadow: 0 0 0 3px rgba(181,107,34,.10); }
     .grid { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); gap: 18px; align-items: start; }
     .grid.sessions-collapsed { grid-template-columns: 44px minmax(0, 1fr); gap: 12px; }
     .workspace-column { min-width: 0; display: grid; gap: 18px; }
@@ -305,14 +313,16 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     .session-panel.is-collapsed .panel-body { display: none !important; }
     .session-panel.is-collapsed .collapse-sessions span { transform: rotate(180deg); }
     .panel-body { padding: 16px; }
-    .create-row { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: start; gap: 8px; margin-bottom: 14px; }
-    .create-actions { display: grid; grid-template-columns: minmax(0,1fr) minmax(112px,.58fr); gap: 8px; }
-    .create-actions button { min-width: 0; }
+    .create-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 14px; padding: 10px 11px; border: 1px solid rgba(91,82,232,.16); border-radius: 10px; background: rgba(91,82,232,.045); }
+    .create-prompt { min-width: 0; }
+    .create-prompt strong { display: block; font-size: 12px; }
+    .create-prompt span { display: block; margin-top: 2px; color: var(--text-dim); font-size: 10px; line-height: 1.45; }
+    .create-session-button { min-height: 39px; display: inline-flex; align-items: center; gap: 7px; padding-inline: 13px; border-radius: 9px; }
+    .create-session-button svg { width: 15px; height: 15px; }
     .proxy-toggle { grid-column: 1 / -1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px; background: rgba(89,55,25,.025); color: var(--text-dim); font-size: 11px; font-weight: 750; }
     .proxy-toggle input { width: 16px; height: 16px; accent-color: var(--accent); }
     .proxy-fields { display: grid; grid-template-columns: minmax(0,1.35fr) minmax(80px,.65fr); gap: 8px; padding: 2px 9px 9px; }
     .proxy-fields input { min-width: 0; }
-    .proxy-current { margin-top: 12px; padding: 10px 11px; border: 1px solid var(--border); border-radius: 9px; background: rgba(89,55,25,.035); color: var(--text-dim); font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
     .sessions { display: grid; gap: 8px; }
     .session { text-align: left; width: 100%; color: var(--text); background: rgba(89,55,25,.025); border: 1px solid var(--border); display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 11px 12px; box-shadow: none; }
     .session:hover { background: var(--card-hover); border-color: rgba(91,82,232,.25); }
@@ -490,6 +500,32 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     .dialog-body p { color: var(--text-dim); font-size: 13px; }
     .dialog-body input { width: 100%; }
     .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+    .dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 22px; border-bottom: 1px solid var(--border); }
+    .dialog-head-copy { display: flex; align-items: flex-start; gap: 12px; }
+    .dialog-head-icon { width: 38px; height: 38px; flex: 0 0 38px; display: grid; place-items: center; border-radius: 11px; background: rgba(91,82,232,.10); color: var(--accent); }
+    .dialog-head-icon svg { width: 19px; height: 19px; }
+    .dialog-head h2 { margin: 0; }
+    .dialog-head p { margin: 4px 0 0; }
+    .dialog-close { width: 34px; min-height: 34px; flex: 0 0 34px; padding: 0; font-size: 18px; line-height: 1; }
+    .create-browser-dialog { width: min(560px, calc(100vw - 28px)); }
+    .create-browser-dialog .dialog-body { padding: 0; }
+    .create-browser-form { display: grid; gap: 17px; padding: 20px 22px 22px; }
+    .create-browser-form .form-field input { min-height: 42px; }
+    .lifecycle-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+    .lifecycle-fieldset legend { margin-bottom: 7px; color: var(--text); font-size: 12px; font-weight: 750; }
+    .lifecycle-options { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+    .lifecycle-option { min-width: 0; display: grid; grid-template-columns: 18px minmax(0,1fr); align-items: start; gap: 9px; padding: 12px; border: 1px solid var(--border); border-radius: 11px; background: rgba(89,55,25,.025); cursor: pointer; }
+    .lifecycle-option:hover { border-color: rgba(91,82,232,.26); background: rgba(91,82,232,.035); }
+    .lifecycle-option:has(input:checked) { border-color: var(--accent); background: rgba(91,82,232,.075); box-shadow: 0 0 0 1px rgba(91,82,232,.07); }
+    .lifecycle-option input { width: 17px; height: 17px; margin: 2px 0 0; accent-color: var(--accent); }
+    .lifecycle-option strong { display: block; font-size: 12px; }
+    .lifecycle-option span { display: block; margin-top: 3px; color: var(--text-dim); font-size: 10px; line-height: 1.48; }
+    .create-proxy-option { display: grid; grid-template-columns: 18px minmax(0,1fr); align-items: start; gap: 10px; padding: 12px; border: 1px solid rgba(45,136,102,.20); border-radius: 11px; background: rgba(45,136,102,.045); cursor: pointer; }
+    .create-proxy-option input { width: 17px; height: 17px; margin: 2px 0 0; accent-color: var(--success); }
+    .create-proxy-option strong { display: block; font-size: 12px; }
+    .create-proxy-option span { display: block; margin-top: 3px; color: var(--text-dim); font-size: 10px; line-height: 1.48; }
+    .create-browser-form .message { margin: -4px 0 0; }
+    .create-browser-form .dialog-actions { margin-top: -2px; }
     .account-dialog { width: min(520px, calc(100vw - 28px)); }
     .account-dialog .dialog-body { padding: 0; }
     .account-dialog-head { padding: 22px 22px 17px; border-bottom: 1px solid var(--border); }
@@ -504,24 +540,43 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     .account-verification-copy { margin: 0 0 8px; color: var(--text-dim); font-size: 11px; line-height: 1.5; }
     .account-form .message { margin: 0; }
     .account-form .dialog-actions { margin-top: 0; }
-    .settings-dialog { width: min(640px, calc(100vw - 28px)); }
+    .settings-dialog { width: min(720px, calc(100vw - 28px)); }
     .settings-dialog .dialog-body { padding: 0; }
     .settings-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 22px; border-bottom: 1px solid var(--border); }
+    .settings-dialog-title { display: flex; align-items: flex-start; gap: 12px; }
+    .settings-dialog-icon { width: 38px; height: 38px; flex: 0 0 38px; display: grid; place-items: center; border-radius: 11px; background: rgba(91,82,232,.10); color: var(--accent); }
+    .settings-dialog-icon svg { width: 19px; height: 19px; }
     .settings-dialog-head h2 { margin-bottom: 3px; }
     .settings-dialog-head p { margin: 0; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
     .settings-dialog-close { width: 34px; min-height: 34px; flex: 0 0 34px; padding: 0; font-size: 18px; line-height: 1; }
-    .settings-sections { display: grid; grid-template-columns: minmax(0,.82fr) minmax(0,1.18fr); }
-    .settings-section { min-width: 0; margin: 0; padding: 20px 22px 22px; display: grid; align-content: start; gap: 12px; }
-    .settings-section + .settings-section { border-left: 1px solid var(--border); }
+    .settings-sections { display: grid; grid-template-columns: minmax(0,.76fr) minmax(0,1.24fr); gap: 12px; padding: 14px; background: rgba(89,55,25,.025); }
+    .settings-section { min-width: 0; margin: 0; padding: 17px; display: grid; align-content: start; gap: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+    .settings-section-head { display: flex; align-items: flex-start; gap: 10px; }
+    .settings-section-icon { width: 31px; height: 31px; flex: 0 0 31px; display: grid; place-items: center; border-radius: 9px; background: rgba(89,55,25,.055); color: var(--text-dim); }
+    .settings-section-icon.network { background: rgba(45,136,102,.09); color: var(--success); }
+    .settings-section-icon svg { width: 16px; height: 16px; }
     .settings-section-kicker { color: var(--accent); font-size: 10px; font-weight: 850; letter-spacing: .09em; text-transform: uppercase; }
-    .settings-section h3 { margin: -5px 0 0; font-size: 16px; letter-spacing: -.01em; }
-    .settings-section-copy { min-height: 38px; margin: -5px 0 0 !important; font-size: 11px !important; line-height: 1.55; }
+    .settings-section h3 { margin: 0; font-size: 16px; letter-spacing: -.01em; }
+    .settings-section-copy { min-height: 38px; margin: 0 !important; font-size: 11px !important; line-height: 1.55; }
     .settings-section .dialog-actions { margin-top: 0; }
     .settings-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
     .settings-fieldset[disabled] { opacity: .56; }
-    .settings-section .proxy-current { margin-top: 0; }
+    .settings-section .proxy-toggle input { width: 16px; flex: 0 0 16px; }
     .settings-section .proxy-fields { padding: 0; }
     .settings-section .message { margin: 0; }
+    .proxy-route-card { display: grid; gap: 12px; padding: 13px; border: 1px solid rgba(89,55,25,.13); border-radius: 11px; background: rgba(89,55,25,.025); }
+    .proxy-route-card.is-enabled { border-color: rgba(45,136,102,.24); background: rgba(45,136,102,.045); }
+    .proxy-route-card.is-unavailable { border-color: rgba(181,107,34,.22); background: rgba(181,107,34,.045); }
+    .proxy-route-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .proxy-route-label { display: block; color: var(--text-dim); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .proxy-current { display: block; margin-top: 2px; color: var(--text); font-size: 13px; font-weight: 780; overflow-wrap: anywhere; }
+    .proxy-state-badge { min-height: 24px; display: inline-flex; align-items: center; padding: 0 8px; border-radius: 999px; background: rgba(89,55,25,.07); color: var(--text-dim); font-size: 9px; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
+    .proxy-route-card.is-enabled .proxy-state-badge { background: rgba(45,136,102,.11); color: var(--success); }
+    .proxy-route-card.is-unavailable .proxy-state-badge { background: rgba(181,107,34,.11); color: #9a5718; }
+    .proxy-route-details { display: grid; grid-template-columns: minmax(0,1.35fr) minmax(105px,.65fr); gap: 8px; }
+    .proxy-route-detail { min-width: 0; padding: 8px 9px; border-radius: 8px; background: rgba(255,253,248,.72); }
+    .proxy-route-detail span { display: block; margin-bottom: 3px; color: var(--text-dim); font-size: 9px; font-weight: 750; }
+    .proxy-route-detail code { display: block; overflow: hidden; color: var(--text); font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
     .downloads-dialog { width: min(560px, calc(100vw - 28px)); }
     .downloads-ticket { position: relative; display: grid; gap: 9px; margin-top: 16px; padding: 16px; overflow: hidden; border: 1px solid rgba(91,82,232,.22); border-radius: 12px; background: linear-gradient(135deg, rgba(91,82,232,.075), rgba(255,253,248,.9) 58%); }
     .downloads-ticket::after { content: ''; position: absolute; top: -34px; right: -27px; width: 92px; height: 72px; border: 10px solid rgba(91,82,232,.055); border-radius: 18px; transform: rotate(8deg); pointer-events: none; }
@@ -532,6 +587,12 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     .downloads-copy { min-height: 35px; box-shadow: none; }
     .downloads-note { margin: 12px 0 0 !important; padding-left: 12px; border-left: 3px solid rgba(91,82,232,.25); line-height: 1.55; }
     .confirm-phrase { padding: 2px 6px; border: 1px solid var(--border); border-radius: 5px; background: rgba(89,55,25,.05); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); }
+    .site-footer { border-top: 1px solid var(--border); background: rgba(247,241,230,.68); }
+    .footer-inner { max-width: 1480px; min-height: 72px; margin: 0 auto; padding: 18px 24px; display: flex; align-items: center; justify-content: space-between; gap: 18px; color: var(--text-dim); font-size: 11px; }
+    .footer-brand { color: var(--text); font-weight: 780; }
+    .footer-links { display: flex; align-items: center; gap: 9px; }
+    .footer-links a { color: var(--text-dim); font-weight: 650; text-decoration: none; }
+    .footer-links a:hover { color: var(--text); }
     @media (prefers-reduced-motion: reduce) {
       * { scroll-behavior: auto !important; transition: none !important; }
       .browser-boot-track::after { width: 54%; animation: none; transform: translateX(55%); }
@@ -560,19 +621,23 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       .brand { font-size: 17px; gap: 7px; }
       .brand img { width: 27px; height: 27px; }
       .brand-domain { display: none; }
-      .account { gap: 6px; }
+      .account { min-width: 0; flex: 1; justify-content: flex-end; gap: 6px; }
+      .header-nav { min-width: 0; overflow-x: auto; scrollbar-width: none; }
+      .header-nav::-webkit-scrollbar { display: none; }
+      .account-menu { flex: 0 0 auto; }
       .account-summary { padding-right: 7px; }
       .account-summary-email { display: none; }
       .header-nav { gap: 2px; }
       .page-intro { margin-bottom: 18px; }
       .viewer-actions { align-items: flex-start; flex-direction: column; }
       .viewer-actions .toolbar { width: 100%; }
-      .viewer-actions .toolbar > * { flex: 1; justify-content: center; }
+      .action-group { flex: 1 1 auto; }
+      .action-group > * { flex: 1; }
+      .action-button-primary { flex: 1; }
       .settings-sections { grid-template-columns: 1fr; }
-      .settings-section + .settings-section { border-top: 1px solid var(--border); border-left: 0; }
-      .create-row { grid-template-columns: 1fr; }
+      .create-row { display: grid; grid-template-columns: 1fr; }
       .create-row button { width: 100%; }
-      .create-actions { grid-template-columns: 1fr; }
+      .lifecycle-options, .proxy-route-details { grid-template-columns: 1fr; }
       .api-key-row { grid-template-columns: 1fr; }
       .api-key-item { grid-template-columns: 1fr; }
       .api-key-actions { justify-content: space-between; }
@@ -589,10 +654,11 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       .code-footer { align-items: stretch; flex-direction: column; }
       .code-actions > * { flex: 1; justify-content: center; }
       .docs-link { justify-content: center; }
+      .footer-inner { align-items: flex-start; flex-direction: column; padding-inline: 14px; }
     }
     @media (max-width: 420px) {
       .brand-name { display: none; }
-      .header-link { padding-inline: 7px; }
+      .header-link { padding-inline: 5px; font-size: 10px; }
     }
   </style>
 </head>
@@ -609,6 +675,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           <a class="header-link" href="#console" data-view-target="console">Console</a>
           <a class="header-link" href="#api-keys" data-view-target="api-keys">API keys</a>
           <a class="header-link" href="#logs" data-view-target="logs">Logs</a>
+          <a class="header-link" href="/docs">Docs</a>
         </div>
         <details class="account-menu" id="accountMenu">
           <summary class="account-summary" aria-label="Account menu for ${escapeHtml(user.email)}">
@@ -666,15 +733,14 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           </div>
           <div class="panel-body" id="sessionPanelBody">
             <div class="create-row">
-              <input id="newSessionName" aria-label="Browser name" maxlength="120" placeholder="Name this browser (optional)">
-              <div class="create-actions">
-                <button id="createSessionBtn" type="button">+ New browser</button>
-                <button class="secondary" id="createIncognitoBtn" type="button">Incognito</button>
+              <div class="create-prompt">
+                <strong>Start another cloud browser</strong>
+                <span>Choose its profile, name, and network route in one place.</span>
               </div>
-              <label class="proxy-toggle" for="newProxyEnabled">
-                <input id="newProxyEnabled" type="checkbox">
-                <span>Use Webshare proxy for this browser</span>
-              </label>
+              <button class="create-session-button" id="createSessionBtn" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                <span>New browser</span>
+              </button>
             </div>
             <div class="sessions" id="sessions"></div>
             <div class="message" id="sessionMessage"></div>
@@ -685,13 +751,38 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
             <div class="viewer-actions">
               <div class="viewer-title-display"><span class="viewer-title" id="viewerTitle">Browser preview</span></div>
               <div class="toolbar">
-                <button class="secondary" id="connectBtn" type="button" disabled>Connect</button>
-                <button class="secondary" id="downloadsBtn" type="button" disabled>Downloads</button>
-                <button class="secondary" id="lifecycleBtn" type="button" disabled>Pause</button>
+                <button class="action-button action-button-primary" id="connectBtn" type="button" disabled>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                  <span id="connectBtnLabel">Connect</span>
+                </button>
                 <a class="button-link" id="externalLink" href="#" target="_blank" rel="noopener" style="display:none">Open separately</a>
-                <button class="secondary" id="browserSettingsBtn" type="button" disabled>Settings</button>
-                <button class="secondary" id="resetSessionBtn" type="button" disabled title="Force-restart this browser's Droplet">Reset</button>
-                <button class="danger" id="deleteSessionBtn" type="button" disabled>Delete</button>
+                <div class="action-group" aria-label="Browser tools">
+                  <button class="secondary action-button" id="downloadsBtn" type="button" disabled>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5h6l2 2h10v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M12 12v5m0 0-2-2m2 2 2-2"/></svg>
+                    <span>Downloads</span>
+                  </button>
+                  <button class="secondary action-button" id="browserSettingsBtn" type="button" disabled>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10m4 0h2M4 17h2m4 0h10M14 4v6M6 14v6"/></svg>
+                    <span>Settings</span>
+                    <span class="route-dot" id="toolbarProxyDot" aria-hidden="true"></span>
+                  </button>
+                </div>
+                <div class="action-group" aria-label="Browser lifecycle">
+                  <button class="secondary action-button" id="lifecycleBtn" type="button" disabled>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5v14M15 5v14"/></svg>
+                    <span id="lifecycleBtnLabel">Pause</span>
+                  </button>
+                  <button class="secondary action-button" id="resetSessionBtn" type="button" disabled title="Force-restart this browser's Droplet">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5"/><path d="M4 17v-5h5"/><path d="M6.1 8.2a7 7 0 0 1 11.5-2.6L20 8M4 16l2.4 2.4a7 7 0 0 0 11.5-2.6"/></svg>
+                    <span id="resetSessionBtnLabel">Reset</span>
+                  </button>
+                </div>
+                <div class="action-group action-group-danger">
+                  <button class="danger action-button" id="deleteSessionBtn" type="button" disabled>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>
+                    <span id="deleteSessionBtnLabel">Delete</span>
+                  </button>
+                </div>
               </div>
             </div>
             <div id="viewerEmpty" class="viewer-state" aria-live="polite">
@@ -878,6 +969,71 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       </section>
     </section>
   </main>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span class="footer-brand">WebBrain Cloud</span>
+      <div class="footer-links">
+        <span>Private browser workspaces</span>
+        <span aria-hidden="true">·</span>
+        <a href="/docs">API docs</a>
+        <span aria-hidden="true">·</span>
+        <a href="https://webbrain.one/">webbrain.one</a>
+      </div>
+    </div>
+  </footer>
+  <dialog class="create-browser-dialog" id="createBrowserDialog">
+    <div class="dialog-body">
+      <div class="dialog-head">
+        <div class="dialog-head-copy">
+          <span class="dialog-head-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18M8 6.5h.01M12 6.5h.01M16 6.5h.01"/></svg>
+          </span>
+          <div>
+            <h2>New cloud browser</h2>
+            <p>Choose how this browser keeps its profile and connects to the web.</p>
+          </div>
+        </div>
+        <button class="secondary dialog-close" type="button" id="closeCreateBrowserBtn" aria-label="Close new browser dialog">×</button>
+      </div>
+      <form class="create-browser-form" id="createBrowserForm">
+        <label class="form-field" for="newSessionName">
+          <span class="form-label">Browser name <span class="field-hint">(optional)</span></span>
+          <input id="newSessionName" maxlength="120" placeholder="Research, Personal, Client work…">
+        </label>
+        <fieldset class="lifecycle-fieldset">
+          <legend>Profile</legend>
+          <div class="lifecycle-options">
+            <label class="lifecycle-option">
+              <input type="radio" name="newSessionLifecycle" value="resumable" checked>
+              <span>
+                <strong>Saved browser</strong>
+                <span>Keeps a private Chrome profile and can be paused when shared Downloads are available.</span>
+              </span>
+            </label>
+            <label class="lifecycle-option">
+              <input type="radio" name="newSessionLifecycle" value="always_on">
+              <span>
+                <strong>Incognito</strong>
+                <span>Uses the classic always-on browser with Chrome state and Downloads kept on its Droplet.</span>
+              </span>
+            </label>
+          </div>
+        </fieldset>
+        <label class="create-proxy-option" for="newProxyEnabled">
+          <input id="newProxyEnabled" type="checkbox">
+          <span>
+            <strong>Use Webshare proxy</strong>
+            <span>Routes this browser through the server-managed Webshare connection. Credentials stay private.</span>
+          </span>
+        </label>
+        <div class="message" id="createBrowserMessage" aria-live="polite"></div>
+        <div class="dialog-actions">
+          <button class="secondary" type="button" id="cancelCreateBrowserBtn">Cancel</button>
+          <button type="submit" id="createBrowserSubmitBtn">Create browser</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
   <dialog class="account-dialog" id="accountDialog">
     <form class="dialog-body" id="accountForm">
       <div class="account-dialog-head">
@@ -920,16 +1076,28 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
   <dialog class="settings-dialog" id="browserSettingsDialog">
     <div class="dialog-body">
       <div class="settings-dialog-head">
-        <div>
-          <h2 id="browserSettingsTitle">Browser settings</h2>
-          <p id="browserSettingsMeta">Select a browser to manage it.</p>
+        <div class="settings-dialog-title">
+          <span class="settings-dialog-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10m4 0h2M4 17h2m4 0h10M14 4v6M6 14v6"/></svg>
+          </span>
+          <div>
+            <h2 id="browserSettingsTitle">Browser settings</h2>
+            <p id="browserSettingsMeta">Select a browser to manage it.</p>
+          </div>
         </div>
         <button class="secondary settings-dialog-close" type="button" id="closeBrowserSettingsBtn" aria-label="Close browser settings">×</button>
       </div>
       <div class="settings-sections">
         <form class="settings-section" id="browserNameForm">
-          <span class="settings-section-kicker">Identity</span>
-          <h3>Browser name</h3>
+          <div class="settings-section-head">
+            <span class="settings-section-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18M8 6.5h.01M12 6.5h.01M16 6.5h.01"/></svg>
+            </span>
+            <div>
+              <span class="settings-section-kicker">Identity</span>
+              <h3>Browser name</h3>
+            </div>
+          </div>
           <p class="settings-section-copy">Use the name you recognize in the dashboard and destructive confirmations.</p>
           <label class="form-field" for="browserNameInput">
             <span class="form-label">Name</span>
@@ -941,10 +1109,35 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           </div>
         </form>
         <form class="settings-section" id="proxyForm">
-          <span class="settings-section-kicker">Network route</span>
-          <h3>Webshare proxy</h3>
+          <div class="settings-section-head">
+            <span class="settings-section-icon network" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+            </span>
+            <div>
+              <span class="settings-section-kicker">Network route</span>
+              <h3>Webshare proxy</h3>
+            </div>
+          </div>
           <p class="settings-section-copy" id="proxyAvailability">Switch the browser between direct traffic and the configured Webshare route.</p>
-          <div class="proxy-current" id="proxyCurrent">Loading current proxy…</div>
+          <div class="proxy-route-card" id="proxyRouteCard">
+            <div class="proxy-route-summary">
+              <div>
+                <span class="proxy-route-label">Current route</span>
+                <strong class="proxy-current" id="proxyCurrent">Loading current route…</strong>
+              </div>
+              <span class="proxy-state-badge" id="proxyStateBadge">Checking</span>
+            </div>
+            <div class="proxy-route-details">
+              <div class="proxy-route-detail">
+                <span>Proxy endpoint</span>
+                <code id="proxyEndpoint">Checking…</code>
+              </div>
+              <div class="proxy-route-detail">
+                <span>Verified exit IP</span>
+                <code id="proxyExitIp">Checking…</code>
+              </div>
+            </div>
+          </div>
           <fieldset class="settings-fieldset" id="proxyFieldsGroup">
             <label class="proxy-toggle" for="proxyEnabled">
               <input id="proxyEnabled" type="checkbox">
@@ -1012,7 +1205,12 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const sessionMessage = document.getElementById('sessionMessage');
     const sessionCount = document.getElementById('sessionCount');
     const createSessionBtn = document.getElementById('createSessionBtn');
-    const createIncognitoBtn = document.getElementById('createIncognitoBtn');
+    const createBrowserDialog = document.getElementById('createBrowserDialog');
+    const createBrowserForm = document.getElementById('createBrowserForm');
+    const createBrowserMessage = document.getElementById('createBrowserMessage');
+    const createBrowserSubmitBtn = document.getElementById('createBrowserSubmitBtn');
+    const closeCreateBrowserBtn = document.getElementById('closeCreateBrowserBtn');
+    const cancelCreateBrowserBtn = document.getElementById('cancelCreateBrowserBtn');
     const newSessionName = document.getElementById('newSessionName');
     const newProxyEnabled = document.getElementById('newProxyEnabled');
     const accountMenu = document.getElementById('accountMenu');
@@ -1022,13 +1220,18 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const editAccountBtn = document.getElementById('editAccountBtn');
     const refreshBtn = document.getElementById('refreshBtn');
     const connectBtn = document.getElementById('connectBtn');
+    const connectBtnLabel = document.getElementById('connectBtnLabel');
     const browserSettingsBtn = document.getElementById('browserSettingsBtn');
+    const toolbarProxyDot = document.getElementById('toolbarProxyDot');
     const downloadsBtn = document.getElementById('downloadsBtn');
     const downloadsDialogDescription = document.getElementById('downloadsDialogDescription');
     const downloadsDialogNote = document.getElementById('downloadsDialogNote');
     const lifecycleBtn = document.getElementById('lifecycleBtn');
+    const lifecycleBtnLabel = document.getElementById('lifecycleBtnLabel');
     const resetSessionBtn = document.getElementById('resetSessionBtn');
+    const resetSessionBtnLabel = document.getElementById('resetSessionBtnLabel');
     const deleteSessionBtn = document.getElementById('deleteSessionBtn');
+    const deleteSessionBtnLabel = document.getElementById('deleteSessionBtnLabel');
     const viewerTitle = document.getElementById('viewerTitle');
     const viewerEmpty = document.getElementById('viewerEmpty');
     const viewerStateVisual = document.getElementById('viewerStateVisual');
@@ -1088,7 +1291,11 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const browserNameMessage = document.getElementById('browserNameMessage');
     const saveBrowserNameBtn = document.getElementById('saveBrowserNameBtn');
     const proxyForm = document.getElementById('proxyForm');
+    const proxyRouteCard = document.getElementById('proxyRouteCard');
     const proxyCurrent = document.getElementById('proxyCurrent');
+    const proxyStateBadge = document.getElementById('proxyStateBadge');
+    const proxyEndpoint = document.getElementById('proxyEndpoint');
+    const proxyExitIp = document.getElementById('proxyExitIp');
     const proxyAvailability = document.getElementById('proxyAvailability');
     const proxyFieldsGroup = document.getElementById('proxyFieldsGroup');
     const proxyEnabled = document.getElementById('proxyEnabled');
@@ -2261,7 +2468,8 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
 
     function syncCreateBrowserControls() {
       createSessionBtn.disabled = state.creatingSession;
-      createIncognitoBtn.disabled = state.creatingSession;
+      createBrowserSubmitBtn.disabled = state.creatingSession;
+      createBrowserSubmitBtn.textContent = state.creatingSession ? 'Creating…' : 'Create browser';
     }
 
     function renderViewer() {
@@ -2277,13 +2485,18 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       const canPause = sharedDownloadsEnabled && !!session && ['ready', 'pausing'].includes(session.status) && session.volume;
       const canResume = !!session && session.status === 'paused' && session.volume;
 
-      connectBtn.textContent = isConnected ? 'Disconnect' : (isConnecting ? 'Connecting…' : 'Connect');
+      connectBtnLabel.textContent = isConnected ? 'Disconnect' : (isConnecting ? 'Connecting…' : 'Connect');
       connectBtn.disabled = isConnecting || (!isConnected && !canConnect);
       browserSettingsBtn.disabled = !session || session.status === 'destroyed';
+      toolbarProxyDot.classList.toggle('is-enabled', session?.proxy?.enabled === true);
+      toolbarProxyDot.classList.toggle('is-unavailable', !!session && session.droplet_connected !== true);
+      browserSettingsBtn.title = session
+        ? 'Settings · ' + proxyStatusText(session.proxy)
+        : 'Browser settings';
       downloadsBtn.disabled = !session
         || !['ready', 'paused'].includes(session.status)
         || (session.status === 'paused' && !sharedDownloadsEnabled);
-      lifecycleBtn.textContent = session?.status === 'paused'
+      lifecycleBtnLabel.textContent = session?.status === 'paused'
         ? 'Resume'
         : session?.status === 'pausing'
           ? 'Finish pause'
@@ -2297,9 +2510,9 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         && session.profile_mode !== 'ephemeral'
         && !!session.droplet_id
         && ['ready', 'provisioning', 'failed'].includes(session.status);
-      resetSessionBtn.textContent = session && resettingSessionIds.has(session.id) ? 'Resetting…' : 'Reset';
+      resetSessionBtnLabel.textContent = session && resettingSessionIds.has(session.id) ? 'Resetting…' : 'Reset';
       resetSessionBtn.disabled = !canReset || resettingSessionIds.has(session?.id);
-      deleteSessionBtn.textContent = session && !session.volume ? 'Stop' : 'Delete';
+      deleteSessionBtnLabel.textContent = session && !session.volume ? 'Stop' : 'Delete';
       deleteSessionBtn.disabled = !session || session.status === 'destroyed';
       viewerTitle.textContent = session ? browserName(session) + ' · ' + session.status : 'Browser preview';
 
@@ -2385,6 +2598,22 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       proxyEnabled.checked = false;
     }
 
+    function updateProxyPresentation(proxy, available = true) {
+      const enabled = available && proxy?.enabled === true;
+      proxyRouteCard.classList.toggle('is-enabled', enabled);
+      proxyRouteCard.classList.toggle('is-unavailable', !available);
+      proxyCurrent.textContent = !available
+        ? 'Browser connection unavailable'
+        : enabled ? 'Webshare proxy' : 'Direct connection';
+      proxyStateBadge.textContent = !available ? 'Offline' : enabled ? 'Enabled' : 'Direct';
+      proxyEndpoint.textContent = !available
+        ? 'Available when connected'
+        : enabled ? (proxy?.endpoint || 'Configured by server') : 'Not in use';
+      proxyExitIp.textContent = !available
+        ? 'Unavailable'
+        : (proxy?.exit_ip || (enabled ? 'Awaiting verification' : 'Browser public IP'));
+    }
+
     async function openBrowserSettings() {
       const session = selectedSession();
       if (!session || session.status === 'destroyed') return;
@@ -2399,7 +2628,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       proxyAvailability.textContent = proxyAvailable
         ? 'Switching routes closes existing browser connections while the new exit is verified.'
         : 'Network routing becomes available when this browser is running and connected.';
-      proxyCurrent.textContent = proxyAvailable ? proxyStatusText(session.proxy) : 'Browser connection unavailable';
+      updateProxyPresentation(session.proxy, proxyAvailable);
       showMessage(browserNameMessage, '');
       showMessage(proxyMessage, '');
       browserSettingsDialog.showModal();
@@ -2409,7 +2638,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       try {
         const body = await api('/api/browser-sessions/' + encodeURIComponent(session.id) + '/proxy');
         if (state.settingsTargetId === session.id && browserSettingsDialog.open) {
-          proxyCurrent.textContent = proxyStatusText(body.proxy);
+          updateProxyPresentation(body.proxy);
           proxyEnabled.checked = body.proxy?.enabled === true;
         }
       } catch (error) {
@@ -2441,12 +2670,21 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       }
     }
 
-    async function createSession(lifecycle) {
+    function openCreateBrowserDialog() {
+      createBrowserForm.reset();
+      showMessage(createBrowserMessage, '');
+      createBrowserDialog.showModal();
+      newSessionName.focus();
+    }
+
+    async function createSession(event) {
+      event.preventDefault();
+      const lifecycle = createBrowserForm.elements.newSessionLifecycle.value;
       state.creatingSession = true;
       syncCreateBrowserControls();
-      showMessage(sessionMessage, lifecycle === 'always_on'
-        ? 'Opening an incognito browser...'
-        : 'Opening a new browser...');
+      showMessage(createBrowserMessage, lifecycle === 'always_on'
+        ? 'Opening an incognito browser…'
+        : 'Opening a saved browser…');
       try {
         const body = await api('/api/browser-sessions', {
           method: 'POST',
@@ -2457,12 +2695,12 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           },
         });
         state.selectedId = body.browser_session.id;
-        newSessionName.value = '';
-        newProxyEnabled.checked = false;
         await loadSessions();
+        createBrowserDialog.close();
+        createBrowserForm.reset();
         showMessage(sessionMessage, 'Browser created. It may take a few minutes before noVNC is ready.');
       } catch (e) {
-        showMessage(sessionMessage, e.message, true);
+        showMessage(createBrowserMessage, e.message, true);
       } finally {
         state.creatingSession = false;
         syncCreateBrowserControls();
@@ -2491,10 +2729,11 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           proxy: {
             enabled: body.proxy.enabled === true,
             endpoint: body.proxy.endpoint || null,
+            exit_ip: body.proxy.exit_ip || null,
             updated_at: body.proxy.updated_at || null,
           },
         } : session);
-        proxyCurrent.textContent = proxyStatusText(body.proxy);
+        updateProxyPresentation(body.proxy);
         proxyEnabled.checked = body.proxy.enabled === true;
         renderSessions();
         showMessage(proxyMessage, 'Network route saved.');
@@ -2795,10 +3034,13 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       }
     }
 
-    createSessionBtn.addEventListener('click', () => createSession('resumable'));
-    createIncognitoBtn.addEventListener('click', () => createSession('always_on'));
-    newSessionName.addEventListener('keydown', event => {
-      if (event.key === 'Enter') createSession('resumable');
+    createSessionBtn.addEventListener('click', openCreateBrowserDialog);
+    createBrowserForm.addEventListener('submit', createSession);
+    closeCreateBrowserBtn.addEventListener('click', () => createBrowserDialog.close());
+    cancelCreateBrowserBtn.addEventListener('click', () => createBrowserDialog.close());
+    createBrowserDialog.addEventListener('close', () => {
+      if (!state.creatingSession) createBrowserForm.reset();
+      showMessage(createBrowserMessage, '');
     });
     collapseSessionsBtn.addEventListener('click', () => setSessionsCollapsed(!sessionPanel.classList.contains('is-collapsed')));
     toggleDestroyedBtn.addEventListener('click', () => {
