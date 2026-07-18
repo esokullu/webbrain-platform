@@ -17,6 +17,7 @@ import {
 import { attemptAutoTopUp } from './billing.js';
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'aborted']);
+const EXPORTABLE_RUN_STATUSES = new Set(['completed', 'failed']);
 const TERMINAL_BROWSER_STATUSES = new Set(['destroyed']);
 const AUTO_TOP_UP_THRESHOLDS = new Set([500, 1000, 2500]);
 
@@ -256,7 +257,6 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     .header-nav { display: flex; align-items: center; gap: 4px; padding: 3px; border: 1px solid var(--border); border-radius: 9px; background: rgba(255,253,248,.55); }
     .header-link { min-height: 28px; display: inline-flex; align-items: center; padding: 4px 9px; border-radius: 6px; color: var(--text-dim); font-size: 12px; font-weight: 700; text-decoration: none; }
     .header-link:hover, .header-link[aria-current="page"] { background: var(--card); color: var(--text); box-shadow: 0 2px 8px var(--shadow); }
-    .header-credit { margin-left: 5px; color: var(--accent); font: 750 9px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .account-menu { position: relative; }
     .account-summary { min-height: 38px; max-width: 270px; display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 5px; border: 1px solid var(--border); border-radius: 10px; background: rgba(255,253,248,.65); color: var(--text); cursor: pointer; list-style: none; user-select: none; transition: background .15s ease, border-color .15s ease, box-shadow .15s ease; }
     .account-summary::-webkit-details-marker { display: none; }
@@ -275,6 +275,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     button.account-action:hover { background: var(--card-hover); color: var(--text); transform: none; }
     button.account-action svg { width: 16px; height: 16px; flex: 0 0 16px; color: var(--text-dim); }
     button.account-action.edit-account-action svg { color: var(--accent); }
+    .account-action-meta { margin-left: auto; color: var(--accent); font: 750 10px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     button.account-action.logout-action { color: var(--danger); }
     button.account-action.logout-action svg { color: currentColor; }
     button.account-action.logout-action:hover { background: rgba(164,59,50,.08); color: var(--danger); }
@@ -549,6 +550,9 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     .logs-load-more { width: 100%; margin-top: 10px; }
     .logs-detail-panel { scroll-margin-top: 86px; }
     .logs-detail-panel .panel-body { min-height: 420px; }
+    .logs-detail-actions { display: flex; align-items: center; gap: 8px; }
+    .logs-export { min-height: 29px; padding: 4px 9px; border-color: rgba(91,82,232,.22); color: var(--accent); font-size: 11px; font-weight: 750; }
+    .logs-export:hover { border-color: rgba(91,82,232,.38); background: rgba(91,82,232,.07); }
     @keyframes run-spin { to { transform: rotate(360deg); } }
     .connection-panel { min-width: 0; }
     .connection-head { align-items: flex-start; }
@@ -756,7 +760,6 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           <a class="header-link" href="#console" data-view-target="console">Console</a>
           <a class="header-link" href="#api-keys" data-view-target="api-keys">API keys</a>
           <a class="header-link" href="#logs" data-view-target="logs">Logs</a>
-          <a class="header-link" href="#billing" data-view-target="billing">Billing<span class="header-credit" id="headerCredit">—</span></a>
           <a class="header-link" href="/docs">Docs</a>
         </div>
         <details class="account-menu" id="accountMenu">
@@ -773,6 +776,11 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
             <button class="account-action edit-account-action" id="editAccountBtn" type="button">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg>
               <span>Edit account</span>
+            </button>
+            <button class="account-action billing-account-action" type="button" data-view-target="billing">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H19a2 2 0 0 1 2 2v12H5.5A2.5 2.5 0 0 1 3 15.5Z"/><path d="M3 7h15"/><path d="M16 12h5v4h-5a2 2 0 0 1 0-4Z"/></svg>
+              <span>Billing</span>
+              <span class="account-action-meta" id="headerCredit">—</span>
             </button>
             <button class="account-action" id="refreshBtn" type="button">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5"/><path d="M4 17v-5h5"/><path d="M6.1 8.2a7 7 0 0 1 11.5-2.6L20 8M4 16l2.4 2.4a7 7 0 0 0 11.5-2.6"/></svg>
@@ -1023,7 +1031,10 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
               <h2 id="logsDetailTitle">Run details</h2>
               <p class="api-description">Results appear first; execution activity stays available below.</p>
             </div>
-            <span class="status" id="logsDetailStatus">None</span>
+            <div class="logs-detail-actions">
+              <a class="button-link logs-export" id="logsExportTrace" href="#" hidden>Export</a>
+              <span class="status" id="logsDetailStatus">None</span>
+            </div>
           </div>
           <div class="panel-body" id="logsDetailOutput" aria-live="polite">
             <div class="logs-empty"><div><strong>Select a run</strong>Choose an entry from the ledger to reopen its result and activity.</div></div>
@@ -1411,6 +1422,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const logsList = document.getElementById('logsList');
     const loadOlderLogsBtn = document.getElementById('loadOlderLogsBtn');
     const logsDetailPanel = document.getElementById('logsDetailPanel');
+    const logsExportTrace = document.getElementById('logsExportTrace');
     const logsDetailStatus = document.getElementById('logsDetailStatus');
     const logsDetailOutput = document.getElementById('logsDetailOutput');
     const accountDialog = document.getElementById('accountDialog');
@@ -1475,6 +1487,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const viewerConnections = new Map();
     const connectingSessionIds = new Set();
     const terminalRunStatuses = new Set(['completed', 'failed', 'aborted']);
+    const exportableRunStatuses = new Set(['completed', 'failed']);
     let consolePollTimer = null;
     let consoleRunRequestVersion = 0;
     const sessionsCollapsedKey = 'webbrain.sessionsCollapsed';
@@ -1490,6 +1503,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         if (link.dataset.viewTarget === nextView) link.setAttribute('aria-current', 'page');
         else link.removeAttribute('aria-current');
       }
+      accountMenu.removeAttribute('open');
       if (updateUrl) history.pushState(null, '', '#' + nextView);
       if (nextView === 'api-keys') loadApiKeys().catch(e => showMessage(apiKeyMessage, e.message, true));
       if (nextView === 'console') renderConsole();
@@ -2312,6 +2326,8 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       const openSeqs = new Set([...logsDetailOutput.querySelectorAll('.run-event-details[open]')].map(item => item.dataset.seq));
       logsDetailOutput.replaceChildren();
       if (!summary) {
+        logsExportTrace.hidden = true;
+        logsExportTrace.removeAttribute('href');
         logsDetailStatus.textContent = 'None';
         const empty = document.createElement('div');
         empty.className = 'logs-empty';
@@ -2324,6 +2340,8 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         return;
       }
       if (!run) {
+        logsExportTrace.hidden = true;
+        logsExportTrace.removeAttribute('href');
         logsDetailStatus.textContent = state.logsDetailError ? 'Unavailable' : 'Loading';
         const empty = document.createElement('div');
         empty.className = 'logs-empty';
@@ -2338,6 +2356,20 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
 
       const status = run.status || summary.status;
       const active = !terminalRunStatuses.has(status);
+      const exportable = exportableRunStatuses.has(status);
+      logsExportTrace.hidden = !exportable;
+      if (exportable) {
+        logsExportTrace.href = '/api/browser-sessions/' + encodeURIComponent(summary.session_id)
+          + '/runs/' + encodeURIComponent(summary.run_id) + '/export';
+        logsExportTrace.setAttribute('download', 'webbrain-trace-' + summary.run_id + '.json');
+        logsExportTrace.title = 'Download this run trace as JSON';
+        logsExportTrace.setAttribute('aria-label', 'Export trace for ' + (summary.task || 'untitled browser run'));
+      } else {
+        logsExportTrace.removeAttribute('href');
+        logsExportTrace.removeAttribute('download');
+        logsExportTrace.removeAttribute('title');
+        logsExportTrace.removeAttribute('aria-label');
+      }
       logsDetailStatus.textContent = status;
       const content = document.createElement('div');
       content.className = 'run-state';
@@ -5146,6 +5178,57 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
         if (snapshot) run = await store.updateCloudRun(run.id, normalizeRunSnapshot(snapshot, run));
       }
       res.json(publicRun(run));
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.get('/api/browser-sessions/:sessionId/runs/:runId/export', requireAuth, async (req, res, next) => {
+    try {
+      const session = await ownedBrowserSession(req, res);
+      if (!session) return;
+      const run = await store.getCloudRun(req.params.runId);
+      if (!run || run.user_id !== req.auth.user.id || run.browser_session_id !== session.id) {
+        return jsonError(res, 404, 'Cloud run not found');
+      }
+      if (!EXPORTABLE_RUN_STATUSES.has(run.status)) {
+        return jsonError(res, 409, 'Only completed or failed runs can be exported.');
+      }
+      const trace = {
+        format: 'webbrain.run-trace',
+        version: 1,
+        exported_at: nowIso(),
+        run: {
+          run_id: run.id,
+          session_id: run.browser_session_id,
+          parent_run_id: run.parent_run_id || null,
+          tab_id: run.tab_id ?? null,
+          task: run.task || '',
+          output_schema: run.output_schema ?? null,
+          status: run.status,
+          result: run.result ?? null,
+          summary: run.summary || '',
+          final_url: run.final_url || '',
+          error: run.error || '',
+          updates: Array.isArray(run.updates) ? run.updates : [],
+          created_at: run.created_at || null,
+          updated_at: run.updated_at || null,
+          completed_at: run.completed_at || null,
+        },
+      };
+      const safeRunId = String(run.id).replace(/[^A-Za-z0-9._-]/g, '_');
+      await audit(req, 'cloud_run.export', 'cloud_run', run.id, {
+        browser_session_id: session.id,
+        status: run.status,
+        update_count: trace.run.updates.length,
+      });
+      res.set({
+        'Cache-Control': 'private, no-store',
+        'Content-Disposition': `attachment; filename="webbrain-trace-${safeRunId}.json"`,
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Content-Type-Options': 'nosniff',
+      });
+      res.send(`${JSON.stringify(trace, null, 2)}\n`);
     } catch (e) {
       next(e);
     }

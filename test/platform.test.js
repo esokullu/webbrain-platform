@@ -471,6 +471,37 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   assert.deepEqual(waited.body.updates.map(update => update.seq), [1, 2, 3]);
   assert.equal((await ctx.store.getCloudRun(waited.body.run_id)).updates[1].data.name, 'read_page');
 
+  const completedExport = await request(
+    ctx.base,
+    `/api/browser-sessions/${sessionId}/runs/${waited.body.run_id}/export`,
+    { headers: { cookie } }
+  );
+  assert.equal(completedExport.status, 200);
+  assert.equal(completedExport.headers.get('cache-control'), 'private, no-store');
+  assert.equal(completedExport.headers.get('x-content-type-options'), 'nosniff');
+  assert.match(
+    completedExport.headers.get('content-disposition'),
+    new RegExp(`attachment; filename="webbrain-trace-${waited.body.run_id}\\.json"`)
+  );
+  assert.equal(completedExport.body.format, 'webbrain.run-trace');
+  assert.equal(completedExport.body.version, 1);
+  assert.equal(completedExport.body.run.run_id, waited.body.run_id);
+  assert.equal(completedExport.body.run.session_id, sessionId);
+  assert.equal(completedExport.body.run.task, 'Summarize this page');
+  assert.deepEqual(completedExport.body.run.output_schema, { title: 'string' });
+  assert.deepEqual(completedExport.body.run.updates.map(update => update.seq), [1, 2, 3]);
+  assert.equal('user_id' in completedExport.body.run, false);
+  assert.equal(ctx.store.auditLogs.some(entry => (
+    entry.action === 'cloud_run.export' && entry.target_id === waited.body.run_id
+  )), true);
+
+  const forbiddenExport = await request(
+    ctx.base,
+    `/api/browser-sessions/${sessionId}/runs/${waited.body.run_id}/export`,
+    { headers: { cookie: otherCookie } }
+  );
+  assert.equal(forbiddenExport.status, 404);
+
   const needsInput = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs`, {
     method: 'POST',
     headers: { cookie },
@@ -539,6 +570,13 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
     body: JSON.stringify({ task: 'Long task', tab_id: 91, wait: false }),
   });
   assert.equal(created.status, 202);
+  const runningExport = await request(
+    ctx.base,
+    `/api/browser-sessions/${sessionId}/runs/${created.body.run_id}/export`,
+    { headers: { cookie } }
+  );
+  assert.equal(runningExport.status, 409);
+  assert.match(runningExport.body.error, /Only completed or failed runs can be exported/);
   const activeContinuation = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs/${created.body.run_id}/messages`, {
     method: 'POST',
     headers: { cookie },
@@ -639,6 +677,35 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   const otherLogs = await request(ctx.base, '/api/runs', { headers: { cookie: otherCookie } });
   assert.equal(otherLogs.status, 200);
   assert.deepEqual(otherLogs.body.runs, []);
+
+  const failedRunId = 'run_failed_export';
+  const failedAt = '2026-07-14T10:01:00.000Z';
+  await ctx.store.createCloudRun({
+    id: failedRunId,
+    browser_session_id: sessionId,
+    user_id: legacyUser.id,
+    parent_run_id: null,
+    tab_id: 42,
+    task: 'Open a missing page',
+    output_schema: null,
+    status: 'failed',
+    result: null,
+    summary: '',
+    final_url: '',
+    error: 'Navigation failed',
+    updates: [{ seq: 1, type: 'error', data: { message: 'Navigation failed' }, ts: failedAt }],
+    created_at: failedAt,
+    updated_at: failedAt,
+    completed_at: failedAt,
+  });
+  const failedExport = await request(
+    ctx.base,
+    `/api/browser-sessions/${sessionId}/runs/${failedRunId}/export`,
+    { headers: { cookie } }
+  );
+  assert.equal(failedExport.status, 200);
+  assert.equal(failedExport.body.run.status, 'failed');
+  assert.equal(failedExport.body.run.error, 'Navigation failed');
 
   const pausedSession = await request(ctx.base, `/api/browser-sessions/${sessionId}/pause`, {
     method: 'POST',
@@ -2053,7 +2120,10 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /id="consoleView" hidden/);
     assert.match(res.text, /id="logsView" hidden/);
     assert.match(res.text, /id="billingView" hidden/);
-    assert.match(res.text, /data-view-target="billing">Billing/);
+    assert.doesNotMatch(res.text, /class="header-link" href="#billing"/);
+    assert.match(res.text, /class="account-action billing-account-action"[^>]*data-view-target="billing"/);
+    assert.match(res.text, /<span>Billing<\/span>\s+<span class="account-action-meta" id="headerCredit">—<\/span>/);
+    assert.match(res.text, /accountMenu\.removeAttribute\('open'\);\s+if \(updateUrl\)/);
     assert.match(res.text, /id="billingBalance"/);
     assert.match(res.text, /id="topUpGrid"/);
     assert.match(res.text, /id="autoTopUpForm"/);
@@ -2100,9 +2170,14 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.doesNotMatch(res.text, /\.run-output\s*\{[^}]*max-height/);
     assert.match(res.text, /id="logsBrowserFilter"/);
     assert.match(res.text, /id="logsStatusFilter"/);
+    assert.match(res.text, /id="logsExportTrace"/);
     assert.match(res.text, /function loadRunLogs\(/);
     assert.match(res.text, /function selectRunLog\(/);
     assert.match(res.text, /function copyRunLog\(/);
+    assert.match(res.text, /const exportableRunStatuses = new Set\(\['completed', 'failed'\]\)/);
+    assert.match(res.text, /Download this run trace as JSON/);
+    assert.match(res.text, /\/runs\/' \+ encodeURIComponent\(summary\.run_id\) \+ '\/export'/);
+    assert.match(res.text, /\.logs-detail-actions \{[^}]*display: flex/);
     assert.match(res.text, /function runLogCopyText\(run\) \{\s+return run\.task \|\| 'Untitled browser run';/);
     assert.match(res.text, /className = 'log-run-copy'/);
     assert.match(res.text, /className = 'log-run-events'/);
