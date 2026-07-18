@@ -123,7 +123,8 @@ Requires=webbrain-xvfb.service${mountLine}
 [Service]
 EnvironmentFile=/etc/webbrain-droplet.env
 WorkingDirectory=${appDir}
-ExecStart=/usr/bin/npm run start:browser
+${hasProfileVolume ? `ExecStartPre=/usr/bin/node ${appDir}/scripts/clean-stale-chrome-singletons.mjs
+` : ''}ExecStart=/usr/bin/npm run start:browser
 Restart=always
 RestartSec=3
 [Install]

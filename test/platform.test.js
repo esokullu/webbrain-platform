@@ -1949,6 +1949,8 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     const res = await requestText(ctx.base, '/', { headers: { cookie } });
     assert.equal(res.status, 200);
     assert.match(res.text, /<span class="brand-name">WebBrain<\/span><span class="brand-domain">\.cloud/);
+    assert.match(res.text, /<span class="brand">\s*<img[^>]+><span class="brand-name">/);
+    assert.doesNotMatch(res.text, /<a class="brand" href=/);
     assert.match(res.text, /<link rel="icon" type="image\/png" href="https:\/\/webbrain\.one\/logo-github\.png">/);
     assert.match(res.text, /--bg: #f7f1e6/);
     assert.match(res.text, /Browser sessions/);
@@ -2574,6 +2576,8 @@ test('volume-backed cloud-init mounts the fixed profile disk and stages Download
   assert.match(alwaysOnCloudInit, /WEBBRAIN_DOWNLOADS_SYNC_ENABLED='false'/);
   assert.match(cloudInit, /RequiresMountsFor=\/mnt\/webbrain-profile/);
   assert.match(cloudInit, /\/usr\/local\/sbin\/webbrain-mount-profile/);
+  assert.match(cloudInit, /ExecStartPre=\/usr\/bin\/node \/opt\/webbrain-platform\/scripts\/clean-stale-chrome-singletons\.mjs/);
+  assert.doesNotMatch(alwaysOnCloudInit, /clean-stale-chrome-singletons/);
   assert.doesNotMatch(cloudInit, /mkfs/);
   assert.doesNotMatch(cloudInit, /ufw allow 608[23]\/tcp/);
 });

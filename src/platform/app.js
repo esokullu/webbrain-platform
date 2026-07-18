@@ -666,9 +666,9 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
   <div class="glow-bg" aria-hidden="true"></div>
   <nav>
     <div class="nav-inner">
-      <a class="brand" href="https://webbrain.one/">
+      <span class="brand">
         <img src="https://webbrain.one/logo-github.png" alt=""><span class="brand-name">WebBrain</span><span class="brand-domain">.cloud</span>
-      </a>
+      </span>
       <div class="account">
         <div class="header-nav" aria-label="Dashboard sections">
           <a class="header-link" href="#browsers" data-view-target="browsers" aria-current="page">Browsers</a>
@@ -1022,8 +1022,8 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         <label class="create-proxy-option" for="newProxyEnabled">
           <input id="newProxyEnabled" type="checkbox">
           <span>
-            <strong>Use Webshare proxy</strong>
-            <span>Routes this browser through the server-managed Webshare connection. Credentials stay private.</span>
+            <strong>Use proxy</strong>
+            <span>Routes this browser through the server-managed proxy connection. Credentials stay private.</span>
           </span>
         </label>
         <div class="message" id="createBrowserMessage" aria-live="polite"></div>
@@ -1115,10 +1115,10 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
             </span>
             <div>
               <span class="settings-section-kicker">Network route</span>
-              <h3>Webshare proxy</h3>
+              <h3>Proxy</h3>
             </div>
           </div>
-          <p class="settings-section-copy" id="proxyAvailability">Switch the browser between direct traffic and the configured Webshare route.</p>
+          <p class="settings-section-copy" id="proxyAvailability">Switch the browser between direct traffic and the configured proxy route.</p>
           <div class="proxy-route-card" id="proxyRouteCard">
             <div class="proxy-route-summary">
               <div>
@@ -1141,7 +1141,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           <fieldset class="settings-fieldset" id="proxyFieldsGroup">
             <label class="proxy-toggle" for="proxyEnabled">
               <input id="proxyEnabled" type="checkbox">
-              <span>Use Webshare proxy</span>
+              <span>Use proxy</span>
             </label>
           </fieldset>
           <span class="field-hint">Credentials are managed by the server environment.</span>
@@ -2604,7 +2604,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       proxyRouteCard.classList.toggle('is-unavailable', !available);
       proxyCurrent.textContent = !available
         ? 'Browser connection unavailable'
-        : enabled ? 'Webshare proxy' : 'Direct connection';
+        : enabled ? 'Proxy' : 'Direct connection';
       proxyStateBadge.textContent = !available ? 'Offline' : enabled ? 'Enabled' : 'Direct';
       proxyEndpoint.textContent = !available
         ? 'Available when connected'
