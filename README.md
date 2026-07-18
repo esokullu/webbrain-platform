@@ -328,6 +328,9 @@ paused while a download or its upload is pending. Permanent storage rejections
 such as an upload-limit or quota error retain the staged file, stop automatic
 retry timers, and surface the rejection when Pause is attempted. After the
 limit is corrected, restart the browser service to retry the retained file.
+If the browser service stops before Chrome can persist completion metadata,
+the next start preserves the available bytes in Shared Downloads with a
+`.partial` suffix instead of leaving Pause blocked indefinitely.
 
 ### Pause and resume a browser
 
@@ -356,6 +359,11 @@ curl -sS -X POST \
 
 Pause returns `409` if a run or download sync is active. Resume returns `202`
 and the session moves through provisioning until `runtime_ready` is true again.
+If Pause repeatedly reports stale staged download data and the user has
+confirmed that no download is running, retry with
+`{"discard_staged_downloads":true}`. This discards only the Droplet's temporary
+download staging while retaining the persistent Chrome profile volume and
+Shared Downloads.
 
 ### Change a running browser's proxy
 

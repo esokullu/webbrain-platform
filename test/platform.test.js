@@ -1194,6 +1194,63 @@ test('pause refuses a Droplet that was booted before shared Downloads sync was e
   }
 });
 
+test('pause can explicitly discard stale root-disk download staging on an existing Droplet', async () => {
+  const ctx = await startPlatform({
+    WEBBRAIN_SPACES_ENDPOINT: 'https://nyc3.digitaloceanspaces.com',
+    WEBBRAIN_SPACES_ACCESS_KEY: 'access',
+    WEBBRAIN_SPACES_SECRET_KEY: 'secret',
+    WEBBRAIN_SPACES_BUCKET: 'downloads',
+  }, { downloadsHandler: {} });
+  let ws = null;
+  try {
+    const cookie = await register(ctx.base, 'pause-stale-staging@example.com');
+    const created = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: '{}',
+    });
+    const sessionId = created.body.browser_session.id;
+    const storedSession = await ctx.store.getBrowserSession(sessionId);
+    let pausePayload = null;
+    ws = new WebSocket(`${ctx.wsBase}/droplet/control?session_token=${encodeURIComponent(storedSession.connect_secret)}`);
+    await new Promise(resolve => ws.once('open', resolve));
+    ws.on('message', raw => {
+      const msg = JSON.parse(raw.toString('utf8'));
+      if (msg.type === 'hello') return;
+      if (msg.action === 'health') {
+        ws.send(JSON.stringify({
+          id: msg.id,
+          ok: true,
+          result: { ok: true, extension_connected: true, downloads_sync_enabled: true },
+        }));
+      } else if (msg.action === 'pause.prepare') {
+        pausePayload = msg.payload;
+        ws.send(JSON.stringify({ id: msg.id, ok: true, result: { prepared: true } }));
+      }
+    });
+
+    const invalid = await request(ctx.base, `/api/browser-sessions/${sessionId}/pause`, {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ discard_staged_downloads: 'yes' }),
+    });
+    assert.equal(invalid.status, 400);
+
+    const paused = await request(ctx.base, `/api/browser-sessions/${sessionId}/pause`, {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ discard_staged_downloads: true }),
+    });
+    assert.equal(paused.status, 200);
+    assert.equal(paused.body.browser_session.status, 'paused');
+    assert.equal(paused.body.discarded_staged_downloads, true);
+    assert.match(pausePayload.downloadsStagingDir, /^\/run\/webbrain-pause-empty\/discard_[a-f0-9]{24}$/);
+  } finally {
+    ws?.close();
+    await ctx.platform.close();
+  }
+});
+
 test('always-on browser creation skips the profile volume and keeps local Downloads semantics', async () => {
   const ctx = await startPlatform({
     WEBBRAIN_SPACES_ENDPOINT: 'https://nyc3.digitaloceanspaces.com',
