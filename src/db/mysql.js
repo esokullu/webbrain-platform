@@ -7,6 +7,15 @@ import { randomId } from '../shared/ids.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const schemaPath = path.resolve(__dirname, '..', '..', 'db', 'schema.sql');
+const BROWSER_SESSION_DATE_FIELDS = [
+  'proxy_updated_at',
+  'paused_at',
+  'billing_metered_at',
+  'ended_at',
+  'expires_at',
+  'created_at',
+  'updated_at',
+];
 
 function toMysqlDate(iso) {
   if (!iso) return null;
@@ -836,7 +845,7 @@ export class MySqlStore {
     const assignments = fields.map(k => `${k} = :${k}`).join(', ');
     const values = { id, ...patch };
     if ('proxy_enabled' in values) values.proxy_enabled = values.proxy_enabled ? 1 : 0;
-    for (const key of ['proxy_updated_at', 'paused_at', 'ended_at', 'expires_at', 'created_at', 'updated_at']) {
+    for (const key of BROWSER_SESSION_DATE_FIELDS) {
       if (values[key]) values[key] = toMysqlDate(values[key]);
     }
     await this.pool.execute(`UPDATE browser_sessions SET ${assignments} WHERE id = :id`, values);
@@ -861,7 +870,7 @@ export class MySqlStore {
     const assignments = fields.map(k => `${k} = :${k}`).join(', ');
     const values = { id, expectedStatus, ...patch };
     if ('proxy_enabled' in values) values.proxy_enabled = values.proxy_enabled ? 1 : 0;
-    for (const key of ['proxy_updated_at', 'paused_at', 'ended_at', 'expires_at', 'created_at', 'updated_at']) {
+    for (const key of BROWSER_SESSION_DATE_FIELDS) {
       if (values[key]) values[key] = toMysqlDate(values[key]);
     }
     const [result] = await this.pool.execute(

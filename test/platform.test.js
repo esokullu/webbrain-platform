@@ -2341,6 +2341,11 @@ test('public API documentation provides accessible REST and client tabs', async 
     assert.match(res.text, /data-client="node"/);
     assert.match(res.text, /data-client="python"/);
     assert.match(res.text, /data-client="php"/);
+    assert.match(res.text, /data-code-group="language-examples"/);
+    assert.match(res.text, /id="example-panel-node"/);
+    assert.match(res.text, /id="example-panel-python"/);
+    assert.match(res.text, /id="example-panel-php"/);
+    assert.match(res.text, /Create and run in your language/);
     assert.match(res.text, /Copy example/);
     assert.match(res.text, /class="tok-comment"/);
     assert.match(res.text, /class="tok-keyword"/);
@@ -2365,10 +2370,20 @@ test('public API documentation provides accessible REST and client tabs', async 
     assert.match(res.text, /parent_run_id/);
     assert.match(res.text, /needs_user_input/);
     assert.match(res.text, /PATCH[\s\S]*\/api\/browser-sessions\/:sessionId/);
+    assert.match(res.text, /POST \/api\/browser-sessions<\/span> request body/);
+    assert.match(res.text, /An empty JSON object is valid/);
+    assert.match(res.text, /<code>display_name<\/code>/);
+    assert.match(res.text, /<code>lifecycle<\/code>/);
+    assert.match(res.text, /<code>proxy_enabled<\/code>/);
+    assert.match(res.text, /<code>host_session_id<\/code>/);
+    assert.match(res.text, /<code>ttl_ms<\/code>/);
+    assert.match(res.text, /<code>provider_api_key<\/code>/);
+    assert.match(res.text, /placement\.existing_session_id/);
     assert.match(res.text, /tree\/main\/clients\/node/);
     assert.match(res.text, /tree\/main\/clients\/python/);
     assert.match(res.text, /tree\/main\/clients\/php/);
     assert.match(res.text, /DELETE<\/span><code>\/api\/browser-sessions\/:sessionId\/proxy/);
+    assert.match(res.text, /group\.querySelectorAll\('\[role="tab"\]'\)/);
     assert.match(res.text, /ArrowRight/);
   } finally {
     await ctx.platform.close();

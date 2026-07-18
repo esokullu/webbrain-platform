@@ -71,6 +71,69 @@ $finished = $client->waitForRun($ready['id'], $run['run_id']);
 print_r($finished['result']);`,
 };
 
+const LANGUAGE_EXAMPLES = {
+  node: `import { WebBrainClient } from './clients/node/webbrain-client.js';
+
+const client = new WebBrainClient({
+  apiKey: process.env.WEBBRAIN_API_KEY,
+});
+
+const session = await client.createBrowserSession({
+  display_name: 'Research browser',
+  lifecycle: 'resumable',
+  proxy_enabled: false,
+});
+
+const ready = await client.waitForBrowserSession(session.id);
+const run = await client.createRun(ready.id, {
+  task: 'Open example.com and return the page title',
+});
+const finished = await client.waitForRun(ready.id, run.run_id);
+
+console.log(finished.result);`,
+
+  python: `import os
+from clients.python.webbrain_client import WebBrainClient
+
+client = WebBrainClient(os.environ["WEBBRAIN_API_KEY"])
+
+session = client.create_browser_session(
+    display_name="Research browser",
+    lifecycle="resumable",
+    proxy_enabled=False,
+)
+
+ready = client.wait_for_browser_session(session["id"])
+run = client.create_run(
+    ready["id"],
+    "Open example.com and return the page title",
+)
+finished = client.wait_for_run(ready["id"], run["run_id"])
+
+print(finished["result"])`,
+
+  php: `<?php
+
+require_once __DIR__ . '/clients/php/WebBrainClient.php';
+
+$client = new WebBrainClient(getenv('WEBBRAIN_API_KEY') ?: '');
+
+$session = $client->createBrowserSession([
+    'display_name' => 'Research browser',
+    'lifecycle' => 'resumable',
+    'proxy_enabled' => false,
+]);
+
+$ready = $client->waitForBrowserSession($session['id']);
+$run = $client->createRun(
+    $ready['id'],
+    'Open example.com and return the page title',
+);
+$finished = $client->waitForRun($ready['id'], $run['run_id']);
+
+print_r($finished['result']);`,
+};
+
 const DOWNLOADS_SHELL_EXAMPLE = `# Obtain access and keep the secret out of the literal shell history
 DOWNLOADS_ACCESS=$(curl --fail-with-body -sS -X POST "https://webbrain.cloud/api/browser-sessions/$SESSION_ID/downloads-access" -H "Authorization: Bearer $WEBBRAIN_API_KEY" -H "Content-Type: application/json" -d '{}')
 DOWNLOADS_URL=$(printf '%s' "$DOWNLOADS_ACCESS" | jq -r '.url')
@@ -95,6 +158,7 @@ const TABS = [
   ['python', 'Python'],
   ['php', 'PHP'],
 ];
+const LANGUAGE_TABS = TABS.filter(([id]) => id !== 'rest');
 
 const TOKEN_PATTERNS = {
   rest: /#[^\n]*|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*|\b[A-Z_][A-Z0-9_]*(?==)|\b(?:export|until|do|done|sleep|curl|jq|printf|basename)\b|\b(?:true|false|null)\b|\b\d+\b/gm,
@@ -143,10 +207,14 @@ function highlightedCode(source, language) {
 }
 
 export function docsPage() {
-  const tabButtons = TABS.map(([id, label], index) => `
+  const quickstartTabButtons = TABS.map(([id, label], index) => `
     <button class="code-tab" id="tab-${id}" type="button" role="tab" aria-selected="${index === 0}" aria-controls="panel-${id}" tabindex="${index === 0 ? 0 : -1}" data-client="${id}">${label}</button>`).join('');
-  const tabPanels = TABS.map(([id, label], index) => `
+  const quickstartTabPanels = TABS.map(([id], index) => `
     <pre class="code-panel language-${id}" id="panel-${id}" role="tabpanel" aria-labelledby="tab-${id}" ${index === 0 ? '' : 'hidden'}><code>${highlightedCode(EXAMPLES[id], id)}</code></pre>`).join('');
+  const languageTabButtons = LANGUAGE_TABS.map(([id, label], index) => `
+    <button class="code-tab" id="example-tab-${id}" type="button" role="tab" aria-selected="${index === 0}" aria-controls="example-panel-${id}" tabindex="${index === 0 ? 0 : -1}" data-client="${id}">${label}</button>`).join('');
+  const languageTabPanels = LANGUAGE_TABS.map(([id], index) => `
+    <pre class="code-panel language-${id}" id="example-panel-${id}" role="tabpanel" aria-labelledby="example-tab-${id}" ${index === 0 ? '' : 'hidden'}><code>${highlightedCode(LANGUAGE_EXAMPLES[id], id)}</code></pre>`).join('');
 
   return `<!doctype html>
 <html lang="en">
@@ -212,6 +280,7 @@ export function docsPage() {
     .copy-button { min-height: 34px; padding: 6px 11px; border: 1px solid rgba(255,255,255,.12); border-radius: 7px; background: rgba(255,255,255,.05); color: #bcc3d8; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; }
     .copy-button:hover { background: rgba(255,255,255,.10); color: white; }
     .code-panel { min-height: 420px; max-height: 580px; margin: 0; padding: 28px; overflow: auto; color: #dfe5f5; font: 13px/1.75 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; tab-size: 2; white-space: pre; }
+    .code-card.compact .code-panel { min-height: 360px; }
     .code-panel[hidden] { display: none; }
     .tok-comment { color: #77849f; font-style: italic; }
     .tok-keyword { color: #c8a7ff; font-weight: 650; }
@@ -244,6 +313,8 @@ export function docsPage() {
     .field-table th, .field-table td { padding: 12px 14px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; font-size: 13px; }
     .field-table th { color: var(--text-dim); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
     .field-table tr:last-child td { border-bottom: 0; }
+    .field-table td:first-child code { color: var(--accent); font-weight: 750; white-space: nowrap; }
+    .field-note { margin: 14px 0 0; color: var(--text-dim); font-size: 13px; }
     .status-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
     .status { padding: 6px 9px; border: 1px solid var(--border); border-radius: 999px; background: rgba(255,253,248,.68); color: var(--text-dim); font: 700 11px ui-monospace, monospace; }
     .status.completed { border-color: rgba(45,136,102,.25); color: var(--success); }
@@ -315,12 +386,12 @@ export function docsPage() {
         <div class="flow-step"><span class="flow-number">3</span><strong>Run</strong><span>Send a natural-language task.</span></div>
         <div class="flow-step"><span class="flow-number">4</span><strong>Result</strong><span>Poll for text or structured JSON.</span></div>
       </div>
-      <div class="code-card">
+      <div class="code-card" data-code-group="quickstart">
         <div class="code-toolbar">
-          <div class="code-tabs" role="tablist" aria-label="Choose a client">${tabButtons}</div>
+          <div class="code-tabs" role="tablist" aria-label="Choose a quickstart client">${quickstartTabButtons}</div>
           <button class="copy-button" type="button">Copy example</button>
         </div>
-        ${tabPanels}
+        ${quickstartTabPanels}
       </div>
     </section>
 
@@ -329,6 +400,7 @@ export function docsPage() {
         <span class="toc-label">On this page</span>
         <a href="#authentication">Authentication</a>
         <a href="#sessions">Browser sessions</a>
+        <a href="#examples">Language examples</a>
         <a href="#downloads">Downloads</a>
         <a href="#runs">Runs</a>
         <a href="#structured-output">Structured output</a>
@@ -346,6 +418,24 @@ export function docsPage() {
           <p class="section-kicker">Lifecycle</p>
           <h2>Browser sessions</h2>
           <p>Resumable sessions keep Chrome on a fixed private 2 GiB volume and can be paused after shared Downloads storage is configured. Always-on sessions keep Chrome and Downloads on one running Droplet and cannot be paused. Neither persistent lifecycle expires automatically; it remains until explicitly deleted. Ephemeral sessions pass <span class="inline-code">lifecycle: "ephemeral"</span> plus a same-owner running <span class="inline-code">host_session_id</span>; their blank profile, cache, and Downloads live in a bounded systemd-private <span class="inline-code">/tmp</span> namespace and are discarded on any stop, crash, host restart, or expiry. Poll until <span class="inline-code">runtime_ready</span> is true before starting runs.</p>
+          <h3><span class="inline-code">POST /api/browser-sessions</span> request body</h3>
+          <p>An empty JSON object is valid and creates a resumable browser with server defaults. Add only the fields you need:</p>
+          <table class="field-table">
+            <thead><tr><th>Field</th><th>Type</th><th>Default</th><th>Applies to</th><th>Purpose</th></tr></thead>
+            <tbody>
+              <tr><td><code>display_name</code></td><td>string</td><td>None</td><td>All</td><td>A dashboard label up to 120 characters. <code>name</code> is accepted as a compatibility alias.</td></tr>
+              <tr><td><code>lifecycle</code></td><td>string enum</td><td><code>resumable</code></td><td>All</td><td><code>resumable</code>, <code>always_on</code>, or <code>ephemeral</code>.</td></tr>
+              <tr><td><code>region</code></td><td>string</td><td>Server <code>DO_REGION</code></td><td>Persistent</td><td>DigitalOcean region used when WebBrain creates a new Droplet.</td></tr>
+              <tr><td><code>size</code></td><td>string</td><td>Server <code>DO_SIZE</code></td><td>Persistent</td><td>DigitalOcean size slug used for a new Droplet.</td></tr>
+              <tr><td><code>proxy</code></td><td>object or null</td><td>Server route</td><td>All</td><td>Proxy parts: <code>domain</code> or <code>host</code>, <code>port</code>, <code>username</code>, <code>password</code>, and optional <code>protocol</code>.</td></tr>
+              <tr><td><code>proxy_url</code></td><td>string or null</td><td>Server route</td><td>All</td><td>An HTTP, HTTPS, SOCKS4, or SOCKS5 proxy URL. Credentials are accepted but never returned by the API.</td></tr>
+              <tr><td><code>proxy_enabled</code></td><td>boolean</td><td>Server route</td><td>All</td><td><code>true</code> selects the server-managed proxy; <code>false</code> forces a direct connection.</td></tr>
+              <tr><td><code>host_session_id</code></td><td>string</td><td>Required</td><td>Ephemeral</td><td>A same-owner, running persistent browser whose Droplet will host the ephemeral runtime.</td></tr>
+              <tr><td><code>ttl_ms</code></td><td>positive number</td><td>6 hours</td><td>Ephemeral</td><td>Maximum lifetime in milliseconds, capped by the host browser's own expiry when it has one.</td></tr>
+              <tr><td><code>provider_api_key</code></td><td>string</td><td>Scoped session key</td><td>Advanced</td><td>Overrides the browser runtime provider credential. Most clients should omit this field.</td></tr>
+            </tbody>
+          </table>
+          <p class="field-note">Send only one of <span class="inline-code">proxy</span>, <span class="inline-code">proxy_url</span>, or <span class="inline-code">proxy_enabled</span>. For compatibility, ephemeral placement also accepts <span class="inline-code">placement.existing_session_id</span> or <span class="inline-code">placement.host_session_id</span> as aliases for <span class="inline-code">host_session_id</span>. Persistent requests ignore <span class="inline-code">ttl_ms</span> and ephemeral requests inherit region and size from their host.</p>
           <div class="endpoint-list">
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions</code><span>Create a resumable, always-on, or hosted ephemeral browser.</span></div>
             <div class="endpoint"><span class="method">GET</span><code>/api/browser-sessions</code><span>List your sessions.</span></div>
@@ -360,6 +450,19 @@ export function docsPage() {
             <div class="endpoint"><span class="method">DELETE</span><code>/api/browser-sessions/:sessionId</code><span>Destroy persistent infrastructure or stop an ephemeral runtime.</span></div>
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/connect-token</code><span>Create a noVNC link.</span></div>
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/downloads-access</code><span>Create private Downloads credentials.</span></div>
+          </div>
+        </section>
+
+        <section class="docs-section" id="examples">
+          <p class="section-kicker">Copy and adapt</p>
+          <h2>Create and run in your language</h2>
+          <p>These examples create a named resumable browser with a direct connection, wait until its runtime is ready, run one visible task, and print the result. The bundled clients have no third-party runtime dependencies.</p>
+          <div class="code-card compact" data-code-group="language-examples">
+            <div class="code-toolbar">
+              <div class="code-tabs" role="tablist" aria-label="Choose a language example">${languageTabButtons}</div>
+              <button class="copy-button" type="button">Copy example</button>
+            </div>
+            ${languageTabPanels}
           </div>
         </section>
 
@@ -428,45 +531,47 @@ export function docsPage() {
   </main>
   <footer>WebBrain Cloud API · The browser you can watch while your code drives it.</footer>
   <script>
-    const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
-    const panels = Array.from(document.querySelectorAll('[role="tabpanel"]'));
-    const copyButton = document.querySelector('.copy-button');
+    for (const group of document.querySelectorAll('[data-code-group]')) {
+      const tabs = Array.from(group.querySelectorAll('[role="tab"]'));
+      const panels = Array.from(group.querySelectorAll('[role="tabpanel"]'));
+      const copyButton = group.querySelector('.copy-button');
 
-    function activateTab(tab) {
-      for (const candidate of tabs) {
-        const selected = candidate === tab;
-        candidate.setAttribute('aria-selected', String(selected));
-        candidate.tabIndex = selected ? 0 : -1;
+      function activateTab(tab) {
+        for (const candidate of tabs) {
+          const selected = candidate === tab;
+          candidate.setAttribute('aria-selected', String(selected));
+          candidate.tabIndex = selected ? 0 : -1;
+        }
+        for (const panel of panels) panel.hidden = panel.id !== tab.getAttribute('aria-controls');
       }
-      for (const panel of panels) panel.hidden = panel.id !== tab.getAttribute('aria-controls');
-    }
 
-    tabs.forEach((tab, index) => {
-      tab.addEventListener('click', () => activateTab(tab));
-      tab.addEventListener('keydown', event => {
-        let next = index;
-        if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
-        else if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
-        else if (event.key === 'Home') next = 0;
-        else if (event.key === 'End') next = tabs.length - 1;
-        else return;
-        event.preventDefault();
-        activateTab(tabs[next]);
-        tabs[next].focus();
+      tabs.forEach((tab, index) => {
+        tab.addEventListener('click', () => activateTab(tab));
+        tab.addEventListener('keydown', event => {
+          let next = index;
+          if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+          else if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+          else if (event.key === 'Home') next = 0;
+          else if (event.key === 'End') next = tabs.length - 1;
+          else return;
+          event.preventDefault();
+          activateTab(tabs[next]);
+          tabs[next].focus();
+        });
       });
-    });
 
-    copyButton.addEventListener('click', async () => {
-      const active = panels.find(panel => !panel.hidden);
-      if (!active) return;
-      try {
-        await navigator.clipboard.writeText(active.innerText);
-        copyButton.textContent = 'Copied';
-        setTimeout(() => { copyButton.textContent = 'Copy example'; }, 1400);
-      } catch {
-        copyButton.textContent = 'Copy unavailable';
-      }
-    });
+      copyButton.addEventListener('click', async () => {
+        const active = panels.find(panel => !panel.hidden);
+        if (!active) return;
+        try {
+          await navigator.clipboard.writeText(active.innerText);
+          copyButton.textContent = 'Copied';
+          setTimeout(() => { copyButton.textContent = 'Copy example'; }, 1400);
+        } catch {
+          copyButton.textContent = 'Copy unavailable';
+        }
+      });
+    }
   </script>
 </body>
 </html>`;
