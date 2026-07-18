@@ -70,7 +70,7 @@ test('Chrome download sync uploads completed files and only then clears staging'
   }
 });
 
-test('download sync preserves nonempty crash leftovers, removes empty records, and clears temp metadata', async () => {
+test('download sync uploads nonempty crash leftovers as partial files and clears empty records', async () => {
   const stagingDir = await fs.mkdtemp(path.join(os.tmpdir(), 'webbrain-download-recover-'));
   await fs.writeFile(path.join(stagingDir, 'guid-incomplete'), 'partial');
   await fs.writeFile(path.join(stagingDir, 'guid-incomplete.json'), JSON.stringify({
@@ -86,21 +86,37 @@ test('download sync preserves nonempty crash leftovers, removes empty records, a
     completed: false,
   }));
   await fs.writeFile(path.join(stagingDir, 'guid-incomplete.json.123.tmp'), 'stale metadata');
-  let uploaded = false;
+  const uploads = [];
   const sync = new ChromeDownloadSync({
     stagingDir,
     ingestUrl: 'https://platform.example/droplet/downloads',
     sessionToken: 'session-secret',
-    fetchImpl: async () => { uploaded = true; throw new Error('should not upload'); },
+    fetchImpl: async (url, options) => {
+      const chunks = [];
+      for await (const chunk of options.body) chunks.push(Buffer.from(chunk));
+      uploads.push({
+        url,
+        id: options.headers['x-webbrain-download-id'],
+        body: Buffer.concat(chunks).toString('utf8'),
+      });
+      return { ok: true, status: 201, async text() { return '{}'; } };
+    },
   });
   try {
     await sync.start(fakeCdp());
-    assert.deepEqual((await fs.readdir(stagingDir)).sort(), [
-      'guid-incomplete',
-      'guid-incomplete.json',
-      'guid-orphan',
+    await waitFor(async () => (await fs.readdir(stagingDir)).length === 0);
+    assert.deepEqual(uploads.sort((a, b) => a.id.localeCompare(b.id)), [
+      {
+        url: 'https://platform.example/droplet/downloads/partial.bin.partial',
+        id: 'guid-incomplete',
+        body: 'partial',
+      },
+      {
+        url: 'https://platform.example/droplet/downloads/recovered-download-guid-orphan.partial',
+        id: 'guid-orphan',
+        body: 'orphan-data',
+      },
     ]);
-    assert.equal(uploaded, false);
   } finally {
     sync.close();
     await fs.rm(stagingDir, { recursive: true, force: true });

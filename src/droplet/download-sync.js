@@ -54,7 +54,9 @@ export class ChromeDownloadSync {
           continue;
         }
         if (!record.completed) {
-          if (!await this.hasNonEmptyData(record.guid)) {
+          if (await this.hasNonEmptyData(record.guid)) {
+            await this.recoverPartial(record.guid, record);
+          } else {
             await this.removeRecordFiles(record.guid, metadataPath);
           }
           continue;
@@ -65,7 +67,9 @@ export class ChromeDownloadSync {
         this.queueUpload(record.guid, 0);
       } catch {
         const guid = metadataFile.slice(0, -'.json'.length);
-        if (!validGuid(guid) || !await this.hasNonEmptyData(guid)) {
+        if (validGuid(guid) && await this.hasNonEmptyData(guid)) {
+          await this.recoverPartial(guid);
+        } else {
           if (validGuid(guid)) await fs.rm(this.dataPath(guid), { force: true });
           await fs.rm(metadataPath, { force: true });
         }
@@ -74,10 +78,36 @@ export class ChromeDownloadSync {
 
     for (const entry of entries) {
       if (!entry.isFile() || entry.name.endsWith('.json') || entry.name.endsWith('.tmp') || metadataFiles.has(`${entry.name}.json`)) continue;
-      if (validGuid(entry.name) && !await this.hasNonEmptyData(entry.name)) {
-        await fs.rm(path.join(this.stagingDir, entry.name), { force: true });
+      if (!validGuid(entry.name)) continue;
+      if (await this.hasNonEmptyData(entry.name)) {
+        await this.recoverPartial(entry.name);
+      } else {
+        await fs.rm(this.dataPath(entry.name), { force: true });
       }
     }
+  }
+
+  async recoverPartial(guid, previousRecord = null) {
+    const now = new Date().toISOString();
+    const originalFilename = safeFilename(
+      previousRecord?.filename || `recovered-download-${guid}`,
+    );
+    const record = {
+      ...(previousRecord || {}),
+      guid,
+      filename: originalFilename.endsWith('.partial')
+        ? originalFilename
+        : `${originalFilename}.partial`,
+      source_url: String(previousRecord?.source_url || ''),
+      completed: true,
+      recovered_partial: true,
+      created_at: previousRecord?.created_at || now,
+      completed_at: now,
+    };
+    delete record.upload_error;
+    this.records.set(guid, record);
+    await this.persist(record);
+    this.queueUpload(guid, 0);
   }
 
   onDownloadWillBegin(event) {

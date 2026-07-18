@@ -2931,13 +2931,14 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       const session = selectedSession();
       if (!session || !['ready', 'pausing', 'paused'].includes(session.status) || !session.volume) return;
       const action = session.status === 'paused' ? 'resume' : 'pause';
+      const endpoint = '/api/browser-sessions/' + encodeURIComponent(session.id) + '/' + action;
       lifecycleBtn.disabled = true;
       if (viewerConnections.has(session.id)) removeViewerConnection(session.id);
       showMessage(sessionMessage, action === 'pause'
         ? 'Finishing downloads and safely pausing the browser…'
         : 'Creating a new Droplet and attaching the saved Chrome session…');
       try {
-        const body = await api('/api/browser-sessions/' + encodeURIComponent(session.id) + '/' + action, {
+        const body = await api(endpoint, {
           method: 'POST',
           body: {},
         });
@@ -2947,6 +2948,28 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           ? 'Browser paused. Downloads remain available.'
           : 'Browser is starting with its saved Chrome session.');
       } catch (error) {
+        if (
+          action === 'pause'
+          && error.message.includes('Unsynced browser download data remains staged')
+          && window.confirm(
+            'No download is running, but temporary download data is blocking Pause. '
+            + 'Discard only that temporary staging data and pause the browser? '
+            + 'The saved Chrome profile and Shared Downloads will be kept.'
+          )
+        ) {
+          try {
+            const body = await api(endpoint, {
+              method: 'POST',
+              body: { discard_staged_downloads: true },
+            });
+            state.sessions = state.sessions.map(item => item.id === session.id ? body.browser_session : item);
+            renderSessions();
+            showMessage(sessionMessage, 'Browser paused. Stale temporary download data was discarded.');
+            return;
+          } catch (discardError) {
+            error = discardError;
+          }
+        }
         showMessage(sessionMessage, error.message, true);
         await refreshOne(session.id).catch(() => {});
       }
@@ -4827,6 +4850,13 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
     let destroyConfirmed = false;
     let releaseLifecycle = null;
     try {
+      if (
+        Object.prototype.hasOwnProperty.call(req.body || {}, 'discard_staged_downloads')
+        && typeof req.body.discard_staged_downloads !== 'boolean'
+      ) {
+        return jsonError(res, 400, '`discard_staged_downloads` must be a boolean');
+      }
+      const discardStagedDownloads = req.body?.discard_staged_downloads === true;
       const session = await ownedBrowserSession(req, res);
       if (!session) return;
       if (!session.volume_id) return jsonError(res, 409, 'This browser does not have persistent session storage');
@@ -4902,7 +4932,15 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
         session,
         'The host browser was paused; this ephemeral browser and all temporary data were discarded.'
       );
-      await controlChannel.send(session.id, 'pause.prepare', {}, 30_000);
+      const pausePayload = discardStagedDownloads
+        ? {
+            // Older Droplets already accept this option. Pointing their blocker
+            // at a unique absent directory lets them stop Chrome, flush and
+            // unmount the profile normally before the root disk is discarded.
+            downloadsStagingDir: `/run/webbrain-pause-empty/${randomId('discard')}`,
+          }
+        : {};
+      await controlChannel.send(session.id, 'pause.prepare', pausePayload, 30_000);
       await provisioner.destroyDroplet(session.droplet_id);
       destroyConfirmed = true;
       await provisioner.waitForVolumeDetached(session.volume_id);
@@ -4915,9 +4953,15 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       });
       if (!updated) throw Object.assign(new Error('The browser lifecycle changed while pausing'), { status: 409 });
       reserved = false;
-      await audit(req, 'browser_session.pause', 'browser_session', session.id, { volume_id: session.volume_id });
+      await audit(req, 'browser_session.pause', 'browser_session', session.id, {
+        volume_id: session.volume_id,
+        discarded_staged_downloads: discardStagedDownloads,
+      });
       warmPool?.triggerReconcile();
-      res.json({ browser_session: publicBrowserSession(updated) });
+      res.json({
+        browser_session: publicBrowserSession(updated),
+        discarded_staged_downloads: discardStagedDownloads,
+      });
     } catch (error) {
       if (reserved && !destroyConfirmed) {
         const sessionId = req.params.sessionId;
