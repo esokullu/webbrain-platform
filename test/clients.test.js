@@ -13,6 +13,7 @@ const execFileAsync = promisify(execFile);
 
 async function startDownloadsFixture() {
   const files = new Map();
+  const uploadTargets = [];
   const basic = `Basic ${Buffer.from('webbrain:fixture-secret').toString('base64')}`;
   const server = http.createServer(async (req, res) => {
     if (req.url === '/api/browser-sessions/bs_test/downloads-access') {
@@ -50,6 +51,7 @@ async function startDownloadsFixture() {
       return res.end(JSON.stringify({ path: '', entries, upload_limit_bytes: 1024 * 1024 }));
     }
     if (name && req.method === 'PUT') {
+      uploadTargets.push(req.headers['x-webbrain-upload-target']);
       const chunks = [];
       for await (const chunk of req) chunks.push(chunk);
       const extension = path.extname(name);
@@ -92,6 +94,7 @@ async function startDownloadsFixture() {
   return {
     baseUrl: `http://127.0.0.1:${server.address().port}`,
     files,
+    uploadTargets,
     close: () => new Promise(resolve => server.close(resolve)),
   };
 }
@@ -296,6 +299,13 @@ test('Node.js client streams Downloads listing, upload, full download, and range
       'node sample (1).txt',
       'node sample.txt',
     ]);
+    const browserUpload = await client.uploadDownloadsFile('bs_test', source, {
+      remotePath: 'node browser.txt',
+      access,
+      browserLocal: true,
+    });
+    assert.equal(browserUpload.browser_ready, true);
+    assert.equal(fixture.uploadTargets.at(-1), 'browser');
 
     const destination = path.join(directory, 'full.txt');
     const downloaded = await client.downloadDownloadsFile('bs_test', first.name, destination, { access });
@@ -360,7 +370,7 @@ sys.path.insert(0, ${JSON.stringify(path.resolve('clients/python'))})
 from webbrain_client import WebBrainClient
 client = WebBrainClient('wbp_test', base_url=os.environ['WEBBRAIN_FIXTURE_BASE'])
 access = client.create_downloads_access('bs_test')
-uploaded = client.upload_downloads_file('bs_test', os.environ['WEBBRAIN_FIXTURE_SOURCE'], remote_path='python sample.txt', access=access)
+uploaded = client.upload_downloads_file('bs_test', os.environ['WEBBRAIN_FIXTURE_SOURCE'], remote_path='python sample.txt', access=access, browser_local=True)
 listing = client.list_downloads('bs_test', access=access)
 full = os.path.join(os.environ['WEBBRAIN_FIXTURE_DIRECTORY'], 'python-full.txt')
 partial = os.path.join(os.environ['WEBBRAIN_FIXTURE_DIRECTORY'], 'python-partial.txt')
@@ -373,6 +383,7 @@ print(json.dumps({'uploaded': uploaded, 'names': [entry['name'] for entry in lis
       assert.equal(result.uploaded.name, 'python sample.txt');
       assert.equal(result.uploaded.browser_path, '/root/Downloads/python sample.txt');
       assert.equal(result.uploaded.browser_ready, true);
+      assert.equal(fixture.uploadTargets.at(-1), 'browser');
       assert.equal(result.names.includes('python sample.txt'), true);
       assert.equal(await readFile(path.join(directory, 'python-full.txt'), 'utf8'), 'abcdefghij');
       assert.equal(await readFile(path.join(directory, 'python-partial.txt'), 'utf8'), 'defg');
@@ -384,7 +395,7 @@ print(json.dumps({'uploaded': uploaded, 'names': [entry['name'] for entry in lis
 require_once ${JSON.stringify(path.resolve('clients/php/WebBrainClient.php'))};
 $client = new WebBrainClient('wbp_test', getenv('WEBBRAIN_FIXTURE_BASE'));
 $access = $client->createDownloadsAccess('bs_test');
-$uploaded = $client->uploadDownloadsFile('bs_test', getenv('WEBBRAIN_FIXTURE_SOURCE'), 'php sample.txt', $access);
+$uploaded = $client->uploadDownloadsFile('bs_test', getenv('WEBBRAIN_FIXTURE_SOURCE'), 'php sample.txt', $access, true);
 $listing = $client->listDownloads('bs_test', '', $access);
 $full = getenv('WEBBRAIN_FIXTURE_DIRECTORY') . '/php-full.txt';
 $partial = getenv('WEBBRAIN_FIXTURE_DIRECTORY') . '/php-partial.txt';
@@ -397,6 +408,7 @@ echo json_encode(['uploaded' => $uploaded, 'names' => array_column($listing['ent
       assert.equal(result.uploaded.name, 'php sample.txt');
       assert.equal(result.uploaded.browser_path, '/root/Downloads/php sample.txt');
       assert.equal(result.uploaded.browser_ready, true);
+      assert.equal(fixture.uploadTargets.at(-1), 'browser');
       assert.equal(result.names.includes('php sample.txt'), true);
       assert.equal(await readFile(path.join(directory, 'php-full.txt'), 'utf8'), 'abcdefghij');
       assert.equal(await readFile(path.join(directory, 'php-partial.txt'), 'utf8'), 'bcde');

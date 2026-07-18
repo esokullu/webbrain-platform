@@ -143,10 +143,10 @@ DOWNLOADS_PASSWORD=$(printf '%s' "$DOWNLOADS_ACCESS" | jq -r '.password')
 # Machine-readable listing
 curl --fail-with-body -sS -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" -H 'Accept: application/json' "$DOWNLOADS_URL" | jq
 
-# Streaming upload; response.name is the final collision-safe name
+# Browser-local streaming upload; response.browser_path is immediately usable
 LOCAL_FILE='./report.pdf'
 REMOTE_NAME=$(jq -rn --arg name "$(basename -- "$LOCAL_FILE")" '$name | @uri')
-curl --fail-with-body -sS -X PUT -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" -H 'Content-Type: application/octet-stream' --upload-file "$LOCAL_FILE" "\${DOWNLOADS_URL}\${REMOTE_NAME}" | jq
+curl --fail-with-body -sS -X PUT -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" -H 'Content-Type: application/octet-stream' -H 'X-WebBrain-Upload-Target: browser' --upload-file "$LOCAL_FILE" "\${DOWNLOADS_URL}\${REMOTE_NAME}" | jq
 
 # Full download and a byte-range download
 curl --fail-with-body -sS -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" --output './report.pdf' "\${DOWNLOADS_URL}\${REMOTE_NAME}"
@@ -487,11 +487,11 @@ export function docsPage() {
               <tr><td><code>browser_ready</code></td><td>boolean</td><td><code>true</code> only when the browser can open <code>browser_path</code> immediately.</td></tr>
             </tbody>
           </table>
-          <p class="field-note">Incognito browser-local uploads return their real absolute Downloads path and <span class="inline-code">browser_ready: true</span>. Normal shared-storage uploads remain available while paused but are not mounted into the browser filesystem, so they return <span class="inline-code">storage_backend: "shared_object"</span>, <span class="inline-code">browser_path: null</span>, and <span class="inline-code">browser_ready: false</span>. Existing <span class="inline-code">path</span>, <span class="inline-code">url</span>, <span class="inline-code">etag</span>, and <span class="inline-code">idempotent</span> fields may also be present for compatibility and shared-storage bookkeeping.</p>
+          <p class="field-note">Incognito uploads are browser-local. For a ready, running normal browser, send <span class="inline-code">X-WebBrain-Upload-Target: browser</span> on the <span class="inline-code">PUT</span> to upload directly to that browser and receive its real absolute Downloads path with <span class="inline-code">browser_ready: true</span>. The request returns <span class="inline-code">409 Conflict</span> while the browser is paused or not ready. Without the header, normal uploads use shared storage, remain available while paused, and return <span class="inline-code">storage_backend: "shared_object"</span>, <span class="inline-code">browser_path: null</span>, and <span class="inline-code">browser_ready: false</span>. Existing <span class="inline-code">path</span>, <span class="inline-code">url</span>, <span class="inline-code">etag</span>, and <span class="inline-code">idempotent</span> fields may also be present for compatibility and shared-storage bookkeeping.</p>
           <p>For normal browsers, shared Downloads are scoped to the user, remain online while Droplets are paused, and have a default 25 GiB fair-use allowance per user. Directory requests return the file tray by default and JSON when sent <span class="inline-code">Accept: application/json</span>. Files support <span class="inline-code">GET</span>, <span class="inline-code">HEAD</span>, one HTTP byte range, and raw streaming <span class="inline-code">PUT</span> uploads. Existing names receive a numbered suffix. Delete, rename, and folder creation are not available.</p>
           <p>Chrome writes downloads to temporary Droplet staging. After Chrome reports completion, WebBrain uploads the file to shared storage and removes the local copy only after confirmation. Pause is refused while staging or sync work remains.</p>
           <h3>Client helpers</h3>
-          <p>Node.js and PHP expose <span class="inline-code">listDownloads</span>, <span class="inline-code">uploadDownloadsFile</span>, and <span class="inline-code">downloadDownloadsFile</span>. Python exposes <span class="inline-code">list_downloads</span>, <span class="inline-code">upload_downloads_file</span>, and <span class="inline-code">download_downloads_file</span>. All transfer file bodies as streams and protect existing local files unless overwrite is explicitly enabled.</p>
+          <p>Node.js and PHP expose <span class="inline-code">listDownloads</span>, <span class="inline-code">uploadDownloadsFile</span>, and <span class="inline-code">downloadDownloadsFile</span>. Python exposes <span class="inline-code">list_downloads</span>, <span class="inline-code">upload_downloads_file</span>, and <span class="inline-code">download_downloads_file</span>. Set <span class="inline-code">browserLocal: true</span> in Node.js, <span class="inline-code">browser_local=True</span> in Python, or the PHP upload helper's final argument to <span class="inline-code">true</span> for a browser-local upload. All transfer file bodies as streams and protect existing local files unless overwrite is explicitly enabled.</p>
         </section>
 
         <section class="docs-section" id="runs">

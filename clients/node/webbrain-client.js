@@ -111,7 +111,11 @@ export class WebBrainClient {
     return await response.json();
   }
 
-  async uploadDownloadsFile(sessionId, localPath, { remotePath = path.basename(String(localPath)), access } = {}) {
+  async uploadDownloadsFile(sessionId, localPath, {
+    remotePath = path.basename(String(localPath)),
+    access,
+    browserLocal = false,
+  } = {}) {
     const resolvedAccess = await this.downloadsAccess(sessionId, access);
     const source = String(localPath || '');
     if (!source) throw new TypeError('localPath is required');
@@ -125,6 +129,7 @@ export class WebBrainClient {
       headers: {
         'content-length': String(stat.size),
         'content-type': 'application/octet-stream',
+        ...(browserLocal ? { 'x-webbrain-upload-target': 'browser' } : {}),
       },
       body: createReadStream(source),
       duplex: 'half',

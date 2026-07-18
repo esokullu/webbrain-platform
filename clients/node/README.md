@@ -84,10 +84,10 @@ const access = await client.createDownloadsAccess(ready.id);
 const uploaded = await client.uploadDownloadsFile(
   ready.id,
   './report.pdf',
-  { remotePath: 'report.pdf', access },
+  { remotePath: 'report.pdf', access, browserLocal: true },
 );
 console.log(uploaded.name);         // May be "report (1).pdf" on a collision.
-console.log(uploaded.browser_path); // Absolute path, or null for shared storage.
+console.log(uploaded.browser_path); // Real path in this ready browser.
 console.log(uploaded.browser_ready);
 
 const listing = await client.listDownloads(ready.id, { access });
@@ -107,6 +107,10 @@ await client.downloadDownloadsFile(
   { access, range: 'bytes=0-1023' },
 );
 ```
+
+`browserLocal: true` uploads directly to the ready, running browser and returns
+its absolute Downloads path. Omit it to use durable shared object storage; that
+default remains accessible while paused but returns `browser_path: null`.
 
 If `access` is omitted, each helper calls `createDownloadsAccess` itself. A
 download will not replace an existing local file unless `overwrite: true` is

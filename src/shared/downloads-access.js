@@ -4,6 +4,8 @@ export const DOWNLOADS_USERNAME = 'webbrain';
 export const DOWNLOADS_PATH_PREFIX = '/downloads';
 export const DOWNLOADS_PROXY_TIMESTAMP_HEADER = 'x-webbrain-downloads-timestamp';
 export const DOWNLOADS_PROXY_SIGNATURE_HEADER = 'x-webbrain-downloads-signature';
+export const DOWNLOADS_UPLOAD_TARGET_HEADER = 'x-webbrain-upload-target';
+export const DOWNLOADS_UPLOAD_TARGET_BROWSER = 'browser';
 export const DEFAULT_DOWNLOADS_SIGNATURE_MAX_AGE_MS = 30_000;
 export const DEFAULT_DOWNLOADS_UPLOAD_LIMIT_BYTES = 5 * 1024 * 1024 * 1024;
 

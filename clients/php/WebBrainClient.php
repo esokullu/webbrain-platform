@@ -147,6 +147,7 @@ final class WebBrainClient
         string $localPath,
         ?string $remotePath = null,
         ?array $access = null,
+        bool $browserLocal = false,
     ): array {
         if (!is_file($localPath)) {
             throw new InvalidArgumentException('localPath must be a regular file');
@@ -171,7 +172,11 @@ final class WebBrainClient
                 method: 'PUT',
                 input: $source,
                 inputSize: $size,
-                headers: ['Accept: application/json', 'Content-Type: application/octet-stream'],
+                headers: [
+                    'Accept: application/json',
+                    'Content-Type: application/octet-stream',
+                    ...($browserLocal ? ['X-WebBrain-Upload-Target: browser'] : []),
+                ],
             );
         } finally {
             fclose($source);

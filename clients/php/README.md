@@ -88,9 +88,10 @@ $uploaded = $client->uploadDownloadsFile(
     './report.pdf',
     'report.pdf',
     $access,
+    true,
 );
 echo $uploaded['name']; // May be "report (1).pdf" on a collision.
-var_dump($uploaded['browser_path']); // Absolute path, or null for shared storage.
+var_dump($uploaded['browser_path']); // Real path in this ready browser.
 var_dump($uploaded['browser_ready']);
 
 $listing = $client->listDownloads($ready['id'], '', $access);
@@ -110,6 +111,10 @@ $client->downloadDownloadsFile(
     'bytes=0-1023',
 );
 ```
+
+The final `true` uploads directly to the ready, running browser and returns its
+absolute Downloads path. Omit it to use durable shared object storage; that
+default remains accessible while paused but returns `browser_path: null`.
 
 If `$access` is omitted, each helper calls `createDownloadsAccess` itself. A
 download will not replace an existing local file unless `$overwrite` is

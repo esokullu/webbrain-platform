@@ -290,6 +290,25 @@ curl --fail-with-body -sS -X PUT \
   "${DOWNLOADS_URL}${REMOTE_NAME}" | jq
 ```
 
+Normal browsers use durable shared object storage by default. To upload directly
+into a ready, running browser's filesystem instead, add
+`X-WebBrain-Upload-Target: browser` to the `PUT`:
+
+```bash
+curl --fail-with-body -sS -X PUT \
+  -u "$DOWNLOADS_USER:$DOWNLOADS_PASSWORD" \
+  -H 'Content-Type: application/octet-stream' \
+  -H 'X-WebBrain-Upload-Target: browser' \
+  --upload-file "$LOCAL_FILE" \
+  "${DOWNLOADS_URL}${REMOTE_NAME}" | jq
+```
+
+This browser-local form returns a real absolute path such as
+`/root/Downloads/report.pdf`. It returns `409 Conflict` when the browser is
+paused or not ready; resume the browser before retrying. Omit the header when
+durability while paused is more important than an immediate browser-visible
+path.
+
 Download a complete file or a byte range:
 
 ```bash
@@ -315,7 +334,10 @@ credential repeatedly; clients do not cache it on their own.
 Successful uploads return `name`, `size`, the lowercase `sha256` digest,
 `storage_backend`, `browser_path`, and `browser_ready`. Browser-local uploads
 use `storage_backend: "browser_local"` and return the real absolute path visible
-to that browser. Shared object-backed uploads use
+to that browser. A normal browser opts into this behavior with the
+`X-WebBrain-Upload-Target: browser` request header; the Node.js, Python, and PHP
+client flags are `browserLocal: true`, `browser_local=True`, and `true` in the
+final method argument, respectively. Shared object-backed uploads use
 `storage_backend: "shared_object"`, `browser_path: null`, and
 `browser_ready: false` because they are durable and accessible while paused but
 are not mounted into the browser filesystem. Existing `path`, `url`, `etag`,

@@ -4,6 +4,8 @@ import { WebSocket, WebSocketServer } from 'ws';
 import {
   DOWNLOADS_PROXY_SIGNATURE_HEADER,
   DOWNLOADS_PROXY_TIMESTAMP_HEADER,
+  DOWNLOADS_UPLOAD_TARGET_BROWSER,
+  DOWNLOADS_UPLOAD_TARGET_HEADER,
   isDownloadsRequestPath,
   signDownloadsProxyRequest,
   verifyDownloadsBasicAuthorization,
@@ -70,10 +72,31 @@ export function createInstanceProxy({ store, domain, targetPort = 6081, download
       return true;
     }
 
+    const requestedUploadTarget = isDownloads && req.method === 'PUT'
+      ? String(req.headers[DOWNLOADS_UPLOAD_TARGET_HEADER] || '').trim().toLowerCase()
+      : '';
+    if (requestedUploadTarget && requestedUploadTarget !== DOWNLOADS_UPLOAD_TARGET_BROWSER) {
+      res.writeHead(400, {
+        'cache-control': 'private, no-store',
+        'content-type': 'text/plain; charset=utf-8',
+      });
+      res.end(`Invalid ${DOWNLOADS_UPLOAD_TARGET_HEADER} value`);
+      return true;
+    }
+    const browserLocalUpload = requestedUploadTarget === DOWNLOADS_UPLOAD_TARGET_BROWSER;
+    if (browserLocalUpload && (session.status !== 'ready' || !session.public_ip)) {
+      res.writeHead(409, {
+        'cache-control': 'private, no-store',
+        'content-type': 'text/plain; charset=utf-8',
+      });
+      res.end('Browser-local upload requires a ready, running browser');
+      return true;
+    }
+
     // Legacy and explicitly always-on browsers have no profile volume. Keep
     // their Downloads on the running Droplet even when shared storage is
     // configured for resumable browsers.
-    if (isDownloads && downloadsHandler && session.volume_id) {
+    if (isDownloads && downloadsHandler && session.volume_id && !browserLocalUpload) {
       await downloadsHandler.handleRequest(req, res, { userId: session.user_id });
       return true;
     }
@@ -87,6 +110,7 @@ export function createInstanceProxy({ store, domain, targetPort = 6081, download
     const headers = upstreamHeaders(req, session.public_ip, sessionTargetPort);
     if (isDownloads) {
       delete headers.authorization;
+      delete headers[DOWNLOADS_UPLOAD_TARGET_HEADER];
       const signed = signDownloadsProxyRequest(session.connect_secret, {
         method: req.method,
         path: req.url,

@@ -132,6 +132,7 @@ class WebBrainClient:
         *,
         remote_path: Optional[str] = None,
         access: Optional[Dict[str, Any]] = None,
+        browser_local: bool = False,
     ):
         file_stat = os.stat(local_path)
         if not stat.S_ISREG(file_stat.st_mode):
@@ -146,6 +147,8 @@ class WebBrainClient:
             "Content-Length": str(file_stat.st_size),
             "Accept": "application/json",
         }
+        if browser_local:
+            headers["X-WebBrain-Upload-Target"] = "browser"
         with open(local_path, "rb") as source:
             response = self._downloads_request(
                 downloads_access,

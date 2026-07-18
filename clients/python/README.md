@@ -86,9 +86,10 @@ uploaded = client.upload_downloads_file(
     "./report.pdf",
     remote_path="report.pdf",
     access=access,
+    browser_local=True,
 )
 print(uploaded["name"])  # May be "report (1).pdf" on a collision.
-print(uploaded["browser_path"])  # Absolute path, or None for shared storage.
+print(uploaded["browser_path"])  # Real path in this ready browser.
 print(uploaded["browser_ready"])
 
 listing = client.list_downloads(ready["id"], access=access)
@@ -108,6 +109,10 @@ client.download_downloads_file(
     byte_range="bytes=0-1023",
 )
 ```
+
+`browser_local=True` uploads directly to the ready, running browser and returns
+its absolute Downloads path. Omit it to use durable shared object storage; that
+default remains accessible while paused but returns `browser_path: None`.
 
 If `access` is omitted, each helper calls `create_downloads_access` itself. A
 download will not replace an existing local file unless `overwrite=True` is

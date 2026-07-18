@@ -21,6 +21,8 @@ import { hashToken } from '../src/shared/crypto.js';
 import {
   DOWNLOADS_PROXY_SIGNATURE_HEADER,
   DOWNLOADS_PROXY_TIMESTAMP_HEADER,
+  DOWNLOADS_UPLOAD_TARGET_BROWSER,
+  DOWNLOADS_UPLOAD_TARGET_HEADER,
   downloadsAccessCredentials,
   verifyDownloadsProxyRequest,
 } from '../src/shared/downloads-access.js';
@@ -2538,6 +2540,7 @@ test('instance subdomains proxy HTTP and WebSocket traffic to the session drople
       method: req.method,
       path: req.url,
       authorization: req.headers.authorization,
+      uploadTarget: req.headers[DOWNLOADS_UPLOAD_TARGET_HEADER],
       timestamp: req.headers[DOWNLOADS_PROXY_TIMESTAMP_HEADER],
       signature: req.headers[DOWNLOADS_PROXY_SIGNATURE_HEADER],
     });
@@ -2563,6 +2566,18 @@ test('instance subdomains proxy HTTP and WebSocket traffic to the session drople
     runtime_port: upstreamAddress.port,
     connect_secret: 'secret',
     expires_at: new Date(Date.now() + 60000).toISOString(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+  await store.createBrowserSession({
+    id: 'bs_savedbeef',
+    user_id: 'usr_test',
+    status: 'ready',
+    public_ip: '127.0.0.1',
+    runtime_port: upstreamAddress.port,
+    volume_id: 'vol-savedbeef',
+    connect_secret: 'saved-secret',
+    expires_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   });
@@ -2670,6 +2685,66 @@ test('instance subdomains proxy HTTP and WebSocket traffic to the session drople
       path: proxiedDownloads.path,
     }), true);
 
+    const savedCredentials = downloadsAccessCredentials('saved-secret');
+    const browserLocalUpload = await new Promise((resolve, reject) => {
+      const req = http.request({
+        hostname: '127.0.0.1',
+        port: address.port,
+        method: 'PUT',
+        path: '/downloads/avatar.jpg',
+        headers: {
+          host: 'bs-savedbeef.webbrain.cloud',
+          'x-forwarded-proto': 'https',
+          authorization: `Basic ${Buffer.from(`${savedCredentials.username}:${savedCredentials.password}`).toString('base64')}`,
+          [DOWNLOADS_UPLOAD_TARGET_HEADER]: DOWNLOADS_UPLOAD_TARGET_BROWSER,
+          'content-type': 'application/octet-stream',
+        },
+      }, upstreamRes => {
+        const chunks = [];
+        upstreamRes.on('data', chunk => chunks.push(chunk));
+        upstreamRes.once('end', () => resolve({
+          status: upstreamRes.statusCode,
+          body: Buffer.concat(chunks).toString(),
+        }));
+      });
+      req.once('error', reject);
+      req.end('avatar');
+    });
+    assert.equal(browserLocalUpload.status, 200);
+    assert.equal(browserLocalUpload.body, 'proxied');
+    assert.equal(sharedDownloadsRequests, 0);
+    const proxiedBrowserUpload = upstreamRequests.at(-1);
+    assert.equal(proxiedBrowserUpload.method, 'PUT');
+    assert.equal(proxiedBrowserUpload.path, '/downloads/avatar.jpg');
+    assert.equal(proxiedBrowserUpload.authorization, undefined);
+    assert.equal(proxiedBrowserUpload.uploadTarget, undefined);
+    assert.equal(verifyDownloadsProxyRequest('saved-secret', {
+      timestamp: proxiedBrowserUpload.timestamp,
+      signature: proxiedBrowserUpload.signature,
+      method: proxiedBrowserUpload.method,
+      path: proxiedBrowserUpload.path,
+    }), true);
+
+    const sharedListing = await new Promise((resolve, reject) => {
+      const req = http.request({
+        hostname: '127.0.0.1',
+        port: address.port,
+        path: '/downloads/',
+        headers: {
+          host: 'bs-savedbeef.webbrain.cloud',
+          'x-forwarded-proto': 'https',
+          authorization: `Basic ${Buffer.from(`${savedCredentials.username}:${savedCredentials.password}`).toString('base64')}`,
+        },
+      }, upstreamRes => {
+        upstreamRes.resume();
+        upstreamRes.once('end', () => resolve({ status: upstreamRes.statusCode }));
+      });
+      req.once('error', reject);
+      req.end();
+    });
+    assert.equal(sharedListing.status, 500);
+    assert.equal(sharedDownloadsRequests, 1);
+
     const ws = new WebSocket(`ws://127.0.0.1:${address.port}/websockify?token=test`, {
       headers: { host: 'bs-deadbeef.webbrain.cloud' },
     });
@@ -2739,16 +2814,22 @@ test('shared Downloads remain authenticated and available for paused browsers wi
     assert.equal(access.status, 200);
     assert.equal(access.body.upload_limit_bytes, 25 * 1024 * 1024 * 1024);
 
-    const makeDownloadsRequest = authorization => new Promise((resolve, reject) => {
+    const makeDownloadsRequest = (authorization, {
+      method = 'GET',
+      path = '/downloads/',
+      uploadTarget,
+    } = {}) => new Promise((resolve, reject) => {
       const target = new URL(ctx.base);
       const req = http.request({
         hostname: target.hostname,
         port: target.port,
-        path: '/downloads/',
+        method,
+        path,
         headers: {
           host: 'bs-pausedfiles.webbrain.cloud',
           'x-forwarded-proto': 'https',
           ...(authorization ? { authorization } : {}),
+          ...(uploadTarget ? { [DOWNLOADS_UPLOAD_TARGET_HEADER]: uploadTarget } : {}),
         },
       }, res => {
         const chunks = [];
@@ -2764,6 +2845,13 @@ test('shared Downloads remain authenticated and available for paused browsers wi
     const listing = await makeDownloadsRequest(basic);
     assert.equal(listing.status, 200);
     assert.deepEqual(JSON.parse(listing.body), { entries: [], paused: true });
+    const browserLocalUpload = await makeDownloadsRequest(basic, {
+      method: 'PUT',
+      path: '/downloads/avatar.jpg',
+      uploadTarget: DOWNLOADS_UPLOAD_TARGET_BROWSER,
+    });
+    assert.equal(browserLocalUpload.status, 409);
+    assert.match(browserLocalUpload.body, /ready, running browser/);
     assert.deepEqual(handledUsers, [user.id]);
   } finally {
     await ctx.platform.close();
