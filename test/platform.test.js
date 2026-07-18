@@ -2134,6 +2134,14 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
       /id="connectBtn"[^]*id="downloadsBtn"[^]*id="lifecycleBtn"[^]*id="browserActionsMenu"/
     );
     assert.match(res.text, /id="lifecycleResumeIcon"[^>]*hidden/);
+    assert.match(
+      res.text,
+      /lifecyclePauseIcon\.toggleAttribute\('hidden', session\?\.status === 'paused'\)/
+    );
+    assert.match(
+      res.text,
+      /lifecycleResumeIcon\.toggleAttribute\('hidden', session\?\.status !== 'paused'\)/
+    );
     assert.doesNotMatch(res.text, /id="regionInput"/);
     const inlineScripts = [...res.text.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]);
     assert.ok(inlineScripts.length > 0);
