@@ -34,6 +34,7 @@ async function startPlatform(env = {}, { downloadsHandler = null } = {}) {
     WEBBRAIN_MODEL_PROXY_BASE_URL: 'http://127.0.0.1:65530/v1',
     WEBBRAIN_RUN_POLL_INTERVAL_MS: '10',
     WEBBRAIN_RUN_WAIT_TIMEOUT_MS: '1000',
+    WEBBRAIN_BILLING_ENFORCE_CREDIT: 'false',
     ...env,
   });
   const store = new MemoryStore();
@@ -1980,30 +1981,29 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.doesNotMatch(res.text, /id="newProxyPort"/);
     assert.doesNotMatch(res.text, /id="newProxyUsername"/);
     assert.doesNotMatch(res.text, /id="newProxyPassword"/);
-    assert.match(res.text, /id="browserSettingsBtn"/);
-    assert.match(res.text, /id="resetSessionBtn"/);
-    assert.match(res.text, /function resetSession\(\)/);
+    assert.match(res.text, /id="renameSessionBtn"/);
+    assert.match(res.text, /id="browserActionsMenu"/);
+    assert.match(res.text, /id="proxyMenuBtn"/);
+    assert.match(res.text, /id="restartSessionBtn"/);
+    assert.match(res.text, /id="destroySessionBtn"/);
+    assert.match(res.text, /function restartBrowserSession\(\)/);
     assert.match(res.text, /\/reset'/);
     assert.match(res.text, /power-cycles its Droplet/);
     assert.match(res.text, /Restarting your browser/);
-    assert.match(res.text, /id="browserSettingsDialog"/);
+    assert.match(res.text, /id="renameBrowserDialog"/);
     assert.match(res.text, /id="browserNameForm"/);
-    assert.match(res.text, /id="proxyForm"/);
-    assert.match(res.text, /id="proxyEnabled"/);
-    assert.match(res.text, /id="proxyEndpoint"/);
-    assert.match(res.text, /id="proxyExitIp"/);
-    assert.match(res.text, /function updateProxyPresentation\(proxy, available = true\)/);
-    assert.match(res.text, /Credentials are managed by the server environment/);
-    assert.match(res.text, /function openBrowserSettings\(\)/);
-    assert.doesNotMatch(res.text, /id="proxyBtn"/);
-    assert.doesNotMatch(res.text, /id="renameSessionBtn"/);
+    assert.match(res.text, /function openRenameBrowser\(\)/);
+    assert.match(res.text, /function toggleBrowserProxy\(\)/);
+    assert.match(res.text, /Enable proxy…/);
+    assert.match(res.text, /Disable proxy…/);
+    assert.match(res.text, /body: \{ proxy_enabled: enable \}/);
+    assert.doesNotMatch(res.text, /id="browserSettingsDialog"/);
+    assert.doesNotMatch(res.text, /id="proxyForm"/);
     assert.match(res.text, /id="downloadsBtn"/);
     assert.match(res.text, /id="downloadsDialog"/);
     assert.match(res.text, /id="copyDownloadsPasswordBtn"/);
     assert.match(res.text, /function openDownloadsDialog\(\)/);
     assert.match(res.text, /\/downloads-access/);
-    assert.match(res.text, /function saveBrowserProxy\(event\)/);
-    assert.match(res.text, /body: \{ proxy_enabled: proxyEnabled\.checked \}/);
     assert.match(res.text, /method: 'PATCH'/);
     assert.match(res.text, /display_name/);
     assert.match(res.text, /id="deleteConfirmName"/);
@@ -2056,6 +2056,9 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /data-view-target="billing">Billing/);
     assert.match(res.text, /id="billingBalance"/);
     assert.match(res.text, /id="topUpGrid"/);
+    assert.match(res.text, /id="autoTopUpForm"/);
+    assert.match(res.text, /save its card and enable automatic top-up/);
+    assert.match(res.text, /\/api\/billing\/auto-top-up/);
     assert.match(res.text, /Secure checkout by/);
     assert.match(res.text, /function loadBilling\(\)/);
     assert.match(res.text, /\/api\/billing\/checkout-session/);
@@ -2126,8 +2129,11 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /class="site-footer"/);
     assert.match(res.text, /Private browser workspaces/);
     assert.match(res.text, /class="action-button action-button-primary"/);
-    assert.match(res.text, /aria-label="Browser tools"/);
-    assert.match(res.text, /aria-label="Browser lifecycle"/);
+    assert.match(
+      res.text,
+      /id="connectBtn"[^]*id="downloadsBtn"[^]*id="lifecycleBtn"[^]*id="browserActionsMenu"/
+    );
+    assert.match(res.text, /id="lifecycleResumeIcon"[^>]*hidden/);
     assert.doesNotMatch(res.text, /id="regionInput"/);
     const inlineScripts = [...res.text.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]);
     assert.ok(inlineScripts.length > 0);
@@ -2155,13 +2161,29 @@ test('pricing and billing expose credit packs and bypass the founder account', a
       headers: { cookie: normalCookie },
     });
     assert.equal(normalBilling.status, 200);
-    assert.deepEqual(normalBilling.body.account, { credit_cents: 0, unlimited: false });
+    assert.equal(normalBilling.body.account.credit_cents, 0);
+    assert.equal(normalBilling.body.account.unlimited, false);
+    assert.equal(normalBilling.body.account.auto_top_up_enabled, false);
+    assert.equal(normalBilling.body.account.auto_top_up_threshold_cents, 500);
+    assert.equal(normalBilling.body.account.auto_top_up_amount_cents, 2500);
+    assert.equal(normalBilling.body.account.payment_method_saved, false);
     assert.equal(normalBilling.body.browser_hour_cents, 10);
     assert.equal(normalBilling.body.stripe_configured, false);
     assert.deepEqual(
       normalBilling.body.credit_packages.map(pack => pack.amount_cents),
       [1000, 2500, 5000, 10000]
     );
+    const missingSavedCard = await request(ctx.base, '/api/billing/auto-top-up', {
+      method: 'PATCH',
+      headers: { cookie: normalCookie },
+      body: JSON.stringify({
+        enabled: true,
+        auto_top_up_threshold_cents: 500,
+        auto_top_up_amount_cents: 2500,
+      }),
+    });
+    assert.equal(missingSavedCard.status, 409);
+    assert.match(missingSavedCard.body.error, /Choose a credit pack/);
     const normalUser = await ctx.store.findUserByEmail('billing@example.com');
     const topUp = {
       id: 'btx_test_1',
@@ -2202,6 +2224,68 @@ test('pricing and billing expose credit packs and bypass the founder account', a
     });
     assert.equal(founderCheckout.status, 409);
     assert.match(founderCheckout.body.error, /unlimited billing access/);
+  } finally {
+    await ctx.platform.close();
+  }
+});
+
+test('credit enforcement blocks new and resumed browsers at an empty balance', async () => {
+  const ctx = await startPlatform({ WEBBRAIN_BILLING_ENFORCE_CREDIT: 'true' });
+  try {
+    const cookie = await register(ctx.base, 'empty-balance@example.com');
+    const blockedCreate = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ lifecycle: 'always_on' }),
+    });
+    assert.equal(blockedCreate.status, 402);
+    assert.match(blockedCreate.body.error, /Add credit before starting a browser/);
+
+    const user = await ctx.store.findUserByEmail('empty-balance@example.com');
+    const now = new Date().toISOString();
+    await ctx.store.createBrowserSession({
+      id: 'bs_no_credit',
+      user_id: user.id,
+      display_name: 'Paused browser',
+      status: 'paused',
+      droplet_id: null,
+      public_ip: null,
+      region: 'nyc3',
+      size: 's-2vcpu-4gb',
+      volume_id: 'vol_no_credit',
+      volume_name: 'wb-profile-no-credit',
+      volume_size_gib: 2,
+      profile_mode: 'persistent',
+      host_session_id: null,
+      runtime_port: null,
+      runtime_generation: null,
+      connect_secret: 'secret',
+      proxy_enabled: false,
+      proxy_endpoint: null,
+      proxy_updated_at: null,
+      paused_at: now,
+      billing_metered_at: now,
+      ended_at: null,
+      end_reason: null,
+      expires_at: null,
+      created_at: now,
+      updated_at: now,
+    });
+    const blockedResume = await request(ctx.base, '/api/browser-sessions/bs_no_credit/resume', {
+      method: 'POST',
+      headers: { cookie },
+      body: '{}',
+    });
+    assert.equal(blockedResume.status, 402);
+    assert.equal((await ctx.store.getBrowserSession('bs_no_credit')).status, 'paused');
+
+    const founderCookie = await register(ctx.base, 'esokullu@gmail.com');
+    const founderCreate = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie: founderCookie },
+      body: JSON.stringify({ lifecycle: 'always_on' }),
+    });
+    assert.equal(founderCreate.status, 201);
   } finally {
     await ctx.platform.close();
   }

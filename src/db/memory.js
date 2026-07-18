@@ -131,7 +131,17 @@ export class MemoryStore {
     const row = {
       user_id,
       credit_cents: 0,
+      usage_remainder_units: 0,
       unlimited: Boolean(unlimited),
+      stripe_customer_id: null,
+      stripe_payment_method_id: null,
+      auto_top_up_enabled: false,
+      auto_top_up_threshold_cents: 500,
+      auto_top_up_amount_cents: 2500,
+      auto_top_up_status: 'disabled',
+      auto_top_up_attempt_id: null,
+      auto_top_up_next_attempt_at: null,
+      auto_top_up_last_error: null,
       created_at,
       updated_at,
     };
@@ -173,6 +183,132 @@ export class MemoryStore {
     storedAccount.updated_at = transaction.created_at;
     return {
       applied: true,
+      account: clone(storedAccount),
+      transaction: clone(transaction),
+    };
+  }
+
+  async updateBillingAutoTopUp(userId, patch) {
+    const account = this.billingAccounts.get(userId);
+    if (!account) throw notFound('Billing account not found');
+    const allowed = [
+      'stripe_customer_id',
+      'stripe_payment_method_id',
+      'auto_top_up_enabled',
+      'auto_top_up_threshold_cents',
+      'auto_top_up_amount_cents',
+      'auto_top_up_status',
+      'auto_top_up_attempt_id',
+      'auto_top_up_next_attempt_at',
+      'auto_top_up_last_error',
+      'updated_at',
+    ];
+    for (const key of allowed) {
+      if (Object.prototype.hasOwnProperty.call(patch, key)) account[key] = clone(patch[key]);
+    }
+    account.auto_top_up_enabled = Boolean(account.auto_top_up_enabled);
+    return clone(account);
+  }
+
+  async listDueAutoTopUpAccounts(at = nowIso()) {
+    const now = new Date(at).getTime();
+    return clone([...this.billingAccounts.values()].filter(account => (
+      !account.unlimited
+      && account.auto_top_up_enabled
+      && account.stripe_customer_id
+      && account.stripe_payment_method_id
+      && Number(account.credit_cents) <= Number(account.auto_top_up_threshold_cents)
+      && (
+        account.auto_top_up_status === 'charging'
+        || !account.auto_top_up_next_attempt_at
+        || new Date(account.auto_top_up_next_attempt_at).getTime() <= now
+      )
+    )));
+  }
+
+  async beginAutoTopUpAttempt(userId, { attempt_id, at = nowIso() }) {
+    const account = this.billingAccounts.get(userId);
+    if (!account
+        || account.unlimited
+        || !account.auto_top_up_enabled
+        || !account.stripe_customer_id
+        || !account.stripe_payment_method_id
+        || Number(account.credit_cents) > Number(account.auto_top_up_threshold_cents)) return null;
+    if (account.auto_top_up_status === 'charging' && account.auto_top_up_attempt_id) {
+      return clone(account);
+    }
+    if (account.auto_top_up_next_attempt_at
+        && new Date(account.auto_top_up_next_attempt_at).getTime() > new Date(at).getTime()) return null;
+    Object.assign(account, {
+      auto_top_up_status: 'charging',
+      auto_top_up_attempt_id: attempt_id,
+      auto_top_up_last_error: null,
+      updated_at: at,
+    });
+    return clone(account);
+  }
+
+  async completeAutoTopUpAttempt(userId, attemptId, patch) {
+    const account = this.billingAccounts.get(userId);
+    if (!account || account.auto_top_up_attempt_id !== attemptId) return null;
+    return await this.updateBillingAutoTopUp(userId, {
+      ...patch,
+      auto_top_up_attempt_id: null,
+    });
+  }
+
+  async listBillableBrowserSessions() {
+    return clone([...this.browserSessions.values()].filter(session => (
+      session.profile_mode !== 'ephemeral'
+      && session.droplet_id
+      && !['paused', 'stopping', 'destroyed'].includes(session.status)
+    )));
+  }
+
+  async meterBrowserSessionUsage(sessionId, { metered_at = nowIso(), rate_cents }) {
+    const session = this.browserSessions.get(sessionId);
+    if (!session) throw notFound('Browser session not found');
+    const previous = session.billing_metered_at;
+    session.billing_metered_at = metered_at;
+    if (!previous) return { applied: false, initialized: true, account: null, transaction: null };
+    if (
+      session.profile_mode === 'ephemeral'
+      || !session.droplet_id
+      || ['paused', 'stopping', 'destroyed'].includes(session.status)
+    ) {
+      return { applied: false, initialized: false, account: null, transaction: null };
+    }
+    const elapsedSeconds = Math.max(0, Math.floor(
+      (new Date(metered_at).getTime() - new Date(previous).getTime()) / 1000
+    ));
+    const account = await this.ensureBillingAccount({ user_id: session.user_id });
+    const storedAccount = this.billingAccounts.get(session.user_id);
+    if (!elapsedSeconds || storedAccount.unlimited) {
+      return { applied: false, initialized: false, account: clone(storedAccount), transaction: null };
+    }
+    const totalUnits = Number(storedAccount.usage_remainder_units || 0)
+      + elapsedSeconds * Number(rate_cents);
+    const chargeCents = Math.floor(totalUnits / 3600);
+    storedAccount.usage_remainder_units = totalUnits % 3600;
+    storedAccount.updated_at = metered_at;
+    if (!chargeCents) {
+      return { applied: false, initialized: false, account: clone(storedAccount), transaction: null };
+    }
+    const transaction = {
+      id: randomId('btx'),
+      user_id: session.user_id,
+      amount_cents: -chargeCents,
+      kind: 'browser_usage',
+      provider: null,
+      provider_ref: `usage:${session.id}:${metered_at}`,
+      description: `${elapsedSeconds}s active browser usage`,
+      created_at: metered_at,
+    };
+    this.billingTransactions.set(transaction.id, transaction);
+    storedAccount.credit_cents = Number(storedAccount.credit_cents) - chargeCents;
+    return {
+      applied: true,
+      initialized: false,
       account: clone(storedAccount),
       transaction: clone(transaction),
     };

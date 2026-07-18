@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import mysql from 'mysql2/promise';
 import { parseJsonMaybe } from '../shared/http.js';
+import { randomId } from '../shared/ids.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const schemaPath = path.resolve(__dirname, '..', '..', 'db', 'schema.sql');
@@ -22,6 +23,10 @@ function encodeJson(value) {
   return value == null ? null : JSON.stringify(value);
 }
 
+function notFound(message = 'Not found') {
+  return Object.assign(new Error(message), { status: 404 });
+}
+
 function normalizeBrowserSession(row) {
   if (!row) return null;
   return {
@@ -29,6 +34,7 @@ function normalizeBrowserSession(row) {
     proxy_enabled: Boolean(row.proxy_enabled),
     proxy_updated_at: fromMysqlDate(row.proxy_updated_at),
     paused_at: fromMysqlDate(row.paused_at),
+    billing_metered_at: fromMysqlDate(row.billing_metered_at),
     ended_at: fromMysqlDate(row.ended_at),
     expires_at: fromMysqlDate(row.expires_at),
     created_at: fromMysqlDate(row.created_at),
@@ -94,6 +100,30 @@ export class MySqlStore {
          ),
          unlimited = 1`
     );
+    const billingAccountColumns = [
+      ['usage_remainder_units', 'ALTER TABLE billing_accounts ADD COLUMN usage_remainder_units BIGINT NOT NULL DEFAULT 0 AFTER credit_cents'],
+      ['stripe_customer_id', 'ALTER TABLE billing_accounts ADD COLUMN stripe_customer_id VARCHAR(255) NULL AFTER unlimited'],
+      ['stripe_payment_method_id', 'ALTER TABLE billing_accounts ADD COLUMN stripe_payment_method_id VARCHAR(255) NULL AFTER stripe_customer_id'],
+      ['auto_top_up_enabled', 'ALTER TABLE billing_accounts ADD COLUMN auto_top_up_enabled TINYINT(1) NOT NULL DEFAULT 0 AFTER stripe_payment_method_id'],
+      ['auto_top_up_threshold_cents', 'ALTER TABLE billing_accounts ADD COLUMN auto_top_up_threshold_cents BIGINT NOT NULL DEFAULT 500 AFTER auto_top_up_enabled'],
+      ['auto_top_up_amount_cents', 'ALTER TABLE billing_accounts ADD COLUMN auto_top_up_amount_cents BIGINT NOT NULL DEFAULT 2500 AFTER auto_top_up_threshold_cents'],
+      ['auto_top_up_status', "ALTER TABLE billing_accounts ADD COLUMN auto_top_up_status VARCHAR(32) NOT NULL DEFAULT 'disabled' AFTER auto_top_up_amount_cents"],
+      ['auto_top_up_attempt_id', 'ALTER TABLE billing_accounts ADD COLUMN auto_top_up_attempt_id VARCHAR(64) NULL AFTER auto_top_up_status'],
+      ['auto_top_up_next_attempt_at', 'ALTER TABLE billing_accounts ADD COLUMN auto_top_up_next_attempt_at DATETIME NULL AFTER auto_top_up_attempt_id'],
+      ['auto_top_up_last_error', 'ALTER TABLE billing_accounts ADD COLUMN auto_top_up_last_error VARCHAR(255) NULL AFTER auto_top_up_next_attempt_at'],
+    ];
+    for (const [column, alter] of billingAccountColumns) {
+      const [rows] = await this.pool.execute(
+        `SELECT 1
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'billing_accounts'
+           AND COLUMN_NAME = :column
+         LIMIT 1`,
+        { column }
+      );
+      if (!rows.length) await this.pool.query(alter);
+    }
     const [displayNameColumns] = await this.pool.execute(
       `SELECT 1
        FROM information_schema.COLUMNS
@@ -128,6 +158,7 @@ export class MySqlStore {
       ['volume_name', 'ALTER TABLE browser_sessions ADD COLUMN volume_name VARCHAR(128) NULL AFTER volume_id'],
       ['volume_size_gib', 'ALTER TABLE browser_sessions ADD COLUMN volume_size_gib INT NULL AFTER volume_name'],
       ['paused_at', 'ALTER TABLE browser_sessions ADD COLUMN paused_at DATETIME NULL AFTER proxy_updated_at'],
+      ['billing_metered_at', 'ALTER TABLE browser_sessions ADD COLUMN billing_metered_at DATETIME NULL AFTER paused_at'],
     ];
     for (const [column, alter] of browserVolumeColumns) {
       const [rows] = await this.pool.execute(
@@ -407,7 +438,12 @@ export class MySqlStore {
     return row ? {
       ...row,
       credit_cents: Number(row.credit_cents),
+      usage_remainder_units: Number(row.usage_remainder_units || 0),
       unlimited: Boolean(row.unlimited),
+      auto_top_up_enabled: Boolean(row.auto_top_up_enabled),
+      auto_top_up_threshold_cents: Number(row.auto_top_up_threshold_cents || 0),
+      auto_top_up_amount_cents: Number(row.auto_top_up_amount_cents || 0),
+      auto_top_up_next_attempt_at: fromMysqlDate(row.auto_top_up_next_attempt_at),
       created_at: fromMysqlDate(row.created_at),
       updated_at: fromMysqlDate(row.updated_at),
     } : null;
@@ -495,11 +531,253 @@ export class MySqlStore {
     }
   }
 
+  async updateBillingAutoTopUp(userId, patch) {
+    const columnMap = {
+      stripe_customer_id: value => value || null,
+      stripe_payment_method_id: value => value || null,
+      auto_top_up_enabled: value => value ? 1 : 0,
+      auto_top_up_threshold_cents: value => Number(value),
+      auto_top_up_amount_cents: value => Number(value),
+      auto_top_up_status: value => String(value),
+      auto_top_up_attempt_id: value => value || null,
+      auto_top_up_next_attempt_at: value => toMysqlDate(value),
+      auto_top_up_last_error: value => value ? String(value).slice(0, 255) : null,
+      updated_at: value => toMysqlDate(value),
+    };
+    const assignments = [];
+    const params = { userId };
+    for (const [key, normalize] of Object.entries(columnMap)) {
+      if (!Object.prototype.hasOwnProperty.call(patch, key)) continue;
+      assignments.push(`${key} = :${key}`);
+      params[key] = normalize(patch[key]);
+    }
+    if (!assignments.length) return await this.getBillingAccount(userId);
+    const [result] = await this.pool.execute(
+      `UPDATE billing_accounts SET ${assignments.join(', ')} WHERE user_id = :userId`,
+      params
+    );
+    if (!result.affectedRows) throw notFound('Billing account not found');
+    return await this.getBillingAccount(userId);
+  }
+
+  async listDueAutoTopUpAccounts(at) {
+    const [rows] = await this.pool.execute(
+      `SELECT *
+       FROM billing_accounts
+       WHERE unlimited = 0
+         AND auto_top_up_enabled = 1
+         AND stripe_customer_id IS NOT NULL
+         AND stripe_payment_method_id IS NOT NULL
+         AND credit_cents <= auto_top_up_threshold_cents
+         AND (
+           auto_top_up_status = 'charging'
+           OR auto_top_up_next_attempt_at IS NULL
+           OR auto_top_up_next_attempt_at <= :at
+         )`,
+      { at: toMysqlDate(at) }
+    );
+    return rows.map(row => ({
+      ...row,
+      credit_cents: Number(row.credit_cents),
+      usage_remainder_units: Number(row.usage_remainder_units || 0),
+      unlimited: Boolean(row.unlimited),
+      auto_top_up_enabled: Boolean(row.auto_top_up_enabled),
+      auto_top_up_threshold_cents: Number(row.auto_top_up_threshold_cents),
+      auto_top_up_amount_cents: Number(row.auto_top_up_amount_cents),
+      auto_top_up_next_attempt_at: fromMysqlDate(row.auto_top_up_next_attempt_at),
+      created_at: fromMysqlDate(row.created_at),
+      updated_at: fromMysqlDate(row.updated_at),
+    }));
+  }
+
+  async beginAutoTopUpAttempt(userId, { attempt_id, at }) {
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [rows] = await connection.execute(
+        'SELECT * FROM billing_accounts WHERE user_id = :userId FOR UPDATE',
+        { userId }
+      );
+      const account = rows[0];
+      if (
+        !account
+        || account.unlimited
+        || !account.auto_top_up_enabled
+        || !account.stripe_customer_id
+        || !account.stripe_payment_method_id
+        || Number(account.credit_cents) > Number(account.auto_top_up_threshold_cents)
+      ) {
+        await connection.commit();
+        return null;
+      }
+      if (account.auto_top_up_status === 'charging' && account.auto_top_up_attempt_id) {
+        await connection.commit();
+        return await this.getBillingAccount(userId);
+      }
+      if (account.auto_top_up_next_attempt_at
+          && new Date(account.auto_top_up_next_attempt_at).getTime() > new Date(at).getTime()) {
+        await connection.commit();
+        return null;
+      }
+      await connection.execute(
+        `UPDATE billing_accounts
+         SET auto_top_up_status = 'charging',
+             auto_top_up_attempt_id = :attempt_id,
+             auto_top_up_last_error = NULL,
+             updated_at = :at
+         WHERE user_id = :userId`,
+        { userId, attempt_id, at: toMysqlDate(at) }
+      );
+      await connection.commit();
+      return await this.getBillingAccount(userId);
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  async completeAutoTopUpAttempt(userId, attemptId, patch) {
+    const columnMap = {
+      auto_top_up_status: value => String(value),
+      auto_top_up_next_attempt_at: value => toMysqlDate(value),
+      auto_top_up_last_error: value => value ? String(value).slice(0, 255) : null,
+      updated_at: value => toMysqlDate(value),
+    };
+    const assignments = ['auto_top_up_attempt_id = NULL'];
+    const params = { userId, attemptId };
+    for (const [key, normalize] of Object.entries(columnMap)) {
+      if (!Object.prototype.hasOwnProperty.call(patch, key)) continue;
+      assignments.push(`${key} = :${key}`);
+      params[key] = normalize(patch[key]);
+    }
+    const [result] = await this.pool.execute(
+      `UPDATE billing_accounts
+       SET ${assignments.join(', ')}
+       WHERE user_id = :userId AND auto_top_up_attempt_id = :attemptId`,
+      params
+    );
+    return result.affectedRows ? await this.getBillingAccount(userId) : null;
+  }
+
+  async listBillableBrowserSessions() {
+    const [rows] = await this.pool.execute(
+      `SELECT *
+       FROM browser_sessions
+       WHERE profile_mode <> 'ephemeral'
+         AND droplet_id IS NOT NULL
+         AND status NOT IN ('paused', 'stopping', 'destroyed')`
+    );
+    return rows.map(normalizeBrowserSession);
+  }
+
+  async meterBrowserSessionUsage(sessionId, { metered_at, rate_cents }) {
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [sessionRows] = await connection.execute(
+        'SELECT * FROM browser_sessions WHERE id = :sessionId FOR UPDATE',
+        { sessionId }
+      );
+      const session = sessionRows[0];
+      if (!session) throw notFound('Browser session not found');
+      const previous = fromMysqlDate(session.billing_metered_at);
+      await connection.execute(
+        'UPDATE browser_sessions SET billing_metered_at = :metered_at WHERE id = :sessionId',
+        { sessionId, metered_at: toMysqlDate(metered_at) }
+      );
+      if (!previous) {
+        await connection.commit();
+        return { applied: false, initialized: true, account: null, transaction: null };
+      }
+      if (
+        session.profile_mode === 'ephemeral'
+        || !session.droplet_id
+        || ['paused', 'stopping', 'destroyed'].includes(session.status)
+      ) {
+        await connection.commit();
+        return { applied: false, initialized: false, account: null, transaction: null };
+      }
+      const elapsedSeconds = Math.max(0, Math.floor(
+        (new Date(metered_at).getTime() - new Date(previous).getTime()) / 1000
+      ));
+      await connection.execute(
+        `INSERT INTO billing_accounts (user_id, credit_cents, unlimited, created_at, updated_at)
+         VALUES (:userId, 0, 0, :at, :at)
+         ON DUPLICATE KEY UPDATE user_id = user_id`,
+        { userId: session.user_id, at: toMysqlDate(metered_at) }
+      );
+      const [accountRows] = await connection.execute(
+        'SELECT * FROM billing_accounts WHERE user_id = :userId FOR UPDATE',
+        { userId: session.user_id }
+      );
+      const account = accountRows[0];
+      if (!elapsedSeconds || account.unlimited) {
+        await connection.commit();
+        return {
+          applied: false,
+          initialized: false,
+          account: await this.getBillingAccount(session.user_id),
+          transaction: null,
+        };
+      }
+      const totalUnits = Number(account.usage_remainder_units || 0)
+        + elapsedSeconds * Number(rate_cents);
+      const chargeCents = Math.floor(totalUnits / 3600);
+      const remainderUnits = totalUnits % 3600;
+      await connection.execute(
+        `UPDATE billing_accounts
+         SET usage_remainder_units = :remainderUnits,
+             credit_cents = credit_cents - :chargeCents,
+             updated_at = :at
+         WHERE user_id = :userId`,
+        {
+          userId: session.user_id,
+          remainderUnits,
+          chargeCents,
+          at: toMysqlDate(metered_at),
+        }
+      );
+      let transaction = null;
+      if (chargeCents) {
+        transaction = {
+          id: randomId('btx'),
+          user_id: session.user_id,
+          amount_cents: -chargeCents,
+          kind: 'browser_usage',
+          provider: null,
+          provider_ref: `usage:${session.id}:${metered_at}`,
+          description: `${elapsedSeconds}s active browser usage`,
+          created_at: metered_at,
+        };
+        await connection.execute(
+          `INSERT INTO billing_transactions
+           (id,user_id,amount_cents,kind,provider,provider_ref,description,created_at)
+           VALUES (:id,:user_id,:amount_cents,:kind,:provider,:provider_ref,:description,:created_at)`,
+          { ...transaction, created_at: toMysqlDate(transaction.created_at) }
+        );
+      }
+      await connection.commit();
+      return {
+        applied: Boolean(chargeCents),
+        initialized: false,
+        account: await this.getBillingAccount(session.user_id),
+        transaction,
+      };
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
   async createBrowserSession(row) {
     await this.pool.execute(
       `INSERT INTO browser_sessions
-       (id,user_id,display_name,status,droplet_id,public_ip,region,size,volume_id,volume_name,volume_size_gib,profile_mode,host_session_id,runtime_port,runtime_generation,connect_secret,proxy_enabled,proxy_endpoint,proxy_updated_at,paused_at,ended_at,end_reason,expires_at,created_at,updated_at)
-       VALUES (:id,:user_id,:display_name,:status,:droplet_id,:public_ip,:region,:size,:volume_id,:volume_name,:volume_size_gib,:profile_mode,:host_session_id,:runtime_port,:runtime_generation,:connect_secret,:proxy_enabled,:proxy_endpoint,:proxy_updated_at,:paused_at,:ended_at,:end_reason,:expires_at,:created_at,:updated_at)`,
+       (id,user_id,display_name,status,droplet_id,public_ip,region,size,volume_id,volume_name,volume_size_gib,profile_mode,host_session_id,runtime_port,runtime_generation,connect_secret,proxy_enabled,proxy_endpoint,proxy_updated_at,paused_at,billing_metered_at,ended_at,end_reason,expires_at,created_at,updated_at)
+       VALUES (:id,:user_id,:display_name,:status,:droplet_id,:public_ip,:region,:size,:volume_id,:volume_name,:volume_size_gib,:profile_mode,:host_session_id,:runtime_port,:runtime_generation,:connect_secret,:proxy_enabled,:proxy_endpoint,:proxy_updated_at,:paused_at,:billing_metered_at,:ended_at,:end_reason,:expires_at,:created_at,:updated_at)`,
       {
         ...row,
         display_name: row.display_name || null,
@@ -514,6 +792,7 @@ export class MySqlStore {
         volume_name: row.volume_name || null,
         volume_size_gib: row.volume_size_gib || null,
         paused_at: toMysqlDate(row.paused_at),
+        billing_metered_at: toMysqlDate(row.billing_metered_at),
         ended_at: toMysqlDate(row.ended_at),
         end_reason: row.end_reason || null,
         expires_at: toMysqlDate(row.expires_at),

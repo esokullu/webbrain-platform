@@ -76,6 +76,11 @@ export function loadConfig(env = process.env) {
     },
     billing: {
       browserHourCents: positiveInteger(env.WEBBRAIN_BROWSER_HOUR_CENTS || 10, 10),
+      meterIntervalMs: Math.max(
+        10_000,
+        positiveInteger(env.WEBBRAIN_BILLING_METER_INTERVAL_MS || 60_000, 60_000)
+      ),
+      enforceCredit: env.WEBBRAIN_BILLING_ENFORCE_CREDIT !== 'false',
       unlimitedEmails: String(env.WEBBRAIN_UNLIMITED_BILLING_EMAILS || 'esokullu@gmail.com')
         .split(',')
         .map(email => email.trim().toLowerCase())

@@ -6,7 +6,13 @@ function stripeError(status, body) {
   return error;
 }
 
-async function stripeRequest(path, { secretKey, method = 'GET', form = null, fetchImpl = fetch } = {}) {
+async function stripeRequest(path, {
+  secretKey,
+  method = 'GET',
+  form = null,
+  idempotencyKey = '',
+  fetchImpl = fetch,
+} = {}) {
   if (!secretKey) {
     throw Object.assign(new Error('Stripe checkout is not configured yet.'), { status: 503 });
   }
@@ -15,6 +21,7 @@ async function stripeRequest(path, { secretKey, method = 'GET', form = null, fet
     headers: {
       authorization: `Bearer ${secretKey}`,
       ...(form ? { 'content-type': 'application/x-www-form-urlencoded' } : {}),
+      ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
     },
     body: form ? new URLSearchParams(form).toString() : undefined,
   });
@@ -34,6 +41,10 @@ export async function createStripeCheckoutSession({
   baseUrl,
   user,
   amountCents,
+  customerId = '',
+  saveForAutoTopUp = false,
+  autoTopUpThresholdCents = 0,
+  autoTopUpAmountCents = 0,
   fetchImpl = fetch,
 }) {
   const successUrl = `${new URL('/billing/complete', baseUrl)}?session_id={CHECKOUT_SESSION_ID}`;
@@ -49,9 +60,16 @@ export async function createStripeCheckoutSession({
       mode: 'payment',
       success_url: successUrl,
       cancel_url: cancelUrl.toString(),
-      customer_email: user.email,
+      ...(customerId ? { customer: customerId } : { customer_email: user.email }),
+      ...(!customerId && saveForAutoTopUp ? { customer_creation: 'always' } : {}),
       'metadata[user_id]': user.id,
       'metadata[credit_cents]': String(amountCents),
+      ...(saveForAutoTopUp ? {
+        'metadata[auto_top_up_enabled]': 'true',
+        'metadata[auto_top_up_threshold_cents]': String(autoTopUpThresholdCents),
+        'metadata[auto_top_up_amount_cents]': String(autoTopUpAmountCents),
+        'payment_intent_data[setup_future_usage]': 'off_session',
+      } : {}),
       'payment_intent_data[metadata][user_id]': user.id,
       'payment_intent_data[metadata][credit_cents]': String(amountCents),
       'line_items[0][quantity]': '1',
@@ -81,6 +99,49 @@ export async function retrieveStripeCheckoutSession(sessionId, {
     secretKey,
     fetchImpl,
   });
+}
+
+export async function retrieveStripePaymentIntent(paymentIntentId, {
+  secretKey,
+  fetchImpl = fetch,
+} = {}) {
+  return await stripeRequest(`/payment_intents/${encodeURIComponent(paymentIntentId)}`, {
+    secretKey,
+    fetchImpl,
+  });
+}
+
+export async function createStripeOffSessionPaymentIntent({
+  secretKey,
+  customerId,
+  paymentMethodId,
+  amountCents,
+  userId,
+  attemptId,
+  fetchImpl = fetch,
+}) {
+  const paymentIntent = await stripeRequest('/payment_intents', {
+    secretKey,
+    method: 'POST',
+    idempotencyKey: `webbrain-auto-top-up-${attemptId}`,
+    fetchImpl,
+    form: {
+      amount: String(amountCents),
+      currency: 'usd',
+      customer: customerId,
+      payment_method: paymentMethodId,
+      off_session: 'true',
+      confirm: 'true',
+      description: `$${(amountCents / 100).toFixed(2)} WebBrain automatic credit top-up`,
+      'metadata[user_id]': userId,
+      'metadata[credit_cents]': String(amountCents),
+      'metadata[auto_top_up_attempt_id]': attemptId,
+    },
+  });
+  if (!String(paymentIntent?.id || '').startsWith('pi_')) {
+    throw Object.assign(new Error('Stripe did not return a valid PaymentIntent.'), { status: 502 });
+  }
+  return paymentIntent;
 }
 
 export function verifyStripeWebhook(rawBody, signatureHeader, webhookSecret, {
