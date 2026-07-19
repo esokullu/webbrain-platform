@@ -15,6 +15,8 @@ Drive a real, visible cloud browser with natural-language tasks. Use the bundled
 4. Never ask the user to paste the key into a task, command argument, tracked file, chat response, or browser page. Never print it. The CLI reads it only from the environment.
 5. Use `WEBBRAIN_BASE_URL` only when the user explicitly provides another trusted WebBrain deployment.
 
+If this skill was loaded from `https://webbrain.cloud/skills.md` instead of an installed skill directory, read `https://webbrain.cloud/skills/webbrain-cloud/api.md` and use the REST endpoints directly. The bundled CLI is also published at `https://webbrain.cloud/skills/webbrain-cloud/webbrain.mjs`.
+
 Verify authentication without exposing the key:
 
 ```bash

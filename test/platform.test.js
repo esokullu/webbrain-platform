@@ -2451,6 +2451,16 @@ test('login page uses the WebBrain visual identity', async () => {
     assert.match(res.text, /Registration is currently closed\./);
     assert.match(res.text, /href="\/docs"/);
     assert.match(res.text, /href="\/pricing"/);
+    assert.match(res.text, /href="#agents">For agents/);
+    assert.match(res.text, /Built for agents that need a real browser/);
+    assert.match(res.text, /Codex/);
+    assert.match(res.text, /OpenClaw/);
+    assert.match(res.text, /Claude Cowork/);
+    assert.match(res.text, /POST \/api\/browser-sessions/);
+    assert.match(res.text, /runtime_ready: true/);
+    assert.match(res.text, /href="\/skills\.md">Read SKILL\.md/);
+    assert.match(res.text, /href="\/docs#agent-skill">Install &amp; examples/);
+    assert.match(res.text, /Read https:\/\/webbrain\.cloud\/skills\.md and use WebBrain Cloud/);
 
     const registerRes = await request(ctx.base, '/auth/register', {
       method: 'POST',
@@ -2460,6 +2470,34 @@ test('login page uses the WebBrain visual identity', async () => {
     assert.equal(registerRes.status, 403);
     assert.equal(registerRes.body.error, 'Registration is currently closed.');
     assert.equal(await ctx.store.findUserByEmail('closed@example.com'), null);
+  } finally {
+    await ctx.platform.close();
+  }
+});
+
+test('public agent skill files are readable without authentication', async () => {
+  const ctx = await startPlatform();
+  try {
+    const skill = await requestText(ctx.base, '/skills.md');
+    assert.equal(skill.status, 200);
+    assert.match(skill.headers.get('content-type') || '', /^text\/markdown/);
+    assert.match(skill.headers.get('cache-control') || '', /max-age=300/);
+    assert.match(skill.text, /^---\nname: webbrain-cloud/m);
+    assert.match(skill.text, /https:\/\/webbrain\.cloud\/skills\/webbrain-cloud\/api\.md/);
+
+    const canonicalSkill = await requestText(ctx.base, '/skills/webbrain-cloud/SKILL.md');
+    assert.equal(canonicalSkill.status, 200);
+    assert.equal(canonicalSkill.text, skill.text);
+
+    const reference = await requestText(ctx.base, '/skills/webbrain-cloud/api.md');
+    assert.equal(reference.status, 200);
+    assert.match(reference.headers.get('content-type') || '', /^text\/markdown/);
+    assert.match(reference.text, /# WebBrain Cloud API reference/);
+
+    const cli = await requestText(ctx.base, '/skills/webbrain-cloud/webbrain.mjs');
+    assert.equal(cli.status, 200);
+    assert.match(cli.headers.get('content-type') || '', /^application\/javascript/);
+    assert.match(cli.text, /WebBrain Cloud agent CLI/);
   } finally {
     await ctx.platform.close();
   }

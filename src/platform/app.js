@@ -1,4 +1,5 @@
 import express from 'express';
+import { readFileSync } from 'node:fs';
 import { randomId, randomSecret, nowIso, isoAfterMs } from '../shared/ids.js';
 import { hashPassword, verifyPassword, hashToken } from '../shared/crypto.js';
 import { publicBrowserSession, publicRun, jsonError } from '../shared/http.js';
@@ -20,6 +21,18 @@ const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'aborted']);
 const EXPORTABLE_RUN_STATUSES = new Set(['completed', 'failed']);
 const TERMINAL_BROWSER_STATUSES = new Set(['destroyed']);
 const AUTO_TOP_UP_THRESHOLDS = new Set([500, 1000, 2500]);
+const WEBBRAIN_AGENT_SKILL = readFileSync(
+  new URL('../../.agents/skills/webbrain-cloud/SKILL.md', import.meta.url),
+  'utf8',
+);
+const WEBBRAIN_AGENT_API_REFERENCE = readFileSync(
+  new URL('../../.agents/skills/webbrain-cloud/references/api.md', import.meta.url),
+  'utf8',
+);
+const WEBBRAIN_AGENT_CLI = readFileSync(
+  new URL('../../.agents/skills/webbrain-cloud/scripts/webbrain.mjs', import.meta.url),
+  'utf8',
+);
 
 function parseCookies(header = '') {
   const out = {};
@@ -189,11 +202,49 @@ function loginPage(error = '', registrationEnabled = false) {
     .register-form[aria-disabled="true"] button, .register-form[aria-disabled="true"] button:hover { background: transparent; border-color: var(--border); color: var(--text-dim); transform: none; }
     .registration-note { margin: 0; color: var(--text-dim); font-size: 12px; }
     .error { padding: 12px 14px; border: 1px solid rgba(164,59,50,.25); border-radius: 10px; background: rgba(164,59,50,.07); color: var(--danger); }
+    .agent-stage { max-width: 1100px; margin: 0 auto; padding: 0 24px 88px; }
+    .agent-console { overflow: hidden; border: 1px solid rgba(91,82,232,.32); border-radius: 22px; background: #151427; color: #f6f3ff; box-shadow: 0 28px 70px rgba(35,28,77,.20); }
+    .agent-console-bar { min-height: 46px; display: flex; align-items: center; gap: 7px; padding: 10px 16px; border-bottom: 1px solid rgba(255,255,255,.09); background: rgba(255,255,255,.025); }
+    .console-dot { width: 8px; height: 8px; border-radius: 50%; background: #655e85; }
+    .console-dot.live { background: #74d6ae; box-shadow: 0 0 0 4px rgba(116,214,174,.09); }
+    .console-path { margin-left: 7px; color: #9e98bd; font: 600 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .console-status { margin-left: auto; padding: 4px 7px; border: 1px solid rgba(116,214,174,.24); border-radius: 999px; color: #8de1bc; font: 750 9px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; }
+    .agent-console-body { display: grid; grid-template-columns: minmax(280px,.82fr) minmax(0,1.18fr); }
+    .agent-story { padding: 34px; border-right: 1px solid rgba(255,255,255,.09); background: radial-gradient(circle at 15% 0%, rgba(91,82,232,.25), transparent 58%); }
+    .agent-story .eyebrow { margin-bottom: 12px; color: #aaa4ff; }
+    .agent-story h2 { max-width: 430px; margin: 0; font-size: clamp(30px,4vw,45px); line-height: 1.02; letter-spacing: -.04em; }
+    .agent-copy { max-width: 470px; margin: 18px 0 0; color: #b9b4cc; font-size: 15px; }
+    .agent-pills { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 22px; }
+    .agent-pill { padding: 5px 8px; border: 1px solid rgba(255,255,255,.12); border-radius: 999px; color: #d9d5e8; font: 700 10px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .agent-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 26px; }
+    .agent-action { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; padding: 9px 13px; border: 1px solid rgba(255,255,255,.14); border-radius: 9px; color: #f7f4ff; font-size: 12px; font-weight: 800; text-decoration: none; transition: transform .15s ease, background .15s ease; }
+    .agent-action:hover { transform: translateY(-1px); background: rgba(255,255,255,.07); }
+    .agent-action.primary { border-color: #6d64f0; background: #6259e7; box-shadow: 0 10px 26px rgba(98,89,231,.25); }
+    .agent-workflow { min-width: 0; padding: 30px; display: grid; align-content: center; }
+    .workflow-label { margin: 0 0 12px; color: #8f89aa; font: 750 10px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .09em; text-transform: uppercase; }
+    .agent-steps { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); overflow: hidden; border: 1px solid rgba(255,255,255,.10); border-radius: 12px; }
+    .agent-step { min-width: 0; padding: 17px; background: rgba(4,4,13,.22); }
+    .agent-step + .agent-step { border-left: 1px solid rgba(255,255,255,.10); }
+    .step-index { display: block; color: #8de1bc; font: 800 10px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .agent-step strong { display: block; margin-top: 12px; font-size: 14px; }
+    .agent-step span { display: block; margin-top: 4px; color: #928da7; font-size: 11px; line-height: 1.4; }
+    .agent-step code { color: #c4bfff; font: inherit; overflow-wrap: anywhere; }
+    .agent-prompt { margin-top: 12px; padding: 13px 14px; border: 1px solid rgba(116,214,174,.18); border-radius: 10px; background: #0d0d19; }
+    .agent-prompt span { display: block; margin-bottom: 5px; color: #77728d; font: 700 9px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .07em; text-transform: uppercase; }
+    .agent-prompt code { display: block; color: #a7e9c9; font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
     @media (max-width: 800px) {
       .nav-inner { padding-inline: 16px; }
       .nav-note { display: none; }
       main { grid-template-columns: 1fr; gap: 40px; padding: 48px 18px 56px; }
       h1 { font-size: clamp(40px, 12vw, 58px); }
+      .agent-stage { padding: 0 18px 60px; }
+      .agent-console-body { grid-template-columns: 1fr; }
+      .agent-story { border-right: 0; border-bottom: 1px solid rgba(255,255,255,.09); }
+    }
+    @media (max-width: 560px) {
+      .agent-story, .agent-workflow { padding: 24px 20px; }
+      .agent-steps { grid-template-columns: 1fr; }
+      .agent-step + .agent-step { border-left: 0; border-top: 1px solid rgba(255,255,255,.10); }
     }
   </style>
 </head>
@@ -205,6 +256,7 @@ function loginPage(error = '', registrationEnabled = false) {
         <img src="https://webbrain.one/logo-github.png" alt=""> WebBrain<span class="brand-domain">.cloud</span>
       </a>
       <div class="nav-actions">
+        <a class="nav-note" href="#agents">For agents</a>
         <a class="nav-note" href="/pricing">Pricing</a>
         <a class="nav-note" href="/docs">API documentation →</a>
       </div>
@@ -234,6 +286,56 @@ function loginPage(error = '', registrationEnabled = false) {
       </form>
     </section>
   </main>
+  <section class="agent-stage" id="agents" aria-labelledby="agents-title">
+    <div class="agent-console">
+      <div class="agent-console-bar" aria-hidden="true">
+        <span class="console-dot live"></span><span class="console-dot"></span><span class="console-dot"></span>
+        <span class="console-path">webbrain://agent-runtime</span>
+        <span class="console-status">API + Skill</span>
+      </div>
+      <div class="agent-console-body">
+        <div class="agent-story">
+          <p class="eyebrow">Agent-native browser runtime</p>
+          <h2 id="agents-title">Built for agents that need a real browser.</h2>
+          <p class="agent-copy">Give your agent a private, visible browser it can keep using across tasks—complete with natural-language runs, structured results, file transfer, and optional persistent login state.</p>
+          <div class="agent-pills" aria-label="Compatible agents">
+            <span class="agent-pill">Codex</span>
+            <span class="agent-pill">OpenClaw</span>
+            <span class="agent-pill">Claude Cowork</span>
+            <span class="agent-pill">Any shell agent</span>
+          </div>
+          <div class="agent-actions">
+            <a class="agent-action primary" href="/skills.md">Read SKILL.md</a>
+            <a class="agent-action" href="/docs#agent-skill">Install &amp; examples</a>
+          </div>
+        </div>
+        <div class="agent-workflow">
+          <p class="workflow-label">One visible browser, controlled end to end</p>
+          <div class="agent-steps">
+            <div class="agent-step">
+              <span class="step-index">01 / CREATE</span>
+              <strong>Start isolated</strong>
+              <span><code>POST /api/browser-sessions</code></span>
+            </div>
+            <div class="agent-step">
+              <span class="step-index">02 / READY</span>
+              <strong>Wait for the bridge</strong>
+              <span><code>runtime_ready: true</code></span>
+            </div>
+            <div class="agent-step">
+              <span class="step-index">03 / RUN</span>
+              <strong>Send the task</strong>
+              <span>Natural language in, verified result out.</span>
+            </div>
+          </div>
+          <div class="agent-prompt">
+            <span>Tell your agent</span>
+            <code>Read https://webbrain.cloud/skills.md and use WebBrain Cloud to complete this browser task.</code>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
 </body>
 </html>`;
 }
@@ -4035,6 +4137,27 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
     res.type('html').send(req.auth?.user
       ? dashboardPage(req.auth.user, { sharedDownloadsEnabled: config.downloads?.spaces?.enabled === true })
       : loginPage('', config.registrationEnabled));
+  });
+
+  app.get(['/skills.md', '/skills/webbrain-cloud/SKILL.md'], (req, res) => {
+    res.set({
+      'Cache-Control': 'public, max-age=300',
+      'X-Content-Type-Options': 'nosniff',
+    }).type('text/markdown').send(WEBBRAIN_AGENT_SKILL);
+  });
+
+  app.get('/skills/webbrain-cloud/api.md', (req, res) => {
+    res.set({
+      'Cache-Control': 'public, max-age=300',
+      'X-Content-Type-Options': 'nosniff',
+    }).type('text/markdown').send(WEBBRAIN_AGENT_API_REFERENCE);
+  });
+
+  app.get('/skills/webbrain-cloud/webbrain.mjs', (req, res) => {
+    res.set({
+      'Cache-Control': 'public, max-age=300',
+      'X-Content-Type-Options': 'nosniff',
+    }).type('application/javascript').send(WEBBRAIN_AGENT_CLI);
   });
 
   app.post('/auth/register', async (req, res, next) => {

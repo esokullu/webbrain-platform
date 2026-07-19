@@ -567,7 +567,7 @@ export function docsPage() {
         <section class="docs-section" id="agent-skill">
           <p class="section-kicker">Open Agent Skill</p>
           <h2>Give your agent a cloud browser</h2>
-          <p>The repository includes a portable <a href="https://github.com/esokullu/webbrain-platform/tree/main/.agents/skills/webbrain-cloud"><span class="inline-code">webbrain-cloud</span> skill</a> for Codex, OpenClaw, Claude Code, and Claude chat or Cowork. It teaches the agent session selection, readiness polling, run continuations, clarification handling, file transfer, cleanup, and the security boundaries around browser actions.</p>
+          <p>The website publishes a portable <a href="/skills.md"><span class="inline-code">webbrain-cloud</span> skill</a> for Codex, OpenClaw, Claude Code, and Claude chat or Cowork. It teaches the agent session selection, readiness polling, run continuations, clarification handling, file transfer, cleanup, and the security boundaries around browser actions.</p>
           <p>Install the skill, then provide <span class="inline-code">WEBBRAIN_API_KEY</span> through the agent runtime's environment or secret manager. Do not put the key inside <span class="inline-code">SKILL.md</span>, its ZIP, a prompt, or a tracked file. The runtime also needs Node.js 18+ and outbound HTTPS access to <span class="inline-code">webbrain.cloud</span>.</p>
           <div class="code-card agent-install" data-code-group="agent-skill-install">
             <div class="code-toolbar">
