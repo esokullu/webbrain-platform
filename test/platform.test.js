@@ -2461,6 +2461,9 @@ test('login page uses the WebBrain visual identity', async () => {
     assert.match(res.text, /href="\/skills\.md">Read SKILL\.md/);
     assert.match(res.text, /href="\/docs#agent-skill">Install &amp; examples/);
     assert.match(res.text, /Read https:\/\/webbrain\.cloud\/skills\.md and use WebBrain Cloud/);
+    assert.match(res.text, /class="site-footer"/);
+    assert.match(res.text, /Private browser workspaces/);
+    assert.match(res.text, /href="https:\/\/webbrain\.one\/">webbrain\.one/);
 
     const registerRes = await request(ctx.base, '/auth/register', {
       method: 'POST',

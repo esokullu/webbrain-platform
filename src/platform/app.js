@@ -232,6 +232,12 @@ function loginPage(error = '', registrationEnabled = false) {
     .agent-prompt { margin-top: 12px; padding: 13px 14px; border: 1px solid rgba(116,214,174,.18); border-radius: 10px; background: #0d0d19; }
     .agent-prompt span { display: block; margin-bottom: 5px; color: #77728d; font: 700 9px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .07em; text-transform: uppercase; }
     .agent-prompt code { display: block; color: #a7e9c9; font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+    .site-footer { border-top: 1px solid var(--border); background: rgba(247,241,230,.68); }
+    .footer-inner { max-width: 1100px; min-height: 72px; margin: 0 auto; padding: 18px 24px; display: flex; align-items: center; justify-content: space-between; gap: 18px; color: var(--text-dim); font-size: 11px; }
+    .footer-brand { color: var(--text); font-weight: 780; }
+    .footer-links { display: flex; align-items: center; gap: 9px; }
+    .footer-links a { color: var(--text-dim); font-weight: 650; text-decoration: none; }
+    .footer-links a:hover { color: var(--text); }
     @media (max-width: 800px) {
       .nav-inner { padding-inline: 16px; }
       .nav-note { display: none; }
@@ -240,6 +246,7 @@ function loginPage(error = '', registrationEnabled = false) {
       .agent-stage { padding: 0 18px 60px; }
       .agent-console-body { grid-template-columns: 1fr; }
       .agent-story { border-right: 0; border-bottom: 1px solid rgba(255,255,255,.09); }
+      .footer-inner { align-items: flex-start; flex-direction: column; padding-inline: 18px; }
     }
     @media (max-width: 560px) {
       .agent-story, .agent-workflow { padding: 24px 20px; }
@@ -336,6 +343,20 @@ function loginPage(error = '', registrationEnabled = false) {
       </div>
     </div>
   </section>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span class="footer-brand">WebBrain Cloud</span>
+      <div class="footer-links">
+        <span>Private browser workspaces</span>
+        <span aria-hidden="true">·</span>
+        <a href="/docs">API docs</a>
+        <span aria-hidden="true">·</span>
+        <a href="/pricing">Pricing</a>
+        <span aria-hidden="true">·</span>
+        <a href="https://webbrain.one/">webbrain.one</a>
+      </div>
+    </div>
+  </footer>
 </body>
 </html>`;
 }
