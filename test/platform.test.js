@@ -2471,10 +2471,18 @@ test('public API documentation provides accessible REST and client tabs', async 
     assert.match(res.text, /data-client="python"/);
     assert.match(res.text, /data-client="php"/);
     assert.match(res.text, /data-code-group="language-examples"/);
+    assert.match(res.text, /data-code-group="agent-skill-install"/);
     assert.match(res.text, /id="example-panel-node"/);
     assert.match(res.text, /id="example-panel-python"/);
     assert.match(res.text, /id="example-panel-php"/);
     assert.match(res.text, /Create and run in your language/);
+    assert.match(res.text, /Give your agent a cloud browser/);
+    assert.match(res.text, /data-agent="codex"/);
+    assert.match(res.text, /data-agent="openclaw"/);
+    assert.match(res.text, /data-agent="claude"/);
+    assert.match(res.text, /\.agents\/skills\/webbrain-cloud/);
+    assert.match(res.text, /WEBBRAIN_API_KEY/);
+    assert.match(res.text, /Customize &gt; Skills/);
     assert.match(res.text, /Copy example/);
     assert.match(res.text, /class="tok-comment"/);
     assert.match(res.text, /class="tok-keyword"/);

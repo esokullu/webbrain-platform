@@ -119,6 +119,7 @@ same visible browser sessions shown in the dashboard and noVNC.
 
 - Interactive, tabbed guide: [`https://webbrain.cloud/docs`](https://webbrain.cloud/docs)
 - Dependency-free clients: [`clients/`](clients/) for Node.js, Python, and PHP
+- Agent skill: [`.agents/skills/webbrain-cloud`](.agents/skills/webbrain-cloud/) for Codex, OpenClaw, Claude Code, and Claude chat or Cowork
 
 ### Authentication
 

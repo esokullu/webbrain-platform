@@ -134,6 +134,26 @@ $finished = $client->waitForRun($ready['id'], $run['run_id']);
 print_r($finished['result']);`,
 };
 
+const AGENT_SKILL_INSTALLS = {
+  codex: `git clone --depth 1 https://github.com/esokullu/webbrain-platform.git
+mkdir -p "$HOME/.agents/skills"
+cp -R webbrain-platform/.agents/skills/webbrain-cloud "$HOME/.agents/skills/"`,
+
+  openclaw: `git clone --depth 1 https://github.com/esokullu/webbrain-platform.git
+openclaw skills install \\
+  ./webbrain-platform/.agents/skills/webbrain-cloud \\
+  --as webbrain-cloud --global`,
+
+  claude: `git clone --depth 1 https://github.com/esokullu/webbrain-platform.git
+
+# Claude Code
+mkdir -p "$HOME/.claude/skills"
+cp -R webbrain-platform/.agents/skills/webbrain-cloud "$HOME/.claude/skills/"
+
+# Claude chat or Cowork: upload the resulting ZIP in Customize > Skills
+(cd webbrain-platform/.agents/skills && zip -r webbrain-cloud.zip webbrain-cloud)`,
+};
+
 const DOWNLOADS_SHELL_EXAMPLE = `# Obtain access and keep the secret out of the literal shell history
 DOWNLOADS_ACCESS=$(curl --fail-with-body -sS -X POST "https://webbrain.cloud/api/browser-sessions/$SESSION_ID/downloads-access" -H "Authorization: Bearer $WEBBRAIN_API_KEY" -H "Content-Type: application/json" -d '{}')
 DOWNLOADS_URL=$(printf '%s' "$DOWNLOADS_ACCESS" | jq -r '.url')
@@ -168,6 +188,11 @@ const TABS = [
   ['php', 'PHP'],
 ];
 const LANGUAGE_TABS = TABS.filter(([id]) => id !== 'rest');
+const AGENT_SKILL_TABS = [
+  ['codex', 'Codex'],
+  ['openclaw', 'OpenClaw'],
+  ['claude', 'Claude / Cowork'],
+];
 
 const TOKEN_PATTERNS = {
   rest: /#[^\n]*|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*|\b[A-Z_][A-Z0-9_]*(?==)|\b(?:export|until|do|done|sleep|curl|jq|printf|basename)\b|\b(?:true|false|null)\b|\b\d+\b/gm,
@@ -224,6 +249,10 @@ export function docsPage() {
     <button class="code-tab" id="example-tab-${id}" type="button" role="tab" aria-selected="${index === 0}" aria-controls="example-panel-${id}" tabindex="${index === 0 ? 0 : -1}" data-client="${id}">${label}</button>`).join('');
   const languageTabPanels = LANGUAGE_TABS.map(([id], index) => `
     <pre class="code-panel language-${id}" id="example-panel-${id}" role="tabpanel" aria-labelledby="example-tab-${id}" ${index === 0 ? '' : 'hidden'}><code>${highlightedCode(LANGUAGE_EXAMPLES[id], id)}</code></pre>`).join('');
+  const agentSkillTabButtons = AGENT_SKILL_TABS.map(([id, label], index) => `
+    <button class="code-tab" id="agent-tab-${id}" type="button" role="tab" aria-selected="${index === 0}" aria-controls="agent-panel-${id}" tabindex="${index === 0 ? 0 : -1}" data-agent="${id}">${label}</button>`).join('');
+  const agentSkillTabPanels = AGENT_SKILL_TABS.map(([id], index) => `
+    <pre class="code-panel language-rest" id="agent-panel-${id}" role="tabpanel" aria-labelledby="agent-tab-${id}" ${index === 0 ? '' : 'hidden'}><code>${highlightedCode(AGENT_SKILL_INSTALLS[id], 'rest')}</code></pre>`).join('');
 
   return `<!doctype html>
 <html lang="en">
@@ -290,6 +319,7 @@ export function docsPage() {
     .copy-button:hover { background: rgba(255,255,255,.10); color: white; }
     .code-panel { min-height: 420px; max-height: 580px; margin: 0; padding: 28px; overflow: auto; color: #dfe5f5; font: 13px/1.75 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; tab-size: 2; white-space: pre; }
     .code-card.compact .code-panel { min-height: 360px; }
+    .code-card.agent-install .code-panel { min-height: 0; max-height: 440px; }
     .code-panel[hidden] { display: none; }
     .tok-comment { color: #77849f; font-style: italic; }
     .tok-keyword { color: #c8a7ff; font-weight: 650; }
@@ -414,6 +444,7 @@ export function docsPage() {
         <a href="#runs">Runs</a>
         <a href="#structured-output">Structured output</a>
         <a href="#statuses">Statuses</a>
+        <a href="#agent-skill">Agent skill</a>
         <a href="#clients">Clients</a>
       </aside>
       <article class="docs-content">
@@ -531,6 +562,21 @@ export function docsPage() {
           <div class="status-row">
             <span class="status">running</span><span class="status">needs_user_input</span><span class="status completed">completed</span><span class="status failed">failed</span><span class="status">aborting</span><span class="status aborted">aborted</span>
           </div>
+        </section>
+
+        <section class="docs-section" id="agent-skill">
+          <p class="section-kicker">Open Agent Skill</p>
+          <h2>Give your agent a cloud browser</h2>
+          <p>The repository includes a portable <a href="https://github.com/esokullu/webbrain-platform/tree/main/.agents/skills/webbrain-cloud"><span class="inline-code">webbrain-cloud</span> skill</a> for Codex, OpenClaw, Claude Code, and Claude chat or Cowork. It teaches the agent session selection, readiness polling, run continuations, clarification handling, file transfer, cleanup, and the security boundaries around browser actions.</p>
+          <p>Install the skill, then provide <span class="inline-code">WEBBRAIN_API_KEY</span> through the agent runtime's environment or secret manager. Do not put the key inside <span class="inline-code">SKILL.md</span>, its ZIP, a prompt, or a tracked file. The runtime also needs Node.js 18+ and outbound HTTPS access to <span class="inline-code">webbrain.cloud</span>.</p>
+          <div class="code-card agent-install" data-code-group="agent-skill-install">
+            <div class="code-toolbar">
+              <div class="code-tabs" role="tablist" aria-label="Choose an agent installation">${agentSkillTabButtons}</div>
+              <button class="copy-button" type="button">Copy install</button>
+            </div>
+            ${agentSkillTabPanels}
+          </div>
+          <p class="field-note">Codex and OpenClaw both discover the checked-in <span class="inline-code">.agents/skills</span> location when working directly in this repository. Claude chat and Cowork accept the packaged skill from <strong>Customize → Skills</strong>; code execution and network access must be enabled.</p>
         </section>
 
         <section class="docs-section" id="clients">

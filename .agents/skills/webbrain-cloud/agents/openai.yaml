@@ -1,0 +1,4 @@
+interface:
+  display_name: "WebBrain Cloud"
+  short_description: "Drive persistent cloud browsers with agents"
+  default_prompt: "Use $webbrain-cloud to complete this task in a visible cloud browser and return verified results."
