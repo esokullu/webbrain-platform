@@ -27,8 +27,9 @@ Create with `POST /api/browser-sessions`:
 | `display_name` | string | Optional dashboard label, up to 120 characters. |
 | `type` | `normal` or `incognito` | `normal` keeps a persistent profile; `incognito` is disposable and cannot pause. |
 | `proxy_enabled` | boolean | Use the platform-configured proxy or a direct connection. |
+| `webbrain_config` | `webbrain-config/1` object | Optional sparse Settings import copied directly from WebBrain's `/export --config` output. Invalid or platform-managed fields are ignored. |
 
-The public session includes `id`, `display_name`, `status`, `profile_mode`, timestamps, volume metadata, `droplet_connected`, `extension_connected`, `runtime_ready`, and proxy state. Start a run only when `status` is `ready` and `runtime_ready` is `true`.
+The public session includes `id`, `display_name`, `status`, `profile_mode`, timestamps, volume metadata, `droplet_connected`, `extension_connected`, `runtime_ready`, and proxy state. When `webbrain_config` is supplied, the create response also includes `webbrain_config_result` with accepted field paths, ignored fields and reason codes, and non-secret warnings. It never echoes setting values or credentials. Start a run only when `status` is `ready` and `runtime_ready` is `true`.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |

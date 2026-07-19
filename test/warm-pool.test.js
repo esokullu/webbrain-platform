@@ -224,6 +224,7 @@ test('warm pool atomically claims one ready droplet and assigns volume-backed se
   const assigned = await pool.tryAssignSession(session, {
     providerApiKey: 'provider-secret',
     proxyUrl: 'http://proxy.example:8080/',
+    webbrainConfig: 'encoded-webbrain-config',
   });
   assert.equal(assigned.droplet_id, ready.droplet_id);
   assert.equal(assigned.status, 'provisioning');
@@ -237,6 +238,7 @@ test('warm pool atomically claims one ready droplet and assigns volume-backed se
   assert.equal(controlChannel.sent[0].payload.session_id, 'bs_pool');
   assert.equal(controlChannel.sent[0].payload.volume_name, 'wb-profile-bs-pool');
   assert.equal(controlChannel.sent[0].payload.proxy_url, 'http://proxy.example:8080/');
+  assert.equal(controlChannel.sent[0].payload.webbrain_config_b64, 'encoded-webbrain-config');
   assert.equal((await store.getWarmDroplet(ready.id)).status, 'assigned');
 
   const second = await pool.tryAssignSession({ ...session, id: 'bs_second' });

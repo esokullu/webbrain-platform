@@ -46,6 +46,16 @@ test('versioned cloud profiles preserve user preferences while refreshing runtim
   assert.equal(result.patch.tracingEnabled, false);
 });
 
+test('cloud runtime wiring can preserve an explicitly imported active provider', () => {
+  const result = buildCloudStoragePatch({}, {
+    bridgeUrl: 'ws://127.0.0.1:17373/extension',
+    activeProvider: 'openrouter',
+  });
+
+  assert.equal(result.patch.activeProvider, 'openrouter');
+  assert.equal(result.patch.webbrainCloudManaged, true);
+});
+
 test('cloud storage verification identifies only mismatched keys', () => {
   const expected = { activeProvider: 'webbrain_cloud', onboardingComplete: true };
   assert.deepEqual(storagePatchMismatches(expected, expected), []);

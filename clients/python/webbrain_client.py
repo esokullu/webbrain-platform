@@ -68,7 +68,11 @@ class WebBrainClient:
         return self._request("GET", "/api/browser-sessions")["browser_sessions"]
 
     def create_browser_session(self, **options):
-        return self._request("POST", "/api/browser-sessions", options)["browser_session"]
+        response = self._request("POST", "/api/browser-sessions", options)
+        session = dict(response["browser_session"])
+        if "webbrain_config_result" in response:
+            session["webbrain_config_result"] = response["webbrain_config_result"]
+        return session
 
     def get_browser_session(self, session_id: str):
         return self._request("GET", f"/api/browser-sessions/{self._id(session_id)}")["browser_session"]

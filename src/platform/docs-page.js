@@ -134,6 +134,60 @@ $finished = $client->waitForRun($ready['id'], $run['run_id']);
 print_r($finished['result']);`,
 };
 
+const WEBBRAIN_CONFIG_PHP_EXAMPLE = `<?php
+
+require_once __DIR__ . '/clients/php/WebBrainClient.php';
+
+$client = new WebBrainClient(getenv('WEBBRAIN_API_KEY') ?: '');
+
+// Replace this whole NOWDOC body with WebBrain's /export --config output.
+$webbrainConfigJson = <<<'JSON'
+{
+  "schema": "webbrain-config/1",
+  "exportedAt": "2026-07-19T10:00:00.000Z",
+  "webbrainVersion": "7.3.0",
+  "warning": "Contains plaintext provider API keys and other sensitive Settings data. Store securely.",
+  "settings": {
+    "captchaSolverEnabled": true,
+    "capsolverApiKey": "replace-with-your-key",
+    "activeProvider": "webbrain_cloud"
+  }
+}
+JSON;
+
+$session = $client->createBrowserSession([
+    'type' => 'incognito',
+    'webbrain_config' => json_decode(
+        $webbrainConfigJson,
+        true,
+        512,
+        JSON_THROW_ON_ERROR,
+    ),
+]);
+
+print_r($session['webbrain_config_result'] ?? []);`;
+
+const WEBBRAIN_CONFIG_RESULT_EXAMPLE = `{
+  "browser_session": {
+    "id": "bs_example",
+    "status": "provisioning"
+  },
+  "webbrain_config_result": {
+    "accepted": [
+      "settings.captchaSolverEnabled",
+      "settings.capsolverApiKey",
+      "settings.activeProvider"
+    ],
+    "ignored": [
+      {
+        "field": "settings.planBeforeActMode",
+        "reason": "platform_managed"
+      }
+    ],
+    "warnings": []
+  }
+}`;
+
 const AGENT_SKILL_INSTALLS = {
   codex: `git clone --depth 1 https://github.com/esokullu/webbrain-platform.git
 mkdir -p "$HOME/.agents/skills"
@@ -459,16 +513,26 @@ export function docsPage() {
           <h2>Browser sessions</h2>
           <p><span class="inline-code">normal</span> sessions keep Chrome on a fixed private profile volume and can be paused after shared Downloads storage is configured. <span class="inline-code">incognito</span> sessions use the dashboard's always-on browser mode: Chrome and Downloads stay on one running Droplet and Pause is unavailable. Both remain until explicitly destroyed. Poll until <span class="inline-code">runtime_ready</span> is true before starting runs.</p>
           <h3><span class="inline-code">POST /api/browser-sessions</span> request body</h3>
-          <p>An empty JSON object is valid and creates a normal browser. Infrastructure placement, Droplet size, proxy credentials, and provider credentials are private server configuration and cannot be overridden by this request.</p>
+          <p>An empty JSON object is valid and creates a normal browser. Infrastructure placement, Droplet size, proxy credentials, and the reserved WebBrain Cloud connection are private server configuration and cannot be overridden by this request.</p>
           <table class="field-table">
             <thead><tr><th>Field</th><th>Type</th><th>Default</th><th>Applies to</th><th>Purpose</th></tr></thead>
             <tbody>
               <tr><td><code>display_name</code></td><td>string</td><td>None</td><td>Both</td><td>An optional dashboard label up to 120 characters.</td></tr>
               <tr><td><code>type</code></td><td>string enum</td><td><code>normal</code></td><td>Both</td><td><code>normal</code> or <code>incognito</code>, matching the dashboard.</td></tr>
               <tr><td><code>proxy_enabled</code></td><td>boolean</td><td>Server default</td><td>Both</td><td><code>true</code> uses the server-configured proxy; <code>false</code> uses a direct connection.</td></tr>
+              <tr><td><code>webbrain_config</code></td><td><code>webbrain-config/1</code> object</td><td>None</td><td>Both</td><td>Optional sparse Settings import copied directly from WebBrain's <code>/export --config</code> output.</td></tr>
             </tbody>
           </table>
           <p class="field-note">DigitalOcean region and size come only from <span class="inline-code">DO_REGION</span> and <span class="inline-code">DO_SIZE</span>. Proxy routing and credentials come only from the server's proxy environment. They are intentionally absent from the public request body.</p>
+          <h3>Import WebBrain Settings at creation</h3>
+          <p>Paste the complete JSON produced by WebBrain's <span class="inline-code">/export --config</span> command into <span class="inline-code">webbrain_config</span>. The export metadata is accepted unchanged. Settings are sparse: omitted fields keep their normal WebBrain or cloud defaults, accepted fields are applied before <span class="inline-code">runtime_ready</span>, and invalid or managed fields are ignored without failing browser creation.</p>
+          <p>Editable fields are <span class="inline-code">wbLocale</span>, <span class="inline-code">themeMode</span>, <span class="inline-code">verboseMode</span>, <span class="inline-code">selectionShortcutEnabled</span>, <span class="inline-code">helpImproveWebBrain</span>, <span class="inline-code">voiceInputEnabled</span>, <span class="inline-code">notifySound</span>, <span class="inline-code">completionConfetti</span>, <span class="inline-code">providerFilter</span>, <span class="inline-code">screenshotFallback</span>, <span class="inline-code">autoScreenshot</span>, <span class="inline-code">useSiteAdapters</span>, <span class="inline-code">apiMutationObserverEnabled</span>, <span class="inline-code">screenshotRedaction</span>, the agent/cost limits, <span class="inline-code">captchaSolverEnabled</span>, <span class="inline-code">capsolverApiKey</span>, <span class="inline-code">providers</span>, and <span class="inline-code">activeProvider</span>.</p>
+          <p>WebBrain Cloud connection fields, plan/review policy, tracing, permissions, Downloads path, local-network access, schedules, profile, memory, and custom skills remain platform-managed. Additional providers are merged, but private/local endpoints are ignored and the reserved <span class="inline-code">webbrain_cloud</span> connection always keeps its platform-issued URL, model, and session token. A valid configured external provider may be selected with <span class="inline-code">activeProvider</span>.</p>
+          <p class="field-note">Config exports contain plaintext provider and CapSolver API keys. Send them only over HTTPS, never log the request body, and remember that normal browsers retain accepted settings on their profile volume while incognito settings disappear when the browser is destroyed.</p>
+          <pre class="command-block language-php"><code>${highlightedCode(WEBBRAIN_CONFIG_PHP_EXAMPLE, 'php')}</code></pre>
+          <h3>Config import result</h3>
+          <p>When <span class="inline-code">webbrain_config</span> is supplied, the create response includes accepted field paths, ignored fields with stable reason codes, and non-secret warnings. Values and credentials are never echoed.</p>
+          <pre class="command-block"><code>${escapeHtml(WEBBRAIN_CONFIG_RESULT_EXAMPLE)}</code></pre>
           <div class="endpoint-list">
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions</code><span>Create a normal or incognito browser.</span></div>
             <div class="endpoint"><span class="method">GET</span><code>/api/browser-sessions</code><span>List your sessions.</span></div>

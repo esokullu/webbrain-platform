@@ -31,6 +31,7 @@ export class DigitalOceanProvisioner {
         config: this.config,
         providerApiKey: opts.providerApiKey || '',
         proxyUrl: opts.proxyUrl || '',
+        webbrainConfig: opts.webbrainConfig || '',
       }),
     };
     const res = await this.fetch('https://api.digitalocean.com/v2/droplets', {

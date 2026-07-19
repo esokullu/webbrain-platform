@@ -218,7 +218,11 @@ export class WarmDropletPool {
     return claimed;
   }
 
-  async assignClaimedDroplet(claimed, session, { providerApiKey = '', proxyUrl = '' } = {}) {
+  async assignClaimedDroplet(
+    claimed,
+    session,
+    { providerApiKey = '', proxyUrl = '', webbrainConfig = '' } = {},
+  ) {
     try {
       if (session.volume_id) {
         const action = await this.provisioner.attachVolumeToDroplet(
@@ -236,6 +240,7 @@ export class WarmDropletPool {
         session_token: session.connect_secret,
         provider_api_key: providerApiKey || session.connect_secret,
         proxy_url: proxyUrl || '',
+        webbrain_config_b64: webbrainConfig || '',
         volume_id: session.volume_id || '',
         volume_name: session.volume_name || '',
         profile_mount: this.config.droplet.profileMount,
@@ -272,14 +277,21 @@ export class WarmDropletPool {
     }
   }
 
-  async tryAssignSession(session, { providerApiKey = '', proxyUrl = '' } = {}) {
+  async tryAssignSession(
+    session,
+    { providerApiKey = '', proxyUrl = '', webbrainConfig = '' } = {},
+  ) {
     if (this.desiredSize <= 0) return null;
     const deadline = Date.now() + this.claimWaitMs;
 
     while (true) {
       const claimed = await this.claimReadyCandidate(session);
       if (claimed) {
-        return await this.assignClaimedDroplet(claimed, session, { providerApiKey, proxyUrl });
+        return await this.assignClaimedDroplet(
+          claimed,
+          session,
+          { providerApiKey, proxyUrl, webbrainConfig },
+        );
       }
 
       if (this.claimWaitMs <= 0 || Date.now() >= deadline) {
@@ -291,7 +303,11 @@ export class WarmDropletPool {
 
       const reconciledClaim = await this.claimReadyCandidate(session);
       if (reconciledClaim) {
-        return await this.assignClaimedDroplet(reconciledClaim, session, { providerApiKey, proxyUrl });
+        return await this.assignClaimedDroplet(
+          reconciledClaim,
+          session,
+          { providerApiKey, proxyUrl, webbrainConfig },
+        );
       }
 
       if (!await this.hasCreatingCandidate(session)) {

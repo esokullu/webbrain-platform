@@ -196,6 +196,9 @@ async function assign(payload) {
     WEBBRAIN_PROVIDER_BASE_URL: process.env.WEBBRAIN_PROVIDER_BASE_URL || '',
     WEBBRAIN_PROVIDER_API_KEY: payload.provider_api_key || sessionToken,
     WEBBRAIN_PROVIDER_MODEL: process.env.WEBBRAIN_PROVIDER_MODEL || 'webbrain-cloud 1.0',
+    ...(payload.webbrain_config_b64
+      ? { WEBBRAIN_CONFIG_B64: payload.webbrain_config_b64 }
+      : {}),
     WEBBRAIN_NOVNC_SECRET: sessionToken,
     WEBBRAIN_NOVNC_TARGET: 'http://127.0.0.1:6080',
     WEBBRAIN_NOVNC_GATE_PORT: process.env.WEBBRAIN_NOVNC_GATE_PORT || '6081',

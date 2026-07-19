@@ -69,7 +69,12 @@ final class WebBrainClient
 
     public function createBrowserSession(array $options = []): array
     {
-        return $this->request('POST', '/api/browser-sessions', $options)['browser_session'];
+        $response = $this->request('POST', '/api/browser-sessions', $options);
+        $session = $response['browser_session'];
+        if (array_key_exists('webbrain_config_result', $response)) {
+            $session['webbrain_config_result'] = $response['webbrain_config_result'];
+        }
+        return $session;
     }
 
     public function getBrowserSession(string $sessionId): array

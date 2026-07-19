@@ -124,7 +124,14 @@ test('Node.js client sends authenticated session and run requests', async () => 
     });
     res.setHeader('content-type', 'application/json');
     if (req.method === 'POST' && req.url === '/api/browser-sessions') {
-      res.end(JSON.stringify({ browser_session: { id: 'bs_test', status: 'provisioning' } }));
+      res.end(JSON.stringify({
+        browser_session: { id: 'bs_test', status: 'provisioning' },
+        webbrain_config_result: {
+          accepted: ['settings.themeMode'],
+          ignored: [],
+          warnings: [],
+        },
+      }));
       return;
     }
     if (req.method === 'GET' && req.url === '/api/browser-sessions/bs_test') {
@@ -207,8 +214,15 @@ test('Node.js client sends authenticated session and run requests', async () => 
       apiKey: 'wbp_test',
       baseUrl: `http://127.0.0.1:${server.address().port}`,
     });
-    const session = await client.createBrowserSession();
+    const session = await client.createBrowserSession({
+      type: 'incognito',
+      webbrain_config: {
+        schema: 'webbrain-config/1',
+        settings: { themeMode: 'dark' },
+      },
+    });
     assert.equal(session.id, 'bs_test');
+    assert.deepEqual(session.webbrain_config_result.accepted, ['settings.themeMode']);
     const ready = await client.waitForBrowserSession(session.id, { pollIntervalMs: 1, timeoutMs: 1000 });
     assert.equal(ready.runtime_ready, true);
     const renamed = await client.updateBrowserSession(ready.id, { displayName: 'Research' });
@@ -244,6 +258,13 @@ test('Node.js client sends authenticated session and run requests', async () => 
     });
     assert.equal(followUp.parent_run_id, run.run_id);
     assert.equal(requests.every(entry => entry.authorization === 'Bearer wbp_test'), true);
+    assert.deepEqual(requests.find(entry => entry.path === '/api/browser-sessions').body, {
+      type: 'incognito',
+      webbrain_config: {
+        schema: 'webbrain-config/1',
+        settings: { themeMode: 'dark' },
+      },
+    });
     assert.deepEqual(requests.find(entry => entry.path.endsWith('/runs')).body, {
       task: 'Open example.com',
       wait: false,
@@ -273,6 +294,41 @@ test('Node.js client sends authenticated session and run requests', async () => 
       () => client.getBrowserSession('missing'),
       error => error instanceof WebBrainApiError && error.status === 404 && error.message === 'Not found'
     );
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test('PHP client preserves the non-secret WebBrain config result when PHP is installed', async t => {
+  if (!await runtimeAvailable('php', '-v')) return t.skip('PHP is not installed');
+  const server = http.createServer(async (req, res) => {
+    for await (const _chunk of req) {
+      // Consume the request body before replying.
+    }
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({
+      browser_session: { id: 'bs_config', status: 'provisioning' },
+      webbrain_config_result: {
+        accepted: ['settings.captchaSolverEnabled'],
+        ignored: [{ field: 'settings.planBeforeAct', reason: 'platform_managed' }],
+        warnings: [],
+      },
+    }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+
+  try {
+    const phpSource = `<?php
+require_once ${JSON.stringify(path.resolve('clients/php/WebBrainClient.php'))};
+$client = new WebBrainClient('wbp_test', ${JSON.stringify(`http://127.0.0.1:${server.address().port}`)});
+$session = $client->createBrowserSession(['type' => 'incognito']);
+echo json_encode($session, JSON_THROW_ON_ERROR);
+`;
+    const { stdout } = await execFileAsync('php', ['-r', phpSource.replace(/^<\?php\s*/, '')]);
+    const session = JSON.parse(stdout);
+    assert.equal(session.id, 'bs_config');
+    assert.deepEqual(session.webbrain_config_result.accepted, ['settings.captchaSolverEnabled']);
+    assert.equal(Object.hasOwn(session.webbrain_config_result, 'values'), false);
   } finally {
     await new Promise(resolve => server.close(resolve));
   }

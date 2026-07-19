@@ -15,7 +15,13 @@ export function chromeExtensionIdForPath(extensionPath) {
   return [...hex].map(char => String.fromCharCode(97 + Number.parseInt(char, 16))).join('');
 }
 
-export function renderCloudInit({ session, config, providerApiKey = '', proxyUrl = '' }) {
+export function renderCloudInit({
+  session,
+  config,
+  providerApiKey = '',
+  proxyUrl = '',
+  webbrainConfig = '',
+}) {
   const repoUrl = config.droplet.repoUrl || 'https://github.com/esokullu/webbrain-platform.git';
   const webbrainRepoUrl = config.droplet.webbrainRepoUrl || 'https://github.com/webbrain-one/webbrain.git';
   const appDir = '/opt/webbrain-platform';
@@ -62,6 +68,7 @@ chmod 0700 "$mount_path" "$mount_path/chrome"
     WEBBRAIN_PROVIDER_BASE_URL: config.droplet.providerBaseUrl,
     WEBBRAIN_PROVIDER_API_KEY: providerApiKey,
     WEBBRAIN_PROVIDER_MODEL: config.droplet.providerModel,
+    ...(webbrainConfig ? { WEBBRAIN_CONFIG_B64: webbrainConfig } : {}),
     WEBBRAIN_NOVNC_SECRET: session.connect_secret,
     WEBBRAIN_NOVNC_TARGET: 'http://127.0.0.1:6080',
     WEBBRAIN_NOVNC_GATE_PORT: String(config.droplet.noVncGatePort || 6081),

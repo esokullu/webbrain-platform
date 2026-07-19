@@ -170,6 +170,9 @@ export class EphemeralRuntimeManager {
       WEBBRAIN_PROVIDER_BASE_URL: this.env.WEBBRAIN_PROVIDER_BASE_URL || '',
       WEBBRAIN_PROVIDER_API_KEY: payload.provider_api_key || payload.session_token,
       WEBBRAIN_PROVIDER_MODEL: this.env.WEBBRAIN_PROVIDER_MODEL || 'webbrain-cloud 1.0',
+      ...(payload.webbrain_config_b64
+        ? { WEBBRAIN_CONFIG_B64: payload.webbrain_config_b64 }
+        : {}),
       WEBBRAIN_BROWSER_BIN: this.env.WEBBRAIN_BROWSER_BIN || '/opt/chrome-linux64/chrome',
       WEBBRAIN_START_URL: this.env.WEBBRAIN_START_URL || 'https://webbrain.one',
       WEBBRAIN_BROWSER_PROXY_URL: payload.proxy_url || '',

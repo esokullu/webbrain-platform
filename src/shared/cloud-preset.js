@@ -12,6 +12,7 @@ export const WEBBRAIN_CLOUD_FIRST_RUN_PRESET = Object.freeze({
 export function buildCloudStoragePatch(current = {}, {
   bridgeUrl,
   tracingEnabled = true,
+  activeProvider = 'webbrain_cloud',
 } = {}) {
   const currentVersion = Number(current.webbrainCloudPresetVersion || 0);
   const presetApplied = !Number.isFinite(currentVersion)
@@ -20,7 +21,7 @@ export function buildCloudStoragePatch(current = {}, {
     webbrainCloudBridgeEnabled: true,
     webbrainCloudBridgeUrl: bridgeUrl,
     webbrainCloudManaged: true,
-    activeProvider: 'webbrain_cloud',
+    activeProvider,
     tracingEnabled: tracingEnabled !== false,
   };
 

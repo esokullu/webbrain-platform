@@ -10,6 +10,10 @@ import { normalizeProxyUrl, publicProxyEndpoint, publicProxyState } from '../sha
 import { DEFAULT_DOWNLOADS_UPLOAD_LIMIT_BYTES, downloadsAccessCredentials } from '../shared/downloads-access.js';
 import { DEFAULT_CREDIT_PACKAGES, pricingPage } from './pricing-page.js';
 import {
+  encodeWebBrainConfig,
+  sanitizeWebBrainConfig,
+} from '../shared/webbrain-config.js';
+import {
   createStripeCheckoutSession,
   retrieveStripeCheckoutSession,
   retrieveStripePaymentIntent,
@@ -4472,6 +4476,8 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       const lifecycle = browserLifecycleFromRequest(req.body);
       const proxyUrl = configuredBrowserProxyUrl(req.body, config);
       const proxyEndpoint = publicProxyEndpoint(proxyUrl);
+      const webbrainConfig = sanitizeWebBrainConfig(req.body.webbrain_config);
+      const webbrainConfigEncoded = encodeWebBrainConfig(webbrainConfig.config);
 
       if (lifecycle === 'ephemeral') {
         const requestedTtlMs = Number(
@@ -4550,6 +4556,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
             session_token: session.connect_secret,
             provider_api_key: session.connect_secret,
             proxy_url: proxyUrl,
+            webbrain_config_b64: webbrainConfigEncoded,
             expires_at: session.expires_at,
           }, 30_000);
           const updated = await store.updateBrowserSession(session.id, {
@@ -4563,7 +4570,12 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
             host_session_id: refreshedHost.id,
             runtime_generation: runtime.generation,
           });
-          return res.status(201).json({ browser_session: publicBrowserSession(updated) });
+          return res.status(201).json({
+            browser_session: publicBrowserSession(updated),
+            ...(webbrainConfig.supplied
+              ? { webbrain_config_result: webbrainConfig.result }
+              : {}),
+          });
         } catch (error) {
           // A start request can time out after the Droplet has already launched
           // the transient unit. Only clear its placement after the Droplet
@@ -4644,9 +4656,11 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
         provisioned = await warmPool?.tryAssignSession(sessionForDroplet, {
           providerApiKey: session.connect_secret,
           proxyUrl,
+          webbrainConfig: webbrainConfigEncoded,
         }) || await provisioner.createBrowserDroplet(sessionForDroplet, {
           providerApiKey: session.connect_secret,
           proxyUrl,
+          webbrainConfig: webbrainConfigEncoded,
         });
       } catch (e) {
         if (volume?.volume_id) {
@@ -4689,7 +4703,12 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
         lifecycle,
         warm_pool_id: provisioned.warm_pool_id || null,
       });
-      res.status(201).json({ browser_session: publicBrowserSession(updated) });
+      res.status(201).json({
+        browser_session: publicBrowserSession(updated),
+        ...(webbrainConfig.supplied
+          ? { webbrain_config_result: webbrainConfig.result }
+          : {}),
+      });
     } catch (e) {
       next(e);
     }

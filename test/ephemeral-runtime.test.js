@@ -45,6 +45,7 @@ test('ephemeral runtime manager uses a volatile hardened systemd unit and cleans
       session_token: 'child-secret',
       provider_api_key: 'provider-secret',
       proxy_url: 'http://user:pass@proxy.example:8080/',
+      webbrain_config_b64: 'encoded-webbrain-config',
       expires_at: new Date(Date.now() + 60_000).toISOString(),
     });
     assert.equal(started.exists, true);
@@ -66,6 +67,7 @@ test('ephemeral runtime manager uses a volatile hardened systemd unit and cleans
 
     assert.match(launchedEnvText, /WEBBRAIN_EPHEMERAL="true"/);
     assert.match(launchedEnvText, /WEBBRAIN_SESSION_TOKEN="child-secret"/);
+    assert.match(launchedEnvText, /WEBBRAIN_CONFIG_B64="encoded-webbrain-config"/);
     assert.match(launchedEnvText, /WEBBRAIN_NOVNC_GATE_PORT="6200"/);
     assert.match(launchedEnvText, /WEBBRAIN_RUNTIME_HOST="127\.200\.0\.1"/);
     assert.match(launchedEnvText, /WEBBRAIN_EPHEMERAL_DATA_DIR="\/tmp\/webbrain-ephemeral-data"/);

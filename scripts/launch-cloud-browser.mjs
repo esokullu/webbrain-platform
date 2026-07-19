@@ -13,10 +13,15 @@ import {
   buildCloudStoragePatch,
   storagePatchMismatches,
 } from '../src/shared/cloud-preset.js';
+import {
+  decodeWebBrainConfig,
+  WEBBRAIN_CONFIG_ENV,
+} from '../src/shared/webbrain-config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 const sessionId = process.env.WEBBRAIN_SESSION_ID || 'default';
+const WEBBRAIN_CONFIG_APPLIED_SESSION_KEY = 'webbrainPlatformConfigAppliedSession';
 const extensionDir = path.resolve(process.env.WEBBRAIN_EXTENSION_DIR || path.join(rootDir, '..', 'webbrain3', 'src', 'chrome'));
 const profileDir = path.resolve(process.env.WEBBRAIN_PROFILE_DIR || path.join(rootDir, '.webbrain-sessions', sessionId));
 const debuggingPort = Number(process.env.WEBBRAIN_REMOTE_DEBUGGING_PORT || 9222);
@@ -301,7 +306,7 @@ function createCdpClient(webSocketDebuggerUrl) {
   };
 }
 
-async function preseedExtension(extensionId) {
+async function preseedExtension(extensionId, webbrainConfig = null) {
   const target = await createTarget(`chrome-extension://${extensionId}/src/ui/settings.html`);
   const cdp = createCdpClient(target.webSocketDebuggerUrl);
   try {
@@ -310,21 +315,64 @@ async function preseedExtension(extensionId) {
     await waitForExtensionPage(cdp);
 
     const providerConfig = webbrainCloudProviderConfig();
+    const markerResult = await cdp.call('Runtime.evaluate', {
+      expression: `chrome.storage.local.get(${JSON.stringify([
+        WEBBRAIN_CONFIG_APPLIED_SESSION_KEY,
+      ])})`,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    if (markerResult.exceptionDetails) {
+      throw new Error(markerResult.exceptionDetails.text || 'Could not read WebBrain provisioning state.');
+    }
+    const configAlreadyApplied = webbrainConfig
+      && markerResult.result?.value?.[WEBBRAIN_CONFIG_APPLIED_SESSION_KEY] === sessionId;
+    const importedSettings = configAlreadyApplied ? {} : (webbrainConfig?.settings || {});
+    let importResult = null;
+    if (webbrainConfig && !configAlreadyApplied) {
+      const importJson = JSON.stringify(webbrainConfig);
+      const imported = await cdp.call('Runtime.evaluate', {
+        expression: `
+          chrome.runtime.sendMessage({
+            target: 'background',
+            action: 'import_config_patch',
+            json: ${JSON.stringify(importJson)}
+          })
+        `,
+        awaitPromise: true,
+        returnByValue: true,
+      });
+      if (imported.exceptionDetails) {
+        throw new Error(imported.exceptionDetails.text || 'Could not import WebBrain settings.');
+      }
+      importResult = imported.result?.value;
+      if (!importResult?.ok) {
+        throw new Error(importResult?.error || 'WebBrain settings import failed.');
+      }
+    }
+
     const currentResult = await cdp.call('Runtime.evaluate', {
-      expression: "chrome.storage.local.get(['webbrainCloudPresetVersion', 'providers'])",
+      expression: "chrome.storage.local.get(['webbrainCloudPresetVersion', 'providers', 'activeProvider'])",
       awaitPromise: true,
       returnByValue: true,
     });
     if (currentResult.exceptionDetails) {
       throw new Error(currentResult.exceptionDetails.text || 'Could not read WebBrain cloud preset state.');
     }
+    const requestedActiveProvider = importedSettings.activeProvider
+      || currentResult.result?.value?.activeProvider
+      || 'webbrain_cloud';
     const { patch: storagePatch, presetApplied, presetVersion } = buildCloudStoragePatch(
       currentResult.result?.value || {},
       {
         bridgeUrl: sidecarWsUrl,
         tracingEnabled: boolEnv('WEBBRAIN_TRACING_ENABLED', true),
+        activeProvider: requestedActiveProvider,
       },
     );
+    if (webbrainConfig && !configAlreadyApplied) {
+      storagePatch[WEBBRAIN_CONFIG_APPLIED_SESSION_KEY] = sessionId;
+    }
     const currentProviders = currentResult.result?.value?.providers || {};
     const providers = {
       ...currentProviders,
@@ -340,21 +388,23 @@ async function preseedExtension(extensionId) {
         const storagePatch = ${JSON.stringify(storagePatch)};
         const providers = ${JSON.stringify(providers)};
         await chrome.storage.local.set({ ...storagePatch, providers });
-        try {
-          await chrome.runtime.sendMessage({
-            target: 'background',
-            action: 'update_provider',
-            providerId: 'webbrain_cloud',
-            config: providerConfig
-          });
-        } catch (e) {}
-        try {
-          await chrome.runtime.sendMessage({
-            target: 'background',
-            action: 'set_active_provider',
-            providerId: 'webbrain_cloud'
-          });
-        } catch (e) {}
+        const providerUpdate = await chrome.runtime.sendMessage({
+          target: 'background',
+          action: 'update_provider',
+          providerId: 'webbrain_cloud',
+          config: providerConfig
+        });
+        if (!providerUpdate?.ok) {
+          throw new Error(providerUpdate?.error || 'Could not update WebBrain Cloud provider.');
+        }
+        const providerSelection = await chrome.runtime.sendMessage({
+          target: 'background',
+          action: 'set_active_provider',
+          providerId: ${JSON.stringify(requestedActiveProvider)}
+        });
+        if (!providerSelection?.ok) {
+          throw new Error(providerSelection?.error || 'Could not select active provider.');
+        }
         const bridge = await chrome.runtime.sendMessage({
           target: 'background',
           action: 'cloud_bridge_start',
@@ -363,6 +413,10 @@ async function preseedExtension(extensionId) {
         return {
           ok: true,
           bridge,
+          settings_import: {
+            applied: ${JSON.stringify(Boolean(webbrainConfig && !configAlreadyApplied))},
+            setting_count: ${JSON.stringify(Object.keys(importedSettings).length)},
+          },
           preset: { applied: ${JSON.stringify(presetApplied)}, version: ${JSON.stringify(presetVersion)} },
         };
       })()
@@ -379,16 +433,39 @@ async function preseedExtension(extensionId) {
     const seeded = result.result?.value;
     if (!seeded?.ok) return seeded;
 
-    const expected = { ...storagePatch, providers };
+    const importedScalarSettings = Object.fromEntries(
+      Object.entries(importedSettings)
+        .filter(([key]) => key !== 'providers' && key !== 'activeProvider'),
+    );
+    const expected = { ...importedScalarSettings, ...storagePatch };
     const verifiedResult = await cdp.call('Runtime.evaluate', {
-      expression: `chrome.storage.local.get(${JSON.stringify(Object.keys(expected))})`,
+      expression: `chrome.storage.local.get(${JSON.stringify([
+        ...new Set([...Object.keys(expected), 'providers']),
+      ])})`,
       awaitPromise: true,
       returnByValue: true,
     });
     if (verifiedResult.exceptionDetails) {
       throw new Error(verifiedResult.exceptionDetails.text || 'Could not verify WebBrain cloud preset state.');
     }
-    const mismatches = storagePatchMismatches(verifiedResult.result?.value || {}, expected);
+    const actual = verifiedResult.result?.value || {};
+    const mismatches = storagePatchMismatches(actual, expected);
+    const expectedProviderSubsets = {
+      ...(importedSettings.providers || {}),
+      webbrain_cloud: providerConfig,
+    };
+    for (const [providerId, expectedProvider] of Object.entries(expectedProviderSubsets)) {
+      const actualProvider = actual.providers?.[providerId];
+      if (!actualProvider) {
+        mismatches.push(`providers.${providerId}`);
+        continue;
+      }
+      for (const [key, value] of Object.entries(expectedProvider)) {
+        if (JSON.stringify(actualProvider[key]) !== JSON.stringify(value)) {
+          mismatches.push(`providers.${providerId}.${key}`);
+        }
+      }
+    }
     if (mismatches.length) {
       return {
         ...seeded,
@@ -396,7 +473,11 @@ async function preseedExtension(extensionId) {
         error: `WebBrain cloud storage verification failed: ${mismatches.join(', ')}`,
       };
     }
-    return { ...seeded, storage_verified: true };
+    return {
+      ...seeded,
+      storage_verified: true,
+      settings_imported: Boolean(importResult?.ok),
+    };
   } finally {
     cdp.close();
     await closeTarget(target.id).catch(() => {});
@@ -443,6 +524,7 @@ async function main() {
   for (const name of [
     'WEBBRAIN_SESSION_TOKEN',
     'WEBBRAIN_PROVIDER_API_KEY',
+    WEBBRAIN_CONFIG_ENV,
     'WEBBRAIN_BROWSER_PROXY_URL',
     'WEBBRAIN_NOVNC_SECRET',
     'WEBBRAIN_CONTROL_WS_URL',
@@ -468,7 +550,8 @@ async function main() {
     await downloadSync.start(downloadsCdp);
   }
   const extensionId = await waitForExtensionId();
-  const seeded = await preseedExtension(extensionId);
+  const webbrainConfig = decodeWebBrainConfig(process.env[WEBBRAIN_CONFIG_ENV]);
+  const seeded = await preseedExtension(extensionId, webbrainConfig);
   if (!seeded?.ok || seeded?.bridge?.error) {
     throw new Error(`WebBrain cloud startup failed: ${seeded?.error || seeded?.bridge?.error || 'invalid extension response'}`);
   }

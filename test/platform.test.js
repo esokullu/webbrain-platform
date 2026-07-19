@@ -18,6 +18,7 @@ import { chromeExtensionIdForPath, renderCloudInit, renderWarmPoolCloudInit } fr
 import { verifyNoVncToken } from '../src/shared/novnc-token.js';
 import { instanceHostname, sessionIdFromInstanceHost } from '../src/platform/instance-proxy.js';
 import { hashToken } from '../src/shared/crypto.js';
+import { decodeWebBrainConfig } from '../src/shared/webbrain-config.js';
 import {
   DOWNLOADS_PROXY_SIGNATURE_HEADER,
   DOWNLOADS_PROXY_TIMESTAMP_HEADER,
@@ -1309,6 +1310,95 @@ test('always-on browser creation skips the profile volume and keeps local Downlo
   }
 });
 
+test('browser creation accepts WebBrain export config without changing normal or incognito lifecycle', async () => {
+  const ctx = await startPlatform();
+  try {
+    const cookie = await register(ctx.base, 'webbrain-config@example.com');
+    const normal = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ type: 'normal' }),
+    });
+    assert.equal(normal.status, 201);
+    assert.equal(Object.hasOwn(normal.body, 'webbrain_config_result'), false);
+    assert.equal(ctx.provisioner.createdOptions[0].webbrainConfig, '');
+    assert.equal(ctx.provisioner.createdVolumes.length, 1);
+
+    const capsolverSecret = 'capsolver-secret-must-not-be-returned';
+    const configured = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({
+        type: 'incognito',
+        webbrain_config: {
+          schema: 'webbrain-config/1',
+          exportedAt: '2026-07-19T10:00:00.000Z',
+          webbrainVersion: '7.3.0',
+          warning: 'Contains plaintext provider API keys.',
+          settings: {
+            themeMode: 'dark',
+            captchaSolverEnabled: true,
+            capsolverApiKey: capsolverSecret,
+            activeProvider: 'webbrain_cloud',
+            planBeforeActMode: 'strict',
+            unknownSetting: true,
+          },
+        },
+      }),
+    });
+
+    assert.equal(configured.status, 201);
+    assert.equal(configured.body.browser_session.volume, null);
+    assert.deepEqual(configured.body.webbrain_config_result.accepted, [
+      'settings.themeMode',
+      'settings.captchaSolverEnabled',
+      'settings.capsolverApiKey',
+      'settings.activeProvider',
+    ]);
+    assert.deepEqual(configured.body.webbrain_config_result.ignored, [
+      { field: 'settings.planBeforeActMode', reason: 'platform_managed' },
+      { field: 'settings.unknownSetting', reason: 'unsupported_setting' },
+    ]);
+    assert.equal(JSON.stringify(configured.body).includes(capsolverSecret), false);
+    assert.equal(ctx.provisioner.createdVolumes.length, 1);
+    assert.deepEqual(
+      decodeWebBrainConfig(ctx.provisioner.createdOptions[1].webbrainConfig),
+      {
+        schema: 'webbrain-config/1',
+        settings: {
+          themeMode: 'dark',
+          captchaSolverEnabled: true,
+          capsolverApiKey: capsolverSecret,
+          activeProvider: 'webbrain_cloud',
+        },
+      },
+    );
+
+    const invalid = await request(ctx.base, '/api/browser-sessions', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({
+        type: 'incognito',
+        webbrain_config: {
+          schema: 'unsupported-schema',
+          settings: { capsolverApiKey: 'also-must-not-be-returned' },
+        },
+      }),
+    });
+    assert.equal(invalid.status, 201);
+    assert.equal(invalid.body.browser_session.volume, null);
+    assert.deepEqual(invalid.body.webbrain_config_result, {
+      accepted: [],
+      ignored: [{ field: 'webbrain_config.schema', reason: 'invalid_schema' }],
+      warnings: [],
+    });
+    assert.equal(ctx.provisioner.createdOptions[2].webbrainConfig, '');
+    assert.equal(JSON.stringify(invalid.body).includes('also-must-not-be-returned'), false);
+  } finally {
+    await ctx.platform.close();
+  }
+});
+
 test('ephemeral browsers reuse running resumable and always-on Droplets and are discarded on stop or host reset', async () => {
   const ctx = await startPlatform({
     WEBBRAIN_INSTANCE_DOMAIN: '',
@@ -2485,7 +2575,7 @@ test('public agent skill files are readable without authentication', async () =>
     assert.equal(skill.status, 200);
     assert.match(skill.headers.get('content-type') || '', /^text\/markdown/);
     assert.match(skill.headers.get('cache-control') || '', /max-age=300/);
-    assert.match(skill.text, /^---\nname: webbrain-cloud/m);
+    assert.match(skill.text, /^---\r?\nname: webbrain-cloud/m);
     assert.match(skill.text, /https:\/\/webbrain\.cloud\/skills\/webbrain-cloud\/api\.md/);
 
     const canonicalSkill = await requestText(ctx.base, '/skills/webbrain-cloud/SKILL.md');
@@ -2566,6 +2656,10 @@ test('public API documentation provides accessible REST and client tabs', async 
     assert.match(res.text, /<code>display_name<\/code>/);
     assert.match(res.text, /<code>type<\/code>/);
     assert.match(res.text, /<code>proxy_enabled<\/code>/);
+    assert.match(res.text, /<code>webbrain_config<\/code>/);
+    assert.match(res.text, /\/export --config/);
+    assert.match(res.text, /webbrain_config_result/);
+    assert.match(res.text, /settings\.activeProvider/);
     assert.doesNotMatch(res.text, /<code>lifecycle<\/code>/);
     assert.doesNotMatch(res.text, /<code>host_session_id<\/code>/);
     assert.doesNotMatch(res.text, /<code>ttl_ms<\/code>/);
@@ -2924,6 +3018,7 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
     session: { id: 'bs_test', connect_secret: 'connect-secret' },
     config,
     providerApiKey: 'provider-secret',
+    webbrainConfig: 'encoded-webbrain-config',
   });
 
   assert.match(cloudInit, /DISPLAY=':99'/);
@@ -2943,6 +3038,7 @@ test('browser session cloud-init starts virtual display and noVNC services', () 
   assert.match(cloudInit, /WEBBRAIN_BROWSER_PROXY_BYPASS_LIST='platform\.example'/);
   assert.match(cloudInit, /WEBBRAIN_PROXY_STATE_PATH='\/var\/lib\/webbrain\/proxy\.json'/);
   assert.match(cloudInit, /WEBBRAIN_START_URL='https:\/\/webbrain\.one'/);
+  assert.match(cloudInit, /WEBBRAIN_CONFIG_B64='encoded-webbrain-config'/);
   assert.match(cloudInit, /"PasswordManagerEnabled":false/);
   assert.match(cloudInit, /"toolbar_pin":"force_pinned"/);
   assert.match(cloudInit, new RegExp(chromeExtensionIdForPath('/opt/webbrain3/src/chrome')));
@@ -3026,6 +3122,7 @@ test('volume-backed cloud-init mounts the fixed profile disk and stages Download
     },
     config,
   });
+  assert.doesNotMatch(alwaysOnCloudInit, /WEBBRAIN_CONFIG_B64/);
 
   assert.match(cloudInit, /scsi-0DO_Volume_wb-profile-bs-volume/);
   assert.match(cloudInit, /WEBBRAIN_PROFILE_DIR='\/mnt\/webbrain-profile\/chrome'/);
@@ -3073,6 +3170,9 @@ test('cloud browser launches at the virtual display size', async () => {
   assert.match(source, /delete browserEnv\[name\]/);
   assert.match(source, /'WEBBRAIN_SESSION_TOKEN'/);
   assert.match(source, /'WEBBRAIN_PROVIDER_API_KEY'/);
+  assert.match(source, /WEBBRAIN_CONFIG_ENV/);
+  assert.match(source, /decodeWebBrainConfig/);
+  assert.match(source, /action: 'import_config_patch'/);
 });
 
 test('digitalocean provisioner uses hostname-safe droplet names', async () => {

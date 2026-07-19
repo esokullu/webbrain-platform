@@ -52,7 +52,13 @@ export class WebBrainClient {
   }
 
   async createBrowserSession(options = {}) {
-    return (await this.request('POST', '/api/browser-sessions', options)).browser_session;
+    const response = await this.request('POST', '/api/browser-sessions', options);
+    return {
+      ...response.browser_session,
+      ...(response.webbrain_config_result
+        ? { webbrain_config_result: response.webbrain_config_result }
+        : {}),
+    };
   }
 
   async getBrowserSession(sessionId) {
