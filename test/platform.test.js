@@ -2231,10 +2231,10 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /function deleteConfirmationMatches\(\)/);
     assert.doesNotMatch(res.text, /confirm\('Delete browser session/);
     assert.match(res.text, /collapseSessionsBtn/);
-    assert.match(res.text, /toggleDestroyedBtn/);
-    assert.match(res.text, /showDestroyed: false/);
+    assert.doesNotMatch(res.text, /toggleDestroyedBtn/);
+    assert.doesNotMatch(res.text, /showDestroyed/);
     assert.match(res.text, /filter\(s => s\.status !== 'destroyed'\)/);
-    assert.match(res.text, /Show ' \+ destroyedCount \+ ' destroyed/);
+    assert.doesNotMatch(res.text, /Show ' \+ destroyedCount \+ ' destroyed/);
     assert.match(res.text, /meta\.textContent = session\.id;/);
     assert.doesNotMatch(res.text, /session\.proxy\?\.enabled[^\n]+session\.proxy\.endpoint/);
     assert.doesNotMatch(res.text, /meta\.textContent = session\.public_ip/);

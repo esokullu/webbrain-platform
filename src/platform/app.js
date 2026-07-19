@@ -484,7 +484,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     .session-panel.is-collapsed { align-self: stretch; min-height: 680px; }
     .session-panel.is-collapsed .panel-head { height: 100%; padding: 8px 6px; border-bottom: 0; align-items: flex-start; }
     .session-panel.is-collapsed .session-heading { justify-content: center; }
-    .session-panel.is-collapsed .session-heading > div:first-child, .session-panel.is-collapsed .destroyed-toggle, .session-panel.is-collapsed #sessionCount { display: none !important; }
+    .session-panel.is-collapsed .session-heading > div:first-child, .session-panel.is-collapsed #sessionCount { display: none !important; }
     .session-panel.is-collapsed .session-panel-actions { display: block; }
     .session-panel.is-collapsed .panel-body { display: none !important; }
     .session-panel.is-collapsed .collapse-sessions span { transform: rotate(180deg); }
@@ -506,8 +506,6 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     .session-title { font-weight: 700; font-size: 13px; overflow-wrap: anywhere; }
     .session-meta { color: var(--text-dim); font-size: 12px; margin-top: 3px; overflow-wrap: anywhere; }
     .status { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border-radius: 999px; background: rgba(89,55,25,.07); color: var(--text-dim); font-size: 11px; font-weight: 700; }
-    .destroyed-toggle { min-height: 30px; padding: 4px 8px; border: 0; background: transparent; color: var(--text-dim); box-shadow: none; font-size: 11px; font-weight: 600; }
-    .destroyed-toggle:hover { background: var(--card-hover); color: var(--text); }
     .viewer-wrap { min-height: 680px; display: grid; grid-template-rows: auto 1fr; }
     .viewer-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--border); }
     .viewer-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; }
@@ -961,7 +959,6 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
                 <h2>Browser sessions</h2>
               </div>
               <div class="session-panel-actions">
-                <button class="destroyed-toggle" id="toggleDestroyedBtn" type="button" aria-pressed="false" style="display:none">Show destroyed</button>
                 <span class="status" id="sessionCount">0</span>
                 <button class="collapse-sessions" id="collapseSessionsBtn" type="button" aria-controls="sessionPanelBody" aria-expanded="true" title="Collapse browser sessions"><span aria-hidden="true">‹</span></button>
               </div>
@@ -1478,7 +1475,6 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const sharedDownloadsEnabled = ${JSON.stringify(sharedDownloadsEnabled)};
     const sessionPanel = document.getElementById('sessionPanel');
     const collapseSessionsBtn = document.getElementById('collapseSessionsBtn');
-    const toggleDestroyedBtn = document.getElementById('toggleDestroyedBtn');
     const sessionMessage = document.getElementById('sessionMessage');
     const sessionCount = document.getElementById('sessionCount');
     const createSessionBtn = document.getElementById('createSessionBtn');
@@ -1623,7 +1619,6 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       logsProgressExpanded: false,
       logsBrowserFilter: 'all',
       logsStatusFilter: 'all',
-      showDestroyed: false,
       deleteTargetId: null,
       renameTargetId: null,
       downloadsTargetId: null,
@@ -2725,7 +2720,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     }
 
     function visibleSessions() {
-      return state.showDestroyed ? state.sessions : state.sessions.filter(s => s.status !== 'destroyed');
+      return state.sessions.filter(s => s.status !== 'destroyed');
     }
 
     function ensureVisibleSelection(sessions) {
@@ -2735,12 +2730,8 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
 
     function renderSessions() {
       const sessions = visibleSessions();
-      const destroyedCount = state.sessions.filter(s => s.status === 'destroyed').length;
       ensureVisibleSelection(sessions);
       sessionCount.textContent = String(sessions.length);
-      toggleDestroyedBtn.style.display = destroyedCount ? '' : 'none';
-      toggleDestroyedBtn.textContent = state.showDestroyed ? 'Hide destroyed' : 'Show ' + destroyedCount + ' destroyed';
-      toggleDestroyedBtn.setAttribute('aria-pressed', String(state.showDestroyed));
       sessionsEl.innerHTML = '';
       if (!sessions.length) {
         sessionsEl.innerHTML = '<div class="empty empty-small">No active browser sessions yet.</div>';
@@ -3503,10 +3494,6 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       showMessage(createBrowserMessage, '');
     });
     collapseSessionsBtn.addEventListener('click', () => setSessionsCollapsed(!sessionPanel.classList.contains('is-collapsed')));
-    toggleDestroyedBtn.addEventListener('click', () => {
-      state.showDestroyed = !state.showDestroyed;
-      renderSessions();
-    });
     editAccountBtn.addEventListener('click', openAccountDialog);
     accountForm.addEventListener('submit', saveAccount);
     accountConfirmPassword.addEventListener('input', () => accountConfirmPassword.setCustomValidity(''));

@@ -643,8 +643,8 @@ curl -sS -X DELETE \
   -H "Authorization: Bearer $WEBBRAIN_API_KEY"
 ```
 
-Destroyed sessions remain in API history even though the dashboard hides them
-by default.
+Destroyed sessions remain in API history even though the dashboard does not
+list them.
 
 ### Errors
 
