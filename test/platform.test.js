@@ -1282,6 +1282,12 @@ test('always-on browser creation skips the profile volume and keeps local Downlo
     assert.equal(ctx.provisioner.created.length, 1);
     assert.equal(ctx.provisioner.created[0].volume_id, null);
 
+    // A ready browser may briefly miss a runtime health response while the
+    // provider still reports that its Droplet is ready.
+    ctx.provisioner.getDroplet = async () => ({
+      status: 'ready',
+      public_ip: '127.0.0.1',
+    });
     const access = await request(ctx.base, `/api/browser-sessions/${created.body.browser_session.id}/downloads-access`, {
       method: 'POST',
       headers: { cookie },
@@ -1289,6 +1295,7 @@ test('always-on browser creation skips the profile volume and keeps local Downlo
     });
     assert.equal(access.status, 200);
     assert.equal(access.body.upload_limit_bytes, 5 * 1024 * 1024 * 1024);
+    assert.equal((await ctx.store.getBrowserSession(created.body.browser_session.id)).status, 'ready');
 
     const paused = await request(ctx.base, `/api/browser-sessions/${created.body.browser_session.id}/pause`, {
       method: 'POST',

@@ -4739,7 +4739,11 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
     }
     const refreshed = await provisioner.getDroplet(session.droplet_id).catch(() => null);
     if (!refreshed?.status) return { ...session, ...runtime };
-    const status = refreshed.status === 'ready' && !runtime.runtime_ready ? 'provisioning' : refreshed.status;
+    // Runtime readiness gates the initial transition, but a transient health probe
+    // must not regress an already-ready Droplet back to provisioning.
+    const status = refreshed.status === 'ready' && !runtime.runtime_ready
+      ? (session.status === 'ready' ? 'ready' : 'provisioning')
+      : refreshed.status;
     if (status === session.status && (!refreshed.public_ip || refreshed.public_ip === session.public_ip)) {
       return { ...session, ...runtime };
     }
