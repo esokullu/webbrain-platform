@@ -1,4 +1,5 @@
 import net from 'node:net';
+import { WEBBRAIN_CLOUD_FIRST_RUN_PRESET } from './cloud-preset.js';
 
 export const WEBBRAIN_CONFIG_SCHEMA = 'webbrain-config/1';
 export const WEBBRAIN_CONFIG_ENV = 'WEBBRAIN_CONFIG_B64';
@@ -18,13 +19,8 @@ const BOOLEAN_SETTINGS = new Set([
   'captchaSolverEnabled',
 ]);
 
-const PLATFORM_MANAGED_SETTINGS = new Set([
-  'planBeforeActMode',
-  'planBeforeAct',
-  'planReviewMode',
+const BASE_PLATFORM_MANAGED_SETTINGS = new Set([
   'planReviewConfidenceThreshold',
-  'askBeforeConsequentialActions',
-  'tracingEnabled',
   'downloadDirectory',
   'agentAllowLocalNetwork',
   'strictSecretMode',
@@ -43,11 +39,15 @@ const PLATFORM_MANAGED_SETTINGS = new Set([
   'customSkills',
   'defaultSkillsRemoved',
   'clarifyTimeoutSemanticsV2',
+]);
+
+const PLATFORM_MANAGED_SETTINGS = new Set([
+  ...BASE_PLATFORM_MANAGED_SETTINGS,
+  ...Object.keys(WEBBRAIN_CLOUD_FIRST_RUN_PRESET),
   'webbrainCloudBridgeEnabled',
   'webbrainCloudBridgeUrl',
   'webbrainCloudManaged',
-  'webbrainCloudPresetVersion',
-  'onboardingComplete',
+  'tracingEnabled',
 ]);
 
 const SUPPORTED_LOCALES = new Set([
@@ -215,6 +215,14 @@ function sanitizeProviders(value, result) {
     if (Object.hasOwn(rawConfig, 'baseUrl') && !validPublicProviderUrl(rawConfig.baseUrl)) {
       result.ignored.push(ignored(field, 'invalid_provider_url'));
       continue;
+    }
+    if (rawConfig.type === 'aws_bedrock') {
+      if (Object.hasOwn(rawConfig, 'region')) {
+        if (typeof rawConfig.region !== 'string' || !/^[a-z0-9-]{1,32}$/.test(rawConfig.region)) {
+          result.ignored.push(ignored(field, 'invalid_provider_region'));
+          continue;
+        }
+      }
     }
     if (Object.hasOwn(rawConfig, 'configured') && typeof rawConfig.configured !== 'boolean') {
       result.ignored.push(ignored(field, 'invalid_provider_config'));

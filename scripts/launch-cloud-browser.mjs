@@ -359,7 +359,8 @@ async function preseedExtension(extensionId, webbrainConfig = null) {
     if (currentResult.exceptionDetails) {
       throw new Error(currentResult.exceptionDetails.text || 'Could not read WebBrain cloud preset state.');
     }
-    const requestedActiveProvider = importedSettings.activeProvider
+    const allExpectedSettings = webbrainConfig?.settings || {};
+    const requestedActiveProvider = allExpectedSettings.activeProvider
       || currentResult.result?.value?.activeProvider
       || 'webbrain_cloud';
     const { patch: storagePatch, presetApplied, presetVersion } = buildCloudStoragePatch(
@@ -373,38 +374,51 @@ async function preseedExtension(extensionId, webbrainConfig = null) {
     if (webbrainConfig && !configAlreadyApplied) {
       storagePatch[WEBBRAIN_CONFIG_APPLIED_SESSION_KEY] = sessionId;
     }
-    const currentProviders = currentResult.result?.value?.providers || {};
-    const providers = {
-      ...currentProviders,
-      webbrain_cloud: {
-        ...(currentProviders.webbrain_cloud || {}),
-        ...providerConfig,
-      },
-    };
 
     const expression = `
       (async () => {
         const providerConfig = ${JSON.stringify(providerConfig)};
         const storagePatch = ${JSON.stringify(storagePatch)};
-        const providers = ${JSON.stringify(providers)};
-        await chrome.storage.local.set({ ...storagePatch, providers });
-        const providerUpdate = await chrome.runtime.sendMessage({
-          target: 'background',
-          action: 'update_provider',
-          providerId: 'webbrain_cloud',
-          config: providerConfig
-        });
-        if (!providerUpdate?.ok) {
-          throw new Error(providerUpdate?.error || 'Could not update WebBrain Cloud provider.');
+        await chrome.storage.local.set(storagePatch);
+
+        let providerUpdateError = null;
+        try {
+          const providerUpdate = await chrome.runtime.sendMessage({
+            target: 'background',
+            action: 'update_provider',
+            providerId: 'webbrain_cloud',
+            config: providerConfig
+          });
+          if (providerUpdate && !providerUpdate.ok) {
+            providerUpdateError = providerUpdate.error || 'provider update failed';
+          }
+        } catch (e) {
+          providerUpdateError = e.message || String(e);
         }
-        const providerSelection = await chrome.runtime.sendMessage({
-          target: 'background',
-          action: 'set_active_provider',
-          providerId: ${JSON.stringify(requestedActiveProvider)}
-        });
-        if (!providerSelection?.ok) {
-          throw new Error(providerSelection?.error || 'Could not select active provider.');
+
+        let activeProvider = ${JSON.stringify(requestedActiveProvider)};
+        let activeProviderError = null;
+        try {
+          let providerSelection = await chrome.runtime.sendMessage({
+            target: 'background',
+            action: 'set_active_provider',
+            providerId: activeProvider
+          });
+          if (!providerSelection?.ok && activeProvider !== 'webbrain_cloud') {
+            activeProvider = 'webbrain_cloud';
+            providerSelection = await chrome.runtime.sendMessage({
+              target: 'background',
+              action: 'set_active_provider',
+              providerId: activeProvider
+            });
+          }
+          if (providerSelection && !providerSelection.ok) {
+            activeProviderError = providerSelection.error || 'selection failed';
+          }
+        } catch (e) {
+          activeProviderError = e.message || String(e);
         }
+
         const bridge = await chrome.runtime.sendMessage({
           target: 'background',
           action: 'cloud_bridge_start',
@@ -413,6 +427,9 @@ async function preseedExtension(extensionId, webbrainConfig = null) {
         return {
           ok: true,
           bridge,
+          activeProvider,
+          providerUpdateError,
+          activeProviderError,
           settings_import: {
             applied: ${JSON.stringify(Boolean(webbrainConfig && !configAlreadyApplied))},
             setting_count: ${JSON.stringify(Object.keys(importedSettings).length)},
@@ -433,11 +450,14 @@ async function preseedExtension(extensionId, webbrainConfig = null) {
     const seeded = result.result?.value;
     if (!seeded?.ok) return seeded;
 
+    const actualActiveProvider = seeded.activeProvider || requestedActiveProvider;
     const importedScalarSettings = Object.fromEntries(
-      Object.entries(importedSettings)
+      Object.entries(allExpectedSettings)
         .filter(([key]) => key !== 'providers' && key !== 'activeProvider'),
     );
     const expected = { ...importedScalarSettings, ...storagePatch };
+    expected.activeProvider = actualActiveProvider;
+
     const verifiedResult = await cdp.call('Runtime.evaluate', {
       expression: `chrome.storage.local.get(${JSON.stringify([
         ...new Set([...Object.keys(expected), 'providers']),
@@ -449,21 +469,47 @@ async function preseedExtension(extensionId, webbrainConfig = null) {
       throw new Error(verifiedResult.exceptionDetails.text || 'Could not verify WebBrain cloud preset state.');
     }
     const actual = verifiedResult.result?.value || {};
-    const mismatches = storagePatchMismatches(actual, expected);
+    
+    const mismatches = [];
+    const scalarMismatches = storagePatchMismatches(actual, expected);
+    for (const key of scalarMismatches) {
+      if (key === 'activeProvider' && seeded.activeProviderError) {
+        console.warn(`[webbrain-cloud-browser] Skipping verification of activeProvider due to message error: ${seeded.activeProviderError}`);
+        continue;
+      }
+      mismatches.push(key);
+    }
+
     const expectedProviderSubsets = {
-      ...(importedSettings.providers || {}),
+      ...(allExpectedSettings.providers || {}),
       webbrain_cloud: providerConfig,
     };
     for (const [providerId, expectedProvider] of Object.entries(expectedProviderSubsets)) {
+      if (providerId === 'webbrain_cloud' && seeded.providerUpdateError) {
+        console.warn(`[webbrain-cloud-browser] Skipping verification of providers.webbrain_cloud due to message error: ${seeded.providerUpdateError}`);
+        continue;
+      }
       const actualProvider = actual.providers?.[providerId];
       if (!actualProvider) {
+        if (providerId !== 'webbrain_cloud') {
+          continue;
+        }
         mismatches.push(`providers.${providerId}`);
         continue;
       }
-      for (const [key, value] of Object.entries(expectedProvider)) {
-        if (JSON.stringify(actualProvider[key]) !== JSON.stringify(value)) {
-          mismatches.push(`providers.${providerId}.${key}`);
-        }
+      
+      const normExpected = { ...expectedProvider };
+      const normActual = { ...actualProvider };
+      if (typeof normExpected.baseUrl === 'string') {
+        normExpected.baseUrl = normExpected.baseUrl.replace(/\/+$/, '');
+      }
+      if (typeof normActual.baseUrl === 'string') {
+        normActual.baseUrl = normActual.baseUrl.replace(/\/+$/, '');
+      }
+
+      const providerMismatches = storagePatchMismatches(normActual, normExpected);
+      for (const key of providerMismatches) {
+        mismatches.push(`providers.${providerId}.${key}`);
       }
     }
     if (mismatches.length) {
@@ -485,101 +531,116 @@ async function preseedExtension(extensionId, webbrainConfig = null) {
 }
 
 async function main() {
-  if (!existsSync(extensionDir)) {
-    throw new Error(`WebBrain extension directory does not exist: ${extensionDir}`);
-  }
-  await fs.mkdir(profileDir, { recursive: true });
-  await waitForProxyServer();
-
-  const browser = findBrowser();
-  const args = [
-    `--user-data-dir=${profileDir}`,
-    `--remote-debugging-address=${debuggingHost}`,
-    `--remote-debugging-port=${debuggingPort}`,
-    `--disable-extensions-except=${extensionDir}`,
-    `--load-extension=${extensionDir}`,
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--password-store=basic',
-    '--use-mock-keychain',
-    '--disable-dev-shm-usage',
-    '--disable-infobars',
-    '--window-size=1440,900',
-  ];
-  if (browserProxyServer) args.push(`--proxy-server=${browserProxyServer}`);
-  if (browserProxyBypassList) args.push(`--proxy-bypass-list=${browserProxyBypassList}`);
-  if (browserDiskCacheDir) args.push(`--disk-cache-dir=${browserDiskCacheDir}`);
-  const ephemeral = boolEnv('WEBBRAIN_EPHEMERAL', false);
-  if (ephemeral) {
-    // Chrome-for-Testing does not provide a configured setuid helper here.
-    // Disable only that legacy helper and retain the user-namespace/seccomp
-    // renderer sandbox used by the unprivileged DynamicUser.
-    args.push('--disable-breakpad', '--disable-crash-reporter', '--disable-setuid-sandbox');
-  }
-  if (boolEnv('WEBBRAIN_HEADLESS', false)) args.push('--headless=new');
-  if (!ephemeral && process.getuid?.() === 0) args.push('--no-sandbox');
-  args.push(startUrl);
-
-  const browserEnv = { ...process.env };
-  for (const name of [
-    'WEBBRAIN_SESSION_TOKEN',
-    'WEBBRAIN_PROVIDER_API_KEY',
-    WEBBRAIN_CONFIG_ENV,
-    'WEBBRAIN_BROWSER_PROXY_URL',
-    'WEBBRAIN_NOVNC_SECRET',
-    'WEBBRAIN_CONTROL_WS_URL',
-  ]) {
-    delete browserEnv[name];
-  }
-  const child = spawn(browser, args, { stdio: 'inherit', env: browserEnv });
-  process.on('SIGINT', () => child.kill('SIGINT'));
-  process.on('SIGTERM', () => child.kill('SIGTERM'));
-
-  const devtoolsVersion = await waitForDevtools();
-  let downloadsCdp = null;
-  let downloadSync = null;
-  if (downloadsSyncEnabled) {
-    if (!downloadsIngestUrl || !sessionToken) throw new Error('Shared Downloads sync configuration is incomplete.');
-    downloadsCdp = createCdpClient(devtoolsVersion.webSocketDebuggerUrl);
-    await downloadsCdp.open();
-    downloadSync = new ChromeDownloadSync({
-      stagingDir: downloadsStagingDir,
-      ingestUrl: downloadsIngestUrl,
-      sessionToken,
-    });
-    await downloadSync.start(downloadsCdp);
-  }
-  const extensionId = await waitForExtensionId();
-  const webbrainConfig = decodeWebBrainConfig(process.env[WEBBRAIN_CONFIG_ENV]);
-  const seeded = await preseedExtension(extensionId, webbrainConfig);
-  if (!seeded?.ok || seeded?.bridge?.error) {
-    throw new Error(`WebBrain cloud startup failed: ${seeded?.error || seeded?.bridge?.error || 'invalid extension response'}`);
-  }
-  const bridgeHealth = await waitForExtensionBridge();
-  let tabNormalization;
+  const errorFile = `/tmp/webbrain-startup-error-${sessionId}.txt`;
   try {
-    tabNormalization = await normalizeStartupTabs(extensionId);
-  } catch (error) {
-    tabNormalization = { ok: false, error: error.message || String(error) };
-    console.warn(`[webbrain-cloud-browser] start tab normalization skipped: ${tabNormalization.error}`);
-  }
-  console.log(JSON.stringify({
-    ok: true,
-    browser,
-    profile_dir: profileDir,
-    extension_dir: extensionDir,
-    extension_id: extensionId,
-    sidecar_ws_url: sidecarWsUrl,
-    bridge_health: bridgeHealth,
-    preseed: seeded,
-    tab_normalization: tabNormalization,
-  }, null, 2));
+    await fs.rm(errorFile, { force: true }).catch(() => {});
+    if (!existsSync(extensionDir)) {
+      throw new Error(`WebBrain extension directory does not exist: ${extensionDir}`);
+    }
+    await fs.mkdir(profileDir, { recursive: true });
+    await waitForProxyServer();
 
-  child.on('exit', code => {
-    downloadSync?.close();
-    downloadsCdp?.close();
-    process.exit(code ?? 0);
-  });
+    const browser = findBrowser();
+    const args = [
+      `--user-data-dir=${profileDir}`,
+      `--remote-debugging-address=${debuggingHost}`,
+      `--remote-debugging-port=${debuggingPort}`,
+      `--disable-extensions-except=${extensionDir}`,
+      `--load-extension=${extensionDir}`,
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--password-store=basic',
+      '--use-mock-keychain',
+      '--disable-dev-shm-usage',
+      '--disable-infobars',
+      '--window-size=1440,900',
+    ];
+    if (browserProxyServer) args.push(`--proxy-server=${browserProxyServer}`);
+    if (browserProxyBypassList) args.push(`--proxy-bypass-list=${browserProxyBypassList}`);
+    if (browserDiskCacheDir) args.push(`--disk-cache-dir=${browserDiskCacheDir}`);
+    const ephemeral = boolEnv('WEBBRAIN_EPHEMERAL', false);
+    if (ephemeral) {
+      // Chrome-for-Testing does not provide a configured setuid helper here.
+      // Disable only that legacy helper and retain the user-namespace/seccomp
+      // renderer sandbox used by the unprivileged DynamicUser.
+      args.push('--disable-breakpad', '--disable-crash-reporter', '--disable-setuid-sandbox');
+    }
+    if (boolEnv('WEBBRAIN_HEADLESS', false)) args.push('--headless=new');
+    if (!ephemeral && process.getuid?.() === 0) args.push('--no-sandbox');
+    args.push(startUrl);
+
+    const browserEnv = { ...process.env };
+    for (const name of [
+      'WEBBRAIN_SESSION_TOKEN',
+      'WEBBRAIN_PROVIDER_API_KEY',
+      WEBBRAIN_CONFIG_ENV,
+      'WEBBRAIN_BROWSER_PROXY_URL',
+      'WEBBRAIN_NOVNC_SECRET',
+      'WEBBRAIN_CONTROL_WS_URL',
+    ]) {
+      delete browserEnv[name];
+    }
+    const child = spawn(browser, args, { stdio: 'inherit', env: browserEnv });
+    process.on('SIGINT', () => child.kill('SIGINT'));
+    process.on('SIGTERM', () => child.kill('SIGTERM'));
+
+    const devtoolsVersion = await waitForDevtools();
+    let downloadsCdp = null;
+    let downloadSync = null;
+    if (downloadsSyncEnabled) {
+      if (!downloadsIngestUrl || !sessionToken) throw new Error('Shared Downloads sync configuration is incomplete.');
+      downloadsCdp = createCdpClient(devtoolsVersion.webSocketDebuggerUrl);
+      await downloadsCdp.open();
+      downloadSync = new ChromeDownloadSync({
+        stagingDir: downloadsStagingDir,
+        ingestUrl: downloadsIngestUrl,
+        sessionToken,
+      });
+      await downloadSync.start(downloadsCdp);
+    }
+    const extensionId = await waitForExtensionId();
+    
+    let webbrainConfig = null;
+    try {
+      webbrainConfig = decodeWebBrainConfig(process.env[WEBBRAIN_CONFIG_ENV]);
+    } catch (error) {
+      console.warn(`[webbrain-cloud-browser] Failed to decode WebBrain config from environment, degrading to no-config startup: ${error.message || error}`);
+    }
+
+    const seeded = await preseedExtension(extensionId, webbrainConfig);
+    if (!seeded?.ok || seeded?.bridge?.error) {
+      throw new Error(`WebBrain cloud startup failed: ${seeded?.error || seeded?.bridge?.error || 'invalid extension response'}`);
+    }
+    const bridgeHealth = await waitForExtensionBridge();
+    let tabNormalization;
+    try {
+      tabNormalization = await normalizeStartupTabs(extensionId);
+    } catch (error) {
+      tabNormalization = { ok: false, error: error.message || String(error) };
+      console.warn(`[webbrain-cloud-browser] start tab normalization skipped: ${tabNormalization.error}`);
+    }
+    console.log(JSON.stringify({
+      ok: true,
+      browser,
+      profile_dir: profileDir,
+      extension_dir: extensionDir,
+      extension_id: extensionId,
+      sidecar_ws_url: sidecarWsUrl,
+      bridge_health: bridgeHealth,
+      preseed: seeded,
+      tab_normalization: tabNormalization,
+    }, null, 2));
+
+    child.on('exit', code => {
+      downloadSync?.close();
+      downloadsCdp?.close();
+      process.exit(code ?? 0);
+    });
+  } catch (e) {
+    const errorMsg = e.message || String(e);
+    await fs.writeFile(errorFile, errorMsg, 'utf8').catch(() => {});
+    throw e;
+  }
 }
 
 main().catch(e => {

@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { WebSocket } from 'ws';
+import { WEBBRAIN_CONFIG_ENV } from '../shared/webbrain-config.js';
 
 const execFile = promisify(execFileCallback);
 const appDir = process.env.WEBBRAIN_APP_DIR || '/opt/webbrain-platform';
@@ -197,7 +198,7 @@ async function assign(payload) {
     WEBBRAIN_PROVIDER_API_KEY: payload.provider_api_key || sessionToken,
     WEBBRAIN_PROVIDER_MODEL: process.env.WEBBRAIN_PROVIDER_MODEL || 'webbrain-cloud 1.0',
     ...(payload.webbrain_config_b64
-      ? { WEBBRAIN_CONFIG_B64: payload.webbrain_config_b64 }
+      ? { [WEBBRAIN_CONFIG_ENV]: payload.webbrain_config_b64 }
       : {}),
     WEBBRAIN_NOVNC_SECRET: sessionToken,
     WEBBRAIN_NOVNC_TARGET: 'http://127.0.0.1:6080',

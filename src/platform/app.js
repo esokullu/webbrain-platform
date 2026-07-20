@@ -4808,6 +4808,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       droplet_connected: true,
       extension_connected: extensionConnected,
       runtime_ready: extensionConnected,
+      error: health?.error || null,
     };
   }
 
@@ -4816,6 +4817,14 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
     if (isEphemeralBrowser(session)) {
       if (TERMINAL_BROWSER_STATUSES.has(session.status) || session.status === 'failed') {
         return { ...session, ...runtime };
+      }
+      if (runtime.error) {
+        const ended = await terminateEphemeralSession(
+          session,
+          runtime.error,
+          { requestStop: true }
+        ).catch(() => null);
+        if (ended) return { ...ended, ...runtime };
       }
       if (runtime.runtime_ready) {
         if (session.status === 'ready') return { ...session, ...runtime };
@@ -4886,6 +4895,14 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
     }
     if (!session.droplet_id || ['failed', 'pausing', 'paused', 'stopping', 'destroyed'].includes(session.status)) {
       return { ...session, ...runtime };
+    }
+    if (runtime.error && session.status === 'provisioning') {
+      const updated = await store.updateBrowserSession(session.id, {
+        status: 'failed',
+        end_reason: runtime.error.slice(0, 255),
+        updated_at: nowIso(),
+      });
+      return { ...updated, ...runtime };
     }
     const refreshed = await provisioner.getDroplet(session.droplet_id).catch(() => null);
     if (!refreshed?.status) return { ...session, ...runtime };

@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { WEBBRAIN_CONFIG_ENV } from '../shared/webbrain-config.js';
 
 const execFile = promisify(execFileCallback);
 const ACTIVE_SESSION_STATUSES = new Set(['starting', 'active', 'stopping']);
@@ -171,7 +172,7 @@ export class EphemeralRuntimeManager {
       WEBBRAIN_PROVIDER_API_KEY: payload.provider_api_key || payload.session_token,
       WEBBRAIN_PROVIDER_MODEL: this.env.WEBBRAIN_PROVIDER_MODEL || 'webbrain-cloud 1.0',
       ...(payload.webbrain_config_b64
-        ? { WEBBRAIN_CONFIG_B64: payload.webbrain_config_b64 }
+        ? { [WEBBRAIN_CONFIG_ENV]: payload.webbrain_config_b64 }
         : {}),
       WEBBRAIN_BROWSER_BIN: this.env.WEBBRAIN_BROWSER_BIN || '/opt/chrome-linux64/chrome',
       WEBBRAIN_START_URL: this.env.WEBBRAIN_START_URL || 'https://webbrain.one',

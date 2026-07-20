@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { WEBBRAIN_CONFIG_ENV } from '../shared/webbrain-config.js';
 
 function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
@@ -68,7 +69,7 @@ chmod 0700 "$mount_path" "$mount_path/chrome"
     WEBBRAIN_PROVIDER_BASE_URL: config.droplet.providerBaseUrl,
     WEBBRAIN_PROVIDER_API_KEY: providerApiKey,
     WEBBRAIN_PROVIDER_MODEL: config.droplet.providerModel,
-    ...(webbrainConfig ? { WEBBRAIN_CONFIG_B64: webbrainConfig } : {}),
+    ...(webbrainConfig ? { [WEBBRAIN_CONFIG_ENV]: webbrainConfig } : {}),
     WEBBRAIN_NOVNC_SECRET: session.connect_secret,
     WEBBRAIN_NOVNC_TARGET: 'http://127.0.0.1:6080',
     WEBBRAIN_NOVNC_GATE_PORT: String(config.droplet.noVncGatePort || 6081),

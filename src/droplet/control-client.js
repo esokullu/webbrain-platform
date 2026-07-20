@@ -1,4 +1,5 @@
 import { WebSocket } from 'ws';
+import fs from 'node:fs/promises';
 import { cancelDropletPause, prepareDropletForPause } from './pause.js';
 
 const DEFAULT_SIDECAR_BASE = 'http://127.0.0.1:17373';
@@ -155,12 +156,32 @@ export class DropletControlClient {
       return await readJson(res);
     }
     if (action === 'health') {
-      const res = await fetch(`${this.sidecarBase}/healthz`);
-      if (!res.ok) throw new Error(`Sidecar health failed: ${res.status} ${await res.text()}`);
-      return {
-        ...await readJson(res),
-        downloads_sync_enabled: this.downloadsSyncEnabled,
-      };
+      try {
+        const res = await fetch(`${this.sidecarBase}/healthz`);
+        if (!res.ok) throw new Error(`Sidecar health failed: ${res.status} ${await res.text()}`);
+        return {
+          ...await readJson(res),
+          downloads_sync_enabled: this.downloadsSyncEnabled,
+        };
+      } catch (fetchError) {
+        let startupError = null;
+        try {
+          const sessionId = process.env.WEBBRAIN_SESSION_ID || 'default';
+          const errorPath = `/tmp/webbrain-startup-error-${sessionId}.txt`;
+          const hasErrorFile = await fs.access(errorPath).then(() => true).catch(() => false);
+          if (hasErrorFile) {
+            const content = await fs.readFile(errorPath, 'utf8');
+            if (content.trim()) {
+              startupError = content.trim();
+            }
+          }
+        } catch (readErr) {}
+        return {
+          extension_connected: false,
+          downloads_sync_enabled: this.downloadsSyncEnabled,
+          error: startupError || fetchError.message || String(fetchError),
+        };
+      }
     }
     if (action === 'status') {
       const runId = payload.run_id || payload.runId;
