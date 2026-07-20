@@ -243,6 +243,7 @@ test('Node.js client sends authenticated session and run requests', async () => 
       task: 'Open example.com',
       tabId: 42,
       outputSchema: { title: 'string' },
+      capture: 'video',
     });
     const paused = await client.waitForRun(session.id, run.run_id, { pollIntervalMs: 1, timeoutMs: 1000 });
     assert.equal(paused.status, 'needs_user_input');
@@ -270,6 +271,7 @@ test('Node.js client sends authenticated session and run requests', async () => 
       wait: false,
       tab_id: 42,
       output_schema: { title: 'string' },
+      capture: 'video',
     });
     assert.deepEqual(requests.find(entry => entry.method === 'PATCH' && entry.path.endsWith('/proxy')).body, {
       proxy_enabled: true,

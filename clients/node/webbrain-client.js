@@ -233,7 +233,7 @@ export class WebBrainClient {
     }
   }
 
-  async createRun(sessionId, { task, wait = false, timeoutMs, tabId, outputSchema } = {}) {
+  async createRun(sessionId, { task, wait = false, timeoutMs, tabId, outputSchema, capture } = {}) {
     if (!task) throw new TypeError('task is required');
     return await this.request('POST', `/api/browser-sessions/${encodeURIComponent(sessionId)}/runs`, {
       task,
@@ -241,6 +241,7 @@ export class WebBrainClient {
       ...(timeoutMs === undefined ? {} : { timeout_ms: timeoutMs }),
       ...(tabId === undefined ? {} : { tab_id: tabId }),
       ...(outputSchema === undefined ? {} : { output_schema: outputSchema }),
+      ...(capture === undefined ? {} : { capture }),
     });
   }
 
@@ -248,13 +249,14 @@ export class WebBrainClient {
     return await this.request('GET', `/api/browser-sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}`);
   }
 
-  async continueRun(sessionId, runId, { task, wait = false, timeoutMs, outputSchema } = {}) {
+  async continueRun(sessionId, runId, { task, wait = false, timeoutMs, outputSchema, capture } = {}) {
     if (!task) throw new TypeError('task is required');
     return await this.request('POST', `/api/browser-sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/messages`, {
       task,
       wait,
       ...(timeoutMs === undefined ? {} : { timeout_ms: timeoutMs }),
       ...(outputSchema === undefined ? {} : { output_schema: outputSchema }),
+      ...(capture === undefined ? {} : { capture }),
     });
   }
 

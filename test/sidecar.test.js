@@ -29,6 +29,7 @@ test('sidecar run lifecycle proxies cloud_run/status/abort to extension bridge',
     if (msg.action === 'cloud_run') {
       assert.equal(msg.payload.tabId, 42);
       assert.equal(msg.payload.apiMutationsAllowed, true);
+      if (msg.payload.task === 'Summarize') assert.equal(msg.payload.capture, 'video');
       const runId = msg.payload.task === 'Ask for input'
         ? 'run_input'
         : (msg.payload.task === 'Continue summary' ? 'run_child' : 'run_test');
@@ -91,6 +92,7 @@ test('sidecar run lifecycle proxies cloud_run/status/abort to extension bridge',
       task: 'Summarize',
       api_mutations_allowed: true,
       output_schema: { title: 'string' },
+      capture: 'video',
       tab_id: 42,
       wait: false,
     }),

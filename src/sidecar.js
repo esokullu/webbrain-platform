@@ -122,6 +122,7 @@ export function createSidecarServer(options = {}) {
       task,
       apiMutationsAllowed: body.api_mutations_allowed === true || body.apiMutationsAllowed === true,
       outputSchema,
+      ...(body.capture === undefined ? {} : { capture: body.capture }),
       parentRunId: body.parent_run_id ?? body.parentRunId ?? null,
       tabId: body.tab_id ?? body.tabId,
     });

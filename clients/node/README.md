@@ -122,12 +122,17 @@ character segments.
 ```js
 const run = await client.createRun(session.id, {
   task: 'Return the title and visible links',
+  capture: 'video',
   outputSchema: {
     title: 'string',
     links: 'string[]',
   },
 });
 ```
+
+When `capture: 'video'` is set, the extension records the active run tab without
+microphone audio and saves `webbrain-ci-<run_id>.webm` in browser Downloads.
+Use the Downloads helpers to retrieve it after the run completes.
 
 ## Main methods
 

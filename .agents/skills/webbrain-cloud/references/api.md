@@ -60,6 +60,7 @@ Create with `POST /api/browser-sessions/:sessionId/runs`:
 | `timeout_ms` | no | Blocking-path timeout. Client-side polling remains preferable for long agent tasks. |
 | `tab_id` | no | Target a specific tab; otherwise use the active page. |
 | `output_schema` | no | Request validated structured JSON. |
+| `capture` | no | `video` records the run to Downloads as `webbrain-ci-<run_id>.webm`; `none` is the default. |
 
 The public run includes `run_id`, `session_id`, `parent_run_id`, `tab_id`, `status`, `result`, `summary`, `final_url`, `error`, `pending_input`, `updates`, and timestamps.
 

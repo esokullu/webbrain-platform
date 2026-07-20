@@ -17,6 +17,7 @@ const BOOLEAN_SETTINGS = new Set([
   'apiMutationObserverEnabled',
   'screenshotRedaction',
   'captchaSolverEnabled',
+  'enableAllPackagedSkills',
 ]);
 
 const BASE_PLATFORM_MANAGED_SETTINGS = new Set([

@@ -3912,10 +3912,15 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
 
   async function startStoredCloudRun(req, session, task, parentRun = null) {
     const outputSchema = req.body.output_schema ?? req.body.outputSchema ?? null;
+    const requestedCapture = req.body.capture;
+    if (requestedCapture !== undefined && !['none', 'video'].includes(requestedCapture)) {
+      throw Object.assign(new Error('`capture` must be `none` or `video`.'), { status: 400 });
+    }
     const started = await controlChannel.send(session.id, 'run', {
       task,
       api_mutations_allowed: true,
       output_schema: outputSchema,
+      ...(requestedCapture === undefined ? {} : { capture: requestedCapture }),
       parent_run_id: parentRun?.id || null,
       tab_id: parentRun ? parentRun.tab_id : (req.body.tab_id ?? req.body.tabId ?? null),
       wait: false,

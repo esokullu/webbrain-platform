@@ -565,9 +565,10 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   const created = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs`, {
     method: 'POST',
     headers: { cookie },
-    body: JSON.stringify({ task: 'Long task', tab_id: 91, wait: false }),
+    body: JSON.stringify({ task: 'Long task', tab_id: 91, capture: 'video', wait: false }),
   });
   assert.equal(created.status, 202);
+  assert.equal(runPayloads.at(-1).capture, 'video');
   const runningExport = await request(
     ctx.base,
     `/api/browser-sessions/${sessionId}/runs/${created.body.run_id}/export`,

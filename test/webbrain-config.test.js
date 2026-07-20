@@ -6,6 +6,18 @@ import {
   sanitizeWebBrainConfig,
 } from '../src/shared/webbrain-config.js';
 
+test('cloud sessions can opt into all packaged skills without importing arbitrary skill content', () => {
+  const sanitized = sanitizeWebBrainConfig({
+    schema: 'webbrain-config/1',
+    settings: { enableAllPackagedSkills: true },
+  });
+  assert.deepEqual(sanitized.config, {
+    schema: 'webbrain-config/1',
+    settings: { enableAllPackagedSkills: true },
+  });
+  assert.deepEqual(sanitized.result.accepted, ['settings.enableAllPackagedSkills']);
+});
+
 test('webbrain export config is sanitized as a sparse settings patch', () => {
   const sanitized = sanitizeWebBrainConfig({
     schema: 'webbrain-config/1',
