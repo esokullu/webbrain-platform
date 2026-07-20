@@ -5227,7 +5227,14 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
     try {
       const session = await ownedBrowserSession(req, res);
       if (!session) return;
-      if (session.status === 'destroyed') return res.json({ browser_session: publicBrowserSession(session) });
+      if (session.status === 'destroyed') {
+        await failStoredRunsForSession(
+          store,
+          session.id,
+          'Browser session was deleted.',
+        );
+        return res.json({ browser_session: publicBrowserSession(session) });
+      }
       if (['pausing', 'resuming', 'resetting', 'restarting'].includes(session.status)) {
         return jsonError(res, 409, 'Wait for the current browser lifecycle change to finish before deleting');
       }
@@ -5259,6 +5266,11 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
         { allowHostShutdown: true }
       );
       await provisioner.destroyDroplet(deleting.droplet_id);
+      await failStoredRunsForSession(
+        store,
+        deleting.id,
+        'Browser session was deleted.',
+      );
       await finalizeHostedEphemeralSessions(terminatedChildren, childTerminationReason);
       if (deleting.volume_id) {
         await provisioner.waitForVolumeDetached(deleting.volume_id);

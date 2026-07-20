@@ -727,6 +727,14 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   assert.equal(ctx.provisioner.created.length, 2);
   assert.equal(ctx.provisioner.created[1].volume_id, storedSession.volume_id);
 
+  const runInterruptedByDelete = await request(ctx.base, `/api/browser-sessions/${sessionId}/runs`, {
+    method: 'POST',
+    headers: { cookie },
+    body: JSON.stringify({ task: 'Long task', tab_id: 91, wait: false }),
+  });
+  assert.equal(runInterruptedByDelete.status, 202);
+  assert.equal(runInterruptedByDelete.body.status, 'running');
+
   const destroyedSession = await request(ctx.base, `/api/browser-sessions/${sessionId}`, {
     method: 'DELETE',
     headers: { cookie },
@@ -735,6 +743,41 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   assert.equal(destroyedSession.body.browser_session.status, 'destroyed');
   assert.equal(destroyedSession.body.browser_session.volume, null);
   assert.deepEqual(ctx.provisioner.destroyedVolumes, [storedSession.volume_id]);
+  const failedOnDelete = await ctx.store.getCloudRun(runInterruptedByDelete.body.run_id);
+  assert.equal(failedOnDelete.status, 'failed');
+  assert.equal(failedOnDelete.error, 'Browser session was deleted.');
+  assert.equal(failedOnDelete.completed_at !== null, true);
+
+  const staleRunId = 'run_stale_after_destroy';
+  const staleAt = '2026-07-14T10:02:00.000Z';
+  await ctx.store.createCloudRun({
+    id: staleRunId,
+    browser_session_id: sessionId,
+    user_id: legacyUser.id,
+    parent_run_id: null,
+    tab_id: 42,
+    task: 'Legacy stale run',
+    output_schema: null,
+    status: 'running',
+    result: null,
+    summary: '',
+    final_url: '',
+    error: '',
+    updates: [],
+    created_at: staleAt,
+    updated_at: staleAt,
+    completed_at: null,
+  });
+  const repeatedDelete = await request(ctx.base, `/api/browser-sessions/${sessionId}`, {
+    method: 'DELETE',
+    headers: { cookie },
+  });
+  assert.equal(repeatedDelete.status, 200);
+  assert.equal(repeatedDelete.body.browser_session.status, 'destroyed');
+  const reconciledStaleRun = await ctx.store.getCloudRun(staleRunId);
+  assert.equal(reconciledStaleRun.status, 'failed');
+  assert.equal(reconciledStaleRun.error, 'Browser session was deleted.');
+  assert.equal(reconciledStaleRun.completed_at !== null, true);
 
   } finally {
     ws?.close();
