@@ -145,6 +145,7 @@ run = client.create_run(
 - `resume_browser_session(session_id)`
 - `create_workflow(name, source_session_id, source_run_id)`
 - `list_workflows(...)` / `get_workflow(workflow_id)`
+- `import_workflow(definition, name=...)` / `export_workflow(workflow_id)`
 - `rename_workflow(workflow_id, name)` / `delete_workflow(workflow_id)`
 - `create_run(session_id, task, ...)`
 - `create_workflow_run(session_id, workflow_id, parameters, ...)`

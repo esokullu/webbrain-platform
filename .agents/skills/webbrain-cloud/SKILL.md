@@ -83,6 +83,19 @@ node "$SKILL_DIR/scripts/webbrain.mjs" create-workflow SOURCE_SESSION_ID SOURCE_
   --name "Submit contact form"
 ```
 
+To move a sanitized workflow from a local WebBrain browser into Cloud, export it locally with `/workflow --export WORKFLOW_ID`, then import the downloaded file. Cloud validates and stores only the canonical definition; the file never contains runtime parameter values:
+
+```bash
+node "$SKILL_DIR/scripts/webbrain.mjs" workflows import /absolute/path/contact-form.webbrain-workflow.json
+```
+
+Exporting a cloud copy uses the same portable format, so it can be imported into Chrome or Firefox with `/workflow --import --file`:
+
+```bash
+node "$SKILL_DIR/scripts/webbrain.mjs" workflows export WORKFLOW_ID \
+  --output /absolute/path/contact-form.webbrain-workflow.json
+```
+
 Read the returned start origin/path family and parameter descriptors. Open a compatible page in the target browser first, then supply only the declared parameter IDs:
 
 ```bash
@@ -91,7 +104,7 @@ node "$SKILL_DIR/scripts/webbrain.mjs" create-workflow-run TARGET_SESSION_ID WOR
 node "$SKILL_DIR/scripts/webbrain.mjs" wait-run TARGET_SESSION_ID RUN_ID
 ```
 
-Treat parameter values as ephemeral secrets: pass them only in the run request, do not write them into task text, workflow names, logs, or tracked files. A `409` that says the runtime lacks workflow support means the browser must be recreated on an upgraded runtime; ordinary runs can still use that session. The target tab must already match the workflow's start URL family and use the intended login/profile state.
+Treat parameter values as ephemeral secrets: pass them only in the run request, do not write them into task text, workflow files, workflow names, logs, or tracked files. A `409` that says the runtime lacks workflow support means the browser must be recreated on an upgraded runtime; ordinary runs can still use that session. The target tab must already match the workflow's start URL family and use the intended login/profile state.
 
 ## Transfer files
 

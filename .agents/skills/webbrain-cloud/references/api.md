@@ -92,15 +92,26 @@ Statuses are `running`, `needs_user_input`, `completed`, `failed`, `aborting`, a
 
 The create response contains `workflow` plus compiler `warnings`. Workflow metadata includes its start `origin` and `path_family`, parameter descriptors, step count, source IDs, and timestamps. `GET /api/workflows/:workflowId` additionally returns the complete sanitized `webbrain-workflow/1` definition. Names need not be unique.
 
+Portable workflow files are the raw UTF-8 `webbrain-workflow/1` definition, up to 1 MiB, with runtime values represented only by parameter placeholders. Importing always creates a new workflow ID and timestamps. An optional `name` overrides the definition name:
+
+```json
+{
+  "definition": { "schema": "webbrain-workflow/1", "name": "Submit contact form", "...": "..." },
+  "name": "Cloud copy"
+}
+```
+
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
 | `POST` | `/api/workflows` | Compile and save a successful owned cloud run. |
+| `POST` | `/api/workflows/import` | Validate and save a portable definition. |
 | `GET` | `/api/workflows?limit=50&offset=0` | List owned workflow metadata without step definitions. |
 | `GET` | `/api/workflows/:workflowId` | Read metadata and the sanitized definition. |
+| `GET` | `/api/workflows/:workflowId/export` | Download the raw portable definition. |
 | `PATCH` | `/api/workflows/:workflowId` | Rename with `{ "name": "..." }`. |
 | `DELETE` | `/api/workflows/:workflowId` | Delete the definition without deleting historical runs. |
 
-Compilation returns `409` when the source runtime, exact trace, or capability is unavailable and `422` when no safe replayable steps exist. Replay requires an upgraded target runtime, a current tab matching the start URL family, and compatible login/profile state. Unknown or missing parameters are rejected before dispatch; each value is limited to 10,000 characters. Ambiguous targets and uncertain outcomes fail closed, with only the engine's parameter-free safe fallback available.
+Compilation returns `409` when the source runtime, exact trace, or capability is unavailable and `422` when no safe replayable steps exist. Import returns `413` above 1 MiB, `409` at the account limit, and `422` for unsupported schemas or unsafe definitions. Imported workflow metadata has null source session/run IDs. Replay requires an upgraded target runtime, a current tab matching the start URL family, and compatible login/profile state. Unknown or missing parameters are rejected before dispatch; each value is limited to 10,000 characters. Ambiguous targets and uncertain outcomes fail closed, with only the engine's parameter-free safe fallback available.
 
 For `needs_user_input`, pass this body to `/responses`:
 
@@ -161,6 +172,8 @@ download-file SESSION_ID --remote REMOTE_NAME --output LOCAL_PATH [--force]
 list-runs [--limit N] [--offset N]
 list-workflows [--limit N] [--offset N]
 create-workflow SOURCE_SESSION_ID SOURCE_RUN_ID --name TEXT
+workflows import FILE [--name TEXT]
+workflows export WORKFLOW_ID [--output PATH] [--force]
 get-workflow WORKFLOW_ID | rename-workflow WORKFLOW_ID --name TEXT | delete-workflow WORKFLOW_ID
 create-workflow-run SESSION_ID WORKFLOW_ID [--parameters JSON|@FILE] [--tab-id ID]
 create-run SESSION_ID --task TEXT|--task-file PATH [--schema JSON|@FILE] [--tab-id ID]

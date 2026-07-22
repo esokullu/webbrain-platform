@@ -30,6 +30,8 @@ Usage:
   webbrain.mjs list-runs [--limit N] [--offset N]
   webbrain.mjs list-workflows [--limit N] [--offset N]
   webbrain.mjs create-workflow SOURCE_SESSION_ID SOURCE_RUN_ID --name TEXT
+  webbrain.mjs workflows import FILE [--name TEXT]
+  webbrain.mjs workflows export WORKFLOW_ID [--output PATH] [--force]
   webbrain.mjs get-workflow|delete-workflow WORKFLOW_ID
   webbrain.mjs rename-workflow WORKFLOW_ID --name TEXT
   webbrain.mjs create-workflow-run SESSION_ID WORKFLOW_ID [--parameters JSON|@FILE] [--tab-id ID]
@@ -81,6 +83,16 @@ function required(value, label) {
     throw new CliError(`${label} is required`);
   }
   return String(value);
+}
+
+function workflowExportFilename(value) {
+  const stem = String(value || 'workflow')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/^[.-]+|[.-]+$/g, '')
+    .slice(0, 120) || 'workflow';
+  return `${stem}.webbrain-workflow.json`;
 }
 
 function integerOption(options, key, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
@@ -430,6 +442,40 @@ async function main() {
         source_run_id: required(runId, 'SOURCE_RUN_ID'),
       }));
       break;
+    case 'workflows': {
+      const action = required(sessionId, 'WORKFLOW_ACTION');
+      const target = required(runId, action === 'import' ? 'FILE' : 'WORKFLOW_ID');
+      if (action === 'import') {
+        const raw = await readFile(target, 'utf8');
+        if (Buffer.byteLength(raw, 'utf8') > 1024 * 1024) {
+          throw new CliError('Portable workflow files must not exceed 1 MiB');
+        }
+        let definition;
+        try {
+          definition = JSON.parse(raw);
+        } catch {
+          throw new CliError('Workflow file must contain valid JSON');
+        }
+        print((await api('POST', '/api/workflows/import', {
+          definition,
+          ...(options.name === undefined ? {} : { name: options.name }),
+        })).workflow);
+        break;
+      }
+      if (action === 'export') {
+        const definition = await api('GET', `/api/workflows/${encodeURIComponent(target)}/export`);
+        const output = options.output === undefined
+          ? workflowExportFilename(definition?.name)
+          : required(options.output, '--output');
+        if (existsSync(output) && options.force !== true) {
+          throw new CliError(`Refusing to overwrite ${output}; pass --force to replace it`);
+        }
+        await writeFile(output, `${JSON.stringify(definition, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+        print({ workflow_id: target, path: output });
+        break;
+      }
+      throw new CliError('WORKFLOW_ACTION must be import or export');
+    }
     case 'get-workflow':
       print((await api('GET', `/api/workflows/${encodeURIComponent(required(sessionId, 'WORKFLOW_ID'))}`)).workflow);
       break;

@@ -148,6 +148,7 @@ $run = $client->createRun($session['id'], 'Return the title and visible links', 
 - `resumeBrowserSession($sessionId)`
 - `createWorkflow($name, $sourceSessionId, $sourceRunId)`
 - `listWorkflows(...)` / `getWorkflow($workflowId)`
+- `importWorkflow($definition, $name)` / `exportWorkflow($workflowId)`
 - `renameWorkflow($workflowId, $name)` / `deleteWorkflow($workflowId)`
 - `createRun($sessionId, $task, $options)`
 - `createWorkflowRun($sessionId, $workflowId, $parameters, $options)`

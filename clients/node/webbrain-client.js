@@ -248,6 +248,20 @@ export class WebBrainClient {
     return await this.request('GET', `/api/workflows?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`);
   }
 
+  async importWorkflow(definition, { name } = {}) {
+    if (!definition || typeof definition !== 'object' || Array.isArray(definition)) {
+      throw new TypeError('definition is required');
+    }
+    return (await this.request('POST', '/api/workflows/import', {
+      definition,
+      ...(name === undefined ? {} : { name }),
+    })).workflow;
+  }
+
+  async exportWorkflow(workflowId) {
+    return await this.request('GET', `/api/workflows/${encodeURIComponent(workflowId)}/export`);
+  }
+
   async getWorkflow(workflowId) {
     return (await this.request('GET', `/api/workflows/${encodeURIComponent(workflowId)}`)).workflow;
   }

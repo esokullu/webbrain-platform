@@ -974,6 +974,75 @@ test('saved workflows enforce ownership, capability, pagination, ephemeral param
     assert.equal(renamed.body.workflow.name, 'Fill contact form');
     assert.equal(renamed.body.workflow.definition.name, 'Fill contact form');
 
+    const browserExport = {
+      ...created.body.workflow.definition,
+      id: 'workflow_browser_export',
+      name: 'Browser export',
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    const imported = await request(ctx.base, '/api/workflows/import', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ definition: browserExport, name: 'Cloud copy' }),
+    });
+    assert.equal(imported.status, 201);
+    assert.equal(imported.body.workflow.name, 'Cloud copy');
+    assert.equal(imported.body.workflow.source_session_id, null);
+    assert.equal(imported.body.workflow.source_run_id, null);
+    assert.notEqual(imported.body.workflow.id, browserExport.id);
+    assert.equal(imported.body.workflow.definition.id, imported.body.workflow.id);
+    assert.equal(imported.body.workflow.definition.name, 'Cloud copy');
+    assert.notEqual(imported.body.workflow.definition.createdAt, browserExport.createdAt);
+    const importedWorkflowId = imported.body.workflow.id;
+
+    const portableExport = await request(ctx.base, `/api/workflows/${importedWorkflowId}/export`, {
+      headers: { cookie },
+    });
+    assert.equal(portableExport.status, 200);
+    assert.equal(portableExport.body.schema, 'webbrain-workflow/1');
+    assert.equal(portableExport.body.id, importedWorkflowId);
+    assert.match(portableExport.headers.get('content-disposition'), /Cloud-copy\.webbrain-workflow\.json/);
+    assert.equal(portableExport.headers.get('cache-control'), 'private, no-store');
+
+    const forbiddenExport = await request(ctx.base, `/api/workflows/${importedWorkflowId}/export`, {
+      headers: { cookie: otherCookie },
+    });
+    assert.equal(forbiddenExport.status, 404);
+
+    const unsafeImport = await request(ctx.base, '/api/workflows/import', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({
+        definition: {
+          ...browserExport,
+          steps: [{ tool: 'click_ax', args: { ref_id: 'ref_99' }, target: { role: 'button', name: 'Save' } }],
+        },
+      }),
+    });
+    assert.equal(unsafeImport.status, 422);
+
+    const unsupportedImport = await request(ctx.base, '/api/workflows/import', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ definition: { ...browserExport, schema: 'webbrain-workflow/999' } }),
+    });
+    assert.equal(unsupportedImport.status, 422);
+
+    const importAudit = ctx.store.auditLogs.find(entry => entry.action === 'saved_workflow.import');
+    assert.deepEqual(importAudit.metadata, {
+      schema: 'webbrain-workflow/1',
+      step_count: 1,
+      parameter_count: 1,
+    });
+    const exportAudit = ctx.store.auditLogs.find(entry => entry.action === 'saved_workflow.export');
+    assert.deepEqual(exportAudit.metadata, {
+      schema: 'webbrain-workflow/1',
+      step_count: 1,
+      parameter_count: 1,
+    });
+    assert.equal(ctx.store.auditLogs.some(entry => JSON.stringify(entry.metadata).includes('definition')), false);
+
     const missingParameter = await request(ctx.base, '/api/browser-sessions/bs_workflow/runs', {
       method: 'POST',
       headers: { cookie },
@@ -1004,10 +1073,10 @@ test('saved workflows enforce ownership, capability, pagination, ephemeral param
     const started = await request(ctx.base, '/api/browser-sessions/bs_workflow/runs', {
       method: 'POST',
       headers: { cookie },
-      body: JSON.stringify({ workflow_id: workflowId, parameters: { email: secretValue }, tab_id: 17 }),
+      body: JSON.stringify({ workflow_id: importedWorkflowId, parameters: { email: secretValue }, tab_id: 17 }),
     });
     assert.equal(started.status, 202);
-    assert.equal(started.body.workflow_id, workflowId);
+    assert.equal(started.body.workflow_id, importedWorkflowId);
     assert.equal(runtimeParameterValue, secretValue);
     assert.doesNotMatch(JSON.stringify(started.body), new RegExp(secretValue));
 
@@ -1016,12 +1085,12 @@ test('saved workflows enforce ownership, capability, pagination, ephemeral param
     });
     assert.equal(completed.status, 200);
     assert.equal(completed.body.status, 'completed');
-    assert.equal(completed.body.workflow_id, workflowId);
+    assert.equal(completed.body.workflow_id, importedWorkflowId);
     const exported = await request(ctx.base, '/api/browser-sessions/bs_workflow/runs/run_workflow_1/export', {
       headers: { cookie },
     });
     assert.equal(exported.status, 200);
-    assert.equal(exported.body.run.workflow_id, workflowId);
+    assert.equal(exported.body.run.workflow_id, importedWorkflowId);
 
     const waited = await request(ctx.base, '/api/browser-sessions/bs_workflow/runs', {
       method: 'POST',
@@ -1033,20 +1102,102 @@ test('saved workflows enforce ownership, capability, pagination, ephemeral param
     assert.equal(waited.body.workflow_id, workflowId);
 
     const storedRun = await ctx.store.getCloudRun('run_workflow_1');
-    assert.equal(storedRun.workflow_id, workflowId);
+    assert.equal(storedRun.workflow_id, importedWorkflowId);
     assert.doesNotMatch(JSON.stringify(storedRun), new RegExp(secretValue));
     assert.doesNotMatch(JSON.stringify(ctx.store.auditLogs), new RegExp(secretValue));
     assert.doesNotMatch(JSON.stringify(exported.body), new RegExp(secretValue));
+    const postRunWorkflowExport = await request(ctx.base, `/api/workflows/${importedWorkflowId}/export`, {
+      headers: { cookie },
+    });
+    assert.equal(postRunWorkflowExport.status, 200);
+    assert.doesNotMatch(JSON.stringify(postRunWorkflowExport.body), new RegExp(secretValue));
 
-    const deleted = await request(ctx.base, `/api/workflows/${workflowId}`, {
+    const deleted = await request(ctx.base, `/api/workflows/${importedWorkflowId}`, {
       method: 'DELETE',
       headers: { cookie },
     });
     assert.equal(deleted.status, 204);
-    assert.equal(await ctx.store.getSavedWorkflow(workflowId), null);
-    assert.equal((await ctx.store.getCloudRun('run_workflow_1')).workflow_id, workflowId);
+    assert.equal(await ctx.store.getSavedWorkflow(importedWorkflowId), null);
+    assert.equal((await ctx.store.getCloudRun('run_workflow_1')).workflow_id, importedWorkflowId);
   } finally {
     ws?.close();
+    await ctx.platform.close();
+  }
+});
+
+test('portable workflow imports serialize per account and enforce size and account limits', async () => {
+  const ctx = await startPlatform();
+  try {
+    const cookie = await register(ctx.base, 'workflow-imports@example.com');
+    const me = await request(ctx.base, '/api/me', { headers: { cookie } });
+    const userId = me.body.user.id;
+    const definition = {
+      schema: 'webbrain-workflow/1',
+      id: 'workflow_local',
+      name: 'Portable',
+      createdAt: 1,
+      updatedAt: 1,
+      source: { runId: 'run_local', webbrainVersion: '25.7.4' },
+      start: { origin: 'https://example.com', pathFamily: '/form' },
+      parameters: [],
+      steps: [{ id: 'step_1', tool: 'click', args: { text: 'Continue' }, expected: { kind: 'tool_success' } }],
+      stats: { sourceToolCount: 1, compiledStepCount: 1, skippedToolCount: 0 },
+    };
+
+    const realCount = ctx.store.countSavedWorkflowsForUser.bind(ctx.store);
+    let releaseCount;
+    let countStarted;
+    const countStartedPromise = new Promise(resolve => { countStarted = resolve; });
+    const countReleasePromise = new Promise(resolve => { releaseCount = resolve; });
+    ctx.store.countSavedWorkflowsForUser = async id => {
+      countStarted();
+      await countReleasePromise;
+      return realCount(id);
+    };
+    const firstPromise = request(ctx.base, '/api/workflows/import', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ definition }),
+    });
+    await countStartedPromise;
+    const concurrent = await request(ctx.base, '/api/workflows/import', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ definition }),
+    });
+    assert.equal(concurrent.status, 409);
+    releaseCount();
+    assert.equal((await firstPromise).status, 201);
+    ctx.store.countSavedWorkflowsForUser = realCount;
+
+    const oversized = await request(ctx.base, '/api/workflows/import', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ definition: { ...definition, ignored: 'x'.repeat(1024 * 1024) } }),
+    });
+    assert.equal(oversized.status, 413);
+
+    const now = new Date().toISOString();
+    for (let index = 1; index < 100; index += 1) {
+      await ctx.store.createSavedWorkflow({
+        id: `wfl_limit_${index}`,
+        user_id: userId,
+        name: `Workflow ${index}`,
+        schema_version: definition.schema,
+        definition: { ...definition, id: `workflow_limit_${index}`, name: `Workflow ${index}` },
+        source_browser_session_id: null,
+        source_run_id: null,
+        created_at: now,
+        updated_at: now,
+      });
+    }
+    const atLimit = await request(ctx.base, '/api/workflows/import', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ definition }),
+    });
+    assert.equal(atLimit.status, 409);
+  } finally {
     await ctx.platform.close();
   }
 });
@@ -2578,6 +2729,7 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /accountMenu\.removeAttribute\('open'\)/);
     assert.match(res.text, /id="browserView"/);
     assert.match(res.text, /id="consoleView" hidden/);
+    assert.match(res.text, /id="workflowsView" hidden/);
     assert.match(res.text, /id="logsView" hidden/);
     assert.match(res.text, /id="billingView" hidden/);
     assert.doesNotMatch(res.text, /class="header-link" href="#billing"/);
@@ -2595,7 +2747,7 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     const dashboardScript = [...res.text.matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)?.[1] || '';
     assert.doesNotThrow(() => new Function(dashboardScript));
     assert.match(res.text, /id="apiKeysView" hidden/);
-    assert.match(res.text, />Browsers<[^]*>Console<[^]*>API keys<[^]*>Logs<[^]*href="\/docs">Docs</);
+    assert.match(res.text, />Browsers<[^]*>Console<[^]*>Workflows<[^]*>API keys<[^]*>Logs<[^]*href="\/docs">Docs</);
     assert.match(res.text, /setDashboardView/);
     assert.doesNotMatch(res.text, /\.header-link\s*\{\s*display:\s*none/);
     assert.match(res.text, /id="apiKeysList"/);
@@ -2610,6 +2762,15 @@ test('authenticated dashboard renders browser session controls and noVNC viewer'
     assert.match(res.text, /Runs are asynchronous/);
     assert.match(res.text, /Switch to Browsers at any time to watch it/);
     assert.match(res.text, /body: \{ task, wait: false \}/);
+    assert.match(res.text, /id="workflowImportFile"[^>]*accept="\.json,\.webbrain-workflow\.json,application\/json"/);
+    assert.match(res.text, /body: \{ workflow_id: workflow\.id, parameters, wait: false \}/);
+    assert.match(res.text, /for \(const input of inputs\) input\.value = ''/);
+    assert.match(res.text, /for \(const key of Object\.keys\(parameters\)\) delete parameters\[key\]/);
+    assert.match(res.text, /Uses this browser’s visible active tab/);
+    assert.match(res.text, /\/api\/workflows\/import/);
+    assert.match(res.text, /\/export';/);
+    assert.match(res.text, /function respondWorkflowRun/);
+    assert.match(res.text, /function abortWorkflowRun/);
     assert.match(res.text, /function pollConsoleRun\(\)/);
     assert.match(res.text, /id = 'abortConsoleRunBtn'/);
     assert.match(res.text, /function abortConsoleRun\(\)/);
@@ -2895,6 +3056,8 @@ test('public agent skill files are readable without authentication', async () =>
     assert.equal(reference.status, 200);
     assert.match(reference.headers.get('content-type') || '', /^text\/markdown/);
     assert.match(reference.text, /# WebBrain Cloud API reference/);
+    assert.match(reference.text, /\/api\/workflows\/import/);
+    assert.match(reference.text, /workflows export WORKFLOW_ID/);
 
     const cli = await requestText(ctx.base, '/skills/webbrain-cloud/webbrain.mjs');
     assert.equal(cli.status, 200);
@@ -2937,6 +3100,8 @@ test('public API documentation provides accessible REST and client tabs', async 
     assert.match(res.text, /class="tok-variable"/);
     assert.match(res.text, /class="tok-function"/);
     assert.match(res.text, /\/api\/browser-sessions\/:sessionId\/runs/);
+    assert.match(res.text, /\/api\/workflows\/import/);
+    assert.match(res.text, /\/api\/workflows\/:workflowId\/export/);
     assert.match(res.text, /\/api\/browser-sessions\/:sessionId\/downloads-access/);
     assert.match(res.text, /\/api\/browser-sessions\/:sessionId\/reset/);
     assert.match(res.text, /id="downloads"/);

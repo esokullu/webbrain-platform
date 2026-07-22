@@ -76,6 +76,9 @@ test('dashboard columns are present in fresh schema and existing-database migrat
   assert.match(schema, /workflow_id VARCHAR\(40\) NULL/);
   assert.match(schema, /CREATE TABLE IF NOT EXISTS saved_workflows/);
   assert.match(schema, /definition JSON NOT NULL/);
+  assert.match(schema, /source_browser_session_id VARCHAR\(40\) NULL/);
+  assert.match(schema, /source_run_id VARCHAR\(40\) NULL/);
+  assert.match(storeSource, /ALTER TABLE saved_workflows MODIFY COLUMN \$\{column\} VARCHAR\(40\) NULL/);
   assert.match(storeSource, /ALTER TABLE cloud_runs ADD COLUMN workflow_id VARCHAR\(40\) NULL AFTER user_id/);
   assert.match(storeSource, /async createSavedWorkflow\(/);
   assert.match(storeSource, /async listSavedWorkflowsForUser\(/);

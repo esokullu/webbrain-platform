@@ -325,6 +325,17 @@ class WebBrainClient:
     def list_workflows(self, *, limit: int = 50, offset: int = 0):
         return self._request("GET", f"/api/workflows?limit={int(limit)}&offset={int(offset)}")
 
+    def import_workflow(self, definition: Dict[str, Any], *, name: Optional[str] = None):
+        if not isinstance(definition, dict):
+            raise ValueError("definition is required")
+        body: Dict[str, Any] = {"definition": definition}
+        if name is not None:
+            body["name"] = name
+        return self._request("POST", "/api/workflows/import", body)["workflow"]
+
+    def export_workflow(self, workflow_id: str):
+        return self._request("GET", f"/api/workflows/{self._id(workflow_id)}/export")
+
     def get_workflow(self, workflow_id: str):
         return self._request("GET", f"/api/workflows/{self._id(workflow_id)}")["workflow"]
 

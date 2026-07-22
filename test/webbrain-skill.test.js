@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
@@ -8,9 +10,10 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 const cliPath = path.resolve('.agents/skills/webbrain-cloud/scripts/webbrain.mjs');
 
-async function runCli(args, env = {}) {
+async function runCli(args, env = {}, options = {}) {
   return await execFileAsync(process.execPath, [cliPath, ...args], {
     env: { ...process.env, ...env },
+    ...options,
   });
 }
 
@@ -91,6 +94,15 @@ async function startMockApi() {
       }));
       return;
     }
+    if (req.method === 'POST' && req.url === '/api/workflows/import') {
+      res.statusCode = 201;
+      res.end(JSON.stringify({ workflow: { ...body.definition, id: 'wfl_imported', name: body.name || body.definition.name } }));
+      return;
+    }
+    if (req.method === 'GET' && req.url === '/api/workflows/wfl_imported/export') {
+      res.end(JSON.stringify({ schema: 'webbrain-workflow/1', id: 'wfl_imported', name: 'Portable' }));
+      return;
+    }
     res.writeHead(404).end(JSON.stringify({ error: 'Not found' }));
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -106,12 +118,14 @@ test('WebBrain skill CLI documents commands without requiring a key', async () =
   const { stdout, stderr } = await runCli(['help'], { WEBBRAIN_API_KEY: '' });
   assert.match(stdout, /create-session/);
   assert.match(stdout, /respond-run/);
+  assert.match(stdout, /workflows import FILE/);
   assert.match(stdout, /WEBBRAIN_API_KEY/);
   assert.equal(stderr, '');
 });
 
 test('WebBrain skill CLI drives the create, readiness, and run workflow', async () => {
   const mock = await startMockApi();
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'webbrain-workflow-cli-'));
   const env = {
     WEBBRAIN_API_KEY: 'test-webbrain-key',
     WEBBRAIN_BASE_URL: mock.baseUrl,
@@ -139,6 +153,17 @@ test('WebBrain skill CLI drives the create, readiness, and run workflow', async 
     const downloads = await runCli(['list-downloads', 'bs_test'], env);
     assert.deepEqual(JSON.parse(downloads.stdout), { files: [{ name: 'report.pdf', size: 42 }] });
 
+    const workflowInput = path.join(directory, 'portable.json');
+    const workflowOutput = path.join(directory, 'cloud-copy.json');
+    await writeFile(workflowInput, JSON.stringify({ schema: 'webbrain-workflow/1', name: 'Portable' }));
+    const imported = await runCli(['workflows', 'import', workflowInput, '--name', 'Cloud copy'], env);
+    assert.equal(JSON.parse(imported.stdout).id, 'wfl_imported');
+    await runCli(['workflows', 'export', 'wfl_imported', '--output', workflowOutput], env);
+    assert.equal(JSON.parse(await readFile(workflowOutput, 'utf8')).id, 'wfl_imported');
+    const defaultExport = path.join(directory, 'Portable.webbrain-workflow.json');
+    await runCli(['workflows', 'export', 'wfl_imported'], env, { cwd: directory });
+    assert.equal(JSON.parse(await readFile(defaultExport, 'utf8')).id, 'wfl_imported');
+
     const createRequest = mock.requests.find(request => request.url === '/api/browser-sessions');
     assert.deepEqual(createRequest.body, {
       type: 'incognito',
@@ -153,6 +178,7 @@ test('WebBrain skill CLI drives the create, readiness, and run workflow', async 
     assert.doesNotMatch(`${me.stdout}${created.stdout}${ready.stdout}${started.stdout}${finished.stdout}${downloads.stdout}`, /test-webbrain-key|private/);
   } finally {
     await mock.close();
+    await rm(directory, { recursive: true, force: true });
   }
 });
 

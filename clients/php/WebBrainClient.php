@@ -446,6 +446,20 @@ final class WebBrainClient
         return $this->request('GET', '/api/workflows?limit=' . $limit . '&offset=' . $offset);
     }
 
+    public function importWorkflow(array $definition, ?string $name = null): array
+    {
+        $body = ['definition' => $definition];
+        if ($name !== null) {
+            $body['name'] = $name;
+        }
+        return $this->request('POST', '/api/workflows/import', $body)['workflow'];
+    }
+
+    public function exportWorkflow(string $workflowId): array
+    {
+        return $this->request('GET', '/api/workflows/' . self::id($workflowId) . '/export');
+    }
+
     public function getWorkflow(string $workflowId): array
     {
         return $this->request('GET', '/api/workflows/' . self::id($workflowId))['workflow'];

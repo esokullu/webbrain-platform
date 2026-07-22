@@ -20,16 +20,19 @@ import {
   verifyStripeWebhook,
 } from './stripe-billing.js';
 import { attemptAutoTopUp } from './billing.js';
+import {
+  MAX_PORTABLE_WORKFLOW_BYTES,
+  MAX_SAVED_WORKFLOWS,
+  SAVED_WORKFLOW_SCHEMA,
+  normalizePortableWorkflowDefinition,
+  portableWorkflowByteLength,
+} from '../shared/workflows.js';
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'aborted']);
 const EXPORTABLE_RUN_STATUSES = new Set(['completed', 'failed']);
 const TERMINAL_BROWSER_STATUSES = new Set(['destroyed']);
 const AUTO_TOP_UP_THRESHOLDS = new Set([500, 1000, 2500]);
-const SAVED_WORKFLOW_SCHEMA = 'webbrain-workflow/1';
 const SAVED_WORKFLOW_CAPABILITY = 'saved_workflows_v1';
-const MAX_SAVED_WORKFLOWS = 100;
-const MAX_WORKFLOW_STEPS = 100;
-const MAX_WORKFLOW_PARAMETERS = 50;
 const MAX_WORKFLOW_PARAMETER_VALUE_LENGTH = 10_000;
 const WEBBRAIN_AGENT_SKILL = readFileSync(
   new URL('../../.agents/skills/webbrain-cloud/SKILL.md', import.meta.url),
@@ -83,45 +86,24 @@ function normalizeWorkflowName(value) {
   return name;
 }
 
+function workflowExportFilename(value) {
+  const stem = String(value || 'workflow')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/^[.-]+|[.-]+$/g, '')
+    .slice(0, 120) || 'workflow';
+  return `${stem}.webbrain-workflow.json`;
+}
+
 function normalizeCompiledWorkflowDefinition(value, { id, name, now }) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw Object.assign(new Error('The browser returned an invalid workflow definition.'), { status: 409 });
-  }
-  const definition = JSON.parse(JSON.stringify(value));
-  if (definition.schema !== SAVED_WORKFLOW_SCHEMA) {
-    throw Object.assign(new Error('The browser returned an unsupported workflow definition.'), { status: 409 });
-  }
-  const steps = Array.isArray(definition.steps) ? definition.steps : [];
-  const parameters = Array.isArray(definition.parameters) ? definition.parameters : [];
-  if (!steps.length) {
-    throw Object.assign(new Error('No safe replayable steps were found.'), { status: 422 });
-  }
-  if (steps.length > MAX_WORKFLOW_STEPS || parameters.length > MAX_WORKFLOW_PARAMETERS) {
-    throw Object.assign(new Error('The compiled workflow exceeds WebBrain workflow limits.'), { status: 422 });
-  }
-  const origin = String(definition.start?.origin || '');
-  try {
-    const parsed = new URL(origin);
-    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.origin !== origin) throw new Error();
-  } catch {
-    throw Object.assign(new Error('The compiled workflow has an invalid start origin.'), { status: 409 });
-  }
-  const pathFamily = String(definition.start?.pathFamily || '');
-  if (!pathFamily.startsWith('/')) {
-    throw Object.assign(new Error('The compiled workflow has an invalid start path family.'), { status: 409 });
-  }
-  const parameterIds = new Set();
-  for (const parameter of parameters) {
-    const parameterId = String(parameter?.id || '');
-    if (!parameterId || parameterIds.has(parameterId)) {
-      throw Object.assign(new Error('The compiled workflow has invalid parameter descriptors.'), { status: 409 });
-    }
-    parameterIds.add(parameterId);
-  }
-  definition.id = id;
-  definition.name = name;
-  definition.updatedAt = now;
-  return definition;
+  return normalizePortableWorkflowDefinition(value, {
+    id,
+    name,
+    now,
+    updatedAt: now,
+    invalidStatus: 409,
+  });
 }
 
 function validateWorkflowParameters(definition, value) {
@@ -702,6 +684,22 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     .async-notice p { margin: 0; color: var(--text-dim); font-size: 11px; line-height: 1.55; }
     .async-notice a { color: var(--accent); font-weight: 750; }
     .run-panel .panel-body { min-height: 330px; }
+    .workflow-grid { display: grid; grid-template-columns: minmax(320px, .72fr) minmax(0, 1.28fr); gap: 18px; align-items: start; }
+    .workflow-list { display: grid; gap: 8px; }
+    .workflow-list-item { width: 100%; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; padding: 11px 12px; border-color: var(--border); background: rgba(89,55,25,.025); color: var(--text); box-shadow: none; text-align: left; }
+    .workflow-list-item.active { border-color: var(--accent); background: rgba(91,82,232,.08); }
+    .workflow-list-item strong, .workflow-list-item small { display: block; overflow-wrap: anywhere; }
+    .workflow-list-item small { margin-top: 3px; color: var(--text-dim); font-size: 11px; }
+    .workflow-detail { display: grid; gap: 16px; }
+    .workflow-meta { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 9px; }
+    .workflow-meta > div { padding: 10px; border: 1px solid var(--border); border-radius: 9px; background: rgba(89,55,25,.025); }
+    .workflow-meta span { display: block; color: var(--text-dim); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+    .workflow-meta strong { display: block; margin-top: 3px; font-size: 12px; overflow-wrap: anywhere; }
+    .workflow-parameters { display: grid; gap: 10px; }
+    .workflow-run-output { min-height: 130px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: rgba(89,55,25,.025); }
+    .workflow-run-output pre { max-height: 320px; margin: 8px 0 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .workflow-run-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .workflow-load-more { width: 100%; margin-top: 10px; }
     .run-empty { min-height: 296px; display: grid; place-items: center; padding: 28px; border: 1px dashed var(--border); border-radius: 11px; color: var(--text-dim); text-align: center; }
     .run-empty strong { display: block; margin-bottom: 4px; color: var(--text); font-size: 14px; }
     .run-state { display: grid; gap: 15px; }
@@ -918,6 +916,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       .page-intro { align-items: start; flex-direction: column; }
       .grid, .grid.sessions-collapsed { grid-template-columns: 1fr; gap: 18px; }
       .console-grid { grid-template-columns: 1fr; }
+      .workflow-grid { grid-template-columns: 1fr; }
       .logs-grid { grid-template-columns: 1fr; }
       .billing-grid { grid-template-columns: 1fr; }
       .logs-detail-panel { order: -1; }
@@ -991,6 +990,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         <div class="header-nav" aria-label="Dashboard sections">
           <a class="header-link" href="#browsers" data-view-target="browsers" aria-current="page">Browsers</a>
           <a class="header-link" href="#console" data-view-target="console">Console</a>
+          <a class="header-link" href="#workflows" data-view-target="workflows">Workflows</a>
           <a class="header-link" href="#api-keys" data-view-target="api-keys">API keys</a>
           <a class="header-link" href="#logs" data-view-target="logs">Logs</a>
           <a class="header-link" href="/docs">Docs</a>
@@ -1215,6 +1215,68 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
           </div>
         </div>
       </section>
+    </section>
+    <section class="dashboard-view" id="workflowsView" hidden>
+      <section class="page-intro">
+        <div>
+          <p class="eyebrow">Portable automation</p>
+          <h1>Workflows</h1>
+        </div>
+        <p class="intro-copy">Import sanitized workflows from WebBrain, manage account-wide copies, and replay them with ephemeral values.</p>
+      </section>
+      <div class="workflow-grid">
+        <section class="panel" aria-labelledby="workflowListTitle">
+          <div class="panel-head">
+            <div>
+              <div class="panel-kicker">Library</div>
+              <h2 id="workflowListTitle">Saved workflows</h2>
+            </div>
+            <div class="toolbar">
+              <input id="workflowImportFile" type="file" accept=".json,.webbrain-workflow.json,application/json" hidden>
+              <button class="secondary" id="importWorkflowBtn" type="button">Import JSON</button>
+              <button class="secondary" id="refreshWorkflowsBtn" type="button">Refresh</button>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="workflow-list" id="workflowList"></div>
+            <button class="secondary workflow-load-more" id="loadMoreWorkflowsBtn" type="button" hidden>Load more</button>
+            <div class="message" id="workflowMessage" aria-live="polite"></div>
+          </div>
+        </section>
+        <section class="panel" aria-labelledby="workflowDetailTitle">
+          <div class="panel-head">
+            <div>
+              <div class="panel-kicker">Selected workflow</div>
+              <h2 id="workflowDetailTitle">Workflow details</h2>
+            </div>
+            <div class="toolbar">
+              <button class="secondary" id="exportWorkflowBtn" type="button" disabled>Export</button>
+              <button class="secondary" id="renameWorkflowBtn" type="button" disabled>Rename</button>
+              <button class="danger" id="deleteWorkflowBtn" type="button" disabled>Delete</button>
+            </div>
+          </div>
+          <div class="panel-body workflow-detail">
+            <div id="workflowEmpty" class="empty empty-small">Select a workflow or import a portable JSON file.</div>
+            <div id="workflowContent" hidden>
+              <div class="workflow-meta" id="workflowMeta"></div>
+              <p class="api-description">Prepare the visible active tab in the browser below so it matches this start URL family.</p>
+              <form class="console-form" id="workflowRunForm">
+                <label class="form-field" for="workflowSessionSelect">
+                  <span class="form-label">Browser</span>
+                  <select id="workflowSessionSelect"></select>
+                  <span class="field-hint" id="workflowSessionStatus"></span>
+                </label>
+                <div class="workflow-parameters" id="workflowParameters"></div>
+                <div class="workflow-run-actions">
+                  <div class="message" id="workflowRunMessage" aria-live="polite"></div>
+                  <button id="runWorkflowBtn" type="submit">Run workflow</button>
+                </div>
+              </form>
+              <div class="workflow-run-output" id="workflowRunOutput" aria-live="polite">No workflow run yet.</div>
+            </div>
+          </div>
+        </section>
+      </div>
     </section>
     <section class="dashboard-view" id="logsView" hidden>
       <section class="page-intro">
@@ -1615,6 +1677,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const apiKeysList = document.getElementById('apiKeysList');
     const browserView = document.getElementById('browserView');
     const consoleView = document.getElementById('consoleView');
+    const workflowsView = document.getElementById('workflowsView');
     const logsView = document.getElementById('logsView');
     const billingView = document.getElementById('billingView');
     const apiKeysView = document.getElementById('apiKeysView');
@@ -1645,6 +1708,25 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const consoleCodeTabs = [...document.querySelectorAll('[data-code-client]')];
     const copyConsoleCode = document.getElementById('copyConsoleCode');
     const consoleCodeNote = document.getElementById('consoleCodeNote');
+    const workflowImportFile = document.getElementById('workflowImportFile');
+    const importWorkflowBtn = document.getElementById('importWorkflowBtn');
+    const refreshWorkflowsBtn = document.getElementById('refreshWorkflowsBtn');
+    const workflowList = document.getElementById('workflowList');
+    const loadMoreWorkflowsBtn = document.getElementById('loadMoreWorkflowsBtn');
+    const workflowMessage = document.getElementById('workflowMessage');
+    const workflowEmpty = document.getElementById('workflowEmpty');
+    const workflowContent = document.getElementById('workflowContent');
+    const workflowMeta = document.getElementById('workflowMeta');
+    const exportWorkflowBtn = document.getElementById('exportWorkflowBtn');
+    const renameWorkflowBtn = document.getElementById('renameWorkflowBtn');
+    const deleteWorkflowBtn = document.getElementById('deleteWorkflowBtn');
+    const workflowRunForm = document.getElementById('workflowRunForm');
+    const workflowSessionSelect = document.getElementById('workflowSessionSelect');
+    const workflowSessionStatus = document.getElementById('workflowSessionStatus');
+    const workflowParameters = document.getElementById('workflowParameters');
+    const workflowRunMessage = document.getElementById('workflowRunMessage');
+    const runWorkflowBtn = document.getElementById('runWorkflowBtn');
+    const workflowRunOutput = document.getElementById('workflowRunOutput');
     const refreshLogsBtn = document.getElementById('refreshLogsBtn');
     const logsBrowserFilter = document.getElementById('logsBrowserFilter');
     const logsStatusFilter = document.getElementById('logsStatusFilter');
@@ -1699,6 +1781,15 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       consoleRunTask: '',
       consoleProgressExpanded: false,
       consoleAbortPending: false,
+      workflows: [],
+      workflowsOffset: 0,
+      workflowsHasMore: false,
+      workflowSelectedId: null,
+      workflowSelected: null,
+      workflowSessionId: null,
+      workflowRun: null,
+      workflowRunSessionId: null,
+      workflowAbortPending: false,
       runLogs: [],
       logsOffset: 0,
       logsHasMore: false,
@@ -1720,12 +1811,15 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     const exportableRunStatuses = new Set(['completed', 'failed']);
     let consolePollTimer = null;
     let consoleRunRequestVersion = 0;
+    let workflowPollTimer = null;
+    let workflowRunRequestVersion = 0;
     const sessionsCollapsedKey = 'webbrain.sessionsCollapsed';
 
     function setDashboardView(view, updateUrl) {
-      const nextView = ['api-keys', 'console', 'logs', 'billing'].includes(view) ? view : 'browsers';
+      const nextView = ['api-keys', 'console', 'workflows', 'logs', 'billing'].includes(view) ? view : 'browsers';
       browserView.hidden = nextView !== 'browsers';
       consoleView.hidden = nextView !== 'console';
+      workflowsView.hidden = nextView !== 'workflows';
       logsView.hidden = nextView !== 'logs';
       billingView.hidden = nextView !== 'billing';
       apiKeysView.hidden = nextView !== 'api-keys';
@@ -1737,6 +1831,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       if (updateUrl) history.pushState(null, '', '#' + nextView);
       if (nextView === 'api-keys') loadApiKeys().catch(e => showMessage(apiKeyMessage, e.message, true));
       if (nextView === 'console') renderConsole();
+      if (nextView === 'workflows') loadWorkflows({ reset: true }).catch(e => showMessage(workflowMessage, e.message, true));
       if (nextView === 'logs') loadRunLogs({ reset: true }).catch(e => {
         logsMessage.textContent = e.message;
       });
@@ -2436,6 +2531,405 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       renderConsoleRun();
     }
 
+    function workflowRunIsActive() {
+      const status = state.workflowRun?.status;
+      return !!status && !terminalRunStatuses.has(status);
+    }
+
+    function renderWorkflowList() {
+      workflowList.replaceChildren();
+      if (!state.workflows.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty empty-small';
+        empty.textContent = 'No saved workflows yet. Import a WebBrain workflow JSON file.';
+        workflowList.append(empty);
+      }
+      for (const workflow of state.workflows) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'workflow-list-item' + (workflow.id === state.workflowSelectedId ? ' active' : '');
+        const details = document.createElement('span');
+        const title = document.createElement('strong');
+        title.textContent = workflow.name;
+        const meta = document.createElement('small');
+        meta.textContent = workflow.step_count + ' steps · ' + workflow.parameters.length + ' parameters';
+        details.append(title, meta);
+        const scope = document.createElement('span');
+        scope.className = 'status';
+        scope.textContent = workflow.start?.origin || 'Unknown origin';
+        button.append(details, scope);
+        button.addEventListener('click', () => selectWorkflow(workflow.id));
+        workflowList.append(button);
+      }
+      loadMoreWorkflowsBtn.hidden = !state.workflowsHasMore;
+    }
+
+    async function loadWorkflows({ reset = false } = {}) {
+      if (reset) {
+        state.workflowsOffset = 0;
+        state.workflows = [];
+      }
+      refreshWorkflowsBtn.disabled = true;
+      loadMoreWorkflowsBtn.disabled = true;
+      showMessage(workflowMessage, reset ? 'Refreshing workflows…' : 'Loading more workflows…');
+      try {
+        const body = await api('/api/workflows?limit=50&offset=' + state.workflowsOffset);
+        const incoming = body.workflows || [];
+        const known = new Set(state.workflows.map(item => item.id));
+        state.workflows.push(...incoming.filter(item => !known.has(item.id)));
+        state.workflowsHasMore = body.has_more === true;
+        state.workflowsOffset = body.next_offset == null ? state.workflows.length : body.next_offset;
+        if (state.workflowSelectedId && !state.workflows.some(item => item.id === state.workflowSelectedId)) {
+          state.workflowSelectedId = null;
+          state.workflowSelected = null;
+        }
+        renderWorkflowList();
+        showMessage(workflowMessage, '');
+        if (!state.workflowSelectedId && state.workflows[0]) await selectWorkflow(state.workflows[0].id);
+        else renderWorkflowDetail();
+      } finally {
+        refreshWorkflowsBtn.disabled = false;
+        loadMoreWorkflowsBtn.disabled = false;
+      }
+    }
+
+    async function selectWorkflow(id) {
+      if (!id) return;
+      const changed = state.workflowSelectedId !== id;
+      state.workflowSelectedId = id;
+      if (changed) {
+        state.workflowSelected = null;
+        state.workflowRun = null;
+        state.workflowRunSessionId = null;
+        workflowRunRequestVersion += 1;
+        if (workflowPollTimer) clearTimeout(workflowPollTimer);
+        workflowPollTimer = null;
+      }
+      renderWorkflowList();
+      try {
+        const body = await api('/api/workflows/' + encodeURIComponent(id));
+        if (state.workflowSelectedId !== id) return;
+        state.workflowSelected = body.workflow;
+        renderWorkflowDetail();
+      } catch (error) {
+        if (state.workflowSelectedId === id) showMessage(workflowMessage, error.message, true);
+      }
+    }
+
+    function appendWorkflowMeta(label, value) {
+      const item = document.createElement('div');
+      const key = document.createElement('span');
+      key.textContent = label;
+      const content = document.createElement('strong');
+      content.textContent = value || '—';
+      item.append(key, content);
+      workflowMeta.append(item);
+    }
+
+    function renderWorkflowParameters() {
+      workflowParameters.replaceChildren();
+      for (const parameter of state.workflowSelected?.parameters || []) {
+        const label = document.createElement('label');
+        label.className = 'form-field';
+        const title = document.createElement('span');
+        title.className = 'form-label';
+        title.textContent = parameter.label || parameter.id;
+        const input = document.createElement('input');
+        input.type = parameter.sensitive ? 'password' : 'text';
+        input.autocomplete = 'off';
+        input.maxLength = 10000;
+        input.required = parameter.required !== false;
+        input.dataset.workflowParameterId = parameter.id;
+        const hint = document.createElement('span');
+        hint.className = 'field-hint';
+        hint.textContent = parameter.id + (parameter.sensitive ? ' · sensitive' : '');
+        label.append(title, input, hint);
+        workflowParameters.append(label);
+      }
+    }
+
+    function renderWorkflowRunner() {
+      if (!workflowSessionSelect) return;
+      const sessions = state.sessions.filter(session => session.status !== 'destroyed');
+      if (!state.workflowSessionId || !sessions.some(session => session.id === state.workflowSessionId)) {
+        const preferred = sessions.find(session => session.runtime_ready) || sessions[0];
+        state.workflowSessionId = preferred?.id || null;
+      }
+      workflowSessionSelect.replaceChildren();
+      if (!sessions.length) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No browser sessions';
+        workflowSessionSelect.append(option);
+      }
+      for (const session of sessions) {
+        const option = document.createElement('option');
+        option.value = session.id;
+        option.selected = session.id === state.workflowSessionId;
+        option.textContent = browserName(session) + ' · ' + (session.runtime_ready ? 'ready' : session.status);
+        workflowSessionSelect.append(option);
+      }
+      const session = sessions.find(item => item.id === state.workflowSessionId);
+      workflowSessionSelect.disabled = !sessions.length || workflowRunIsActive();
+      if (!session) workflowSessionStatus.textContent = 'Create a browser first.';
+      else if (session.runtime_ready) workflowSessionStatus.textContent = 'Uses this browser’s visible active tab · ' + session.id;
+      else workflowSessionStatus.textContent = 'Choose a browser whose runtime is ready.';
+      runWorkflowBtn.disabled = !state.workflowSelected || !session?.runtime_ready || workflowRunIsActive();
+    }
+
+    function renderWorkflowRun() {
+      workflowRunOutput.replaceChildren();
+      const run = state.workflowRun;
+      if (!run) {
+        workflowRunOutput.textContent = 'No workflow run yet.';
+        return;
+      }
+      const heading = document.createElement('strong');
+      heading.textContent = 'Run ' + (run.status || 'starting');
+      workflowRunOutput.append(heading);
+      const summary = run.error || run.summary || (run.result == null ? '' : (typeof run.result === 'string' ? run.result : JSON.stringify(run.result, null, 2)));
+      if (summary) {
+        const pre = document.createElement('pre');
+        pre.textContent = summary;
+        workflowRunOutput.append(pre);
+      }
+      if (run.final_url) {
+        const link = document.createElement('a');
+        link.href = safeHttpUrl(run.final_url) || '#';
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.textContent = run.final_url;
+        workflowRunOutput.append(link);
+      }
+      if (run.status === 'needs_user_input' && run.pending_input) {
+        const form = document.createElement('form');
+        form.className = 'console-form';
+        const question = document.createElement('p');
+        question.textContent = run.pending_input.question || 'WebBrain needs your input.';
+        const answer = document.createElement('input');
+        answer.type = 'text';
+        answer.required = true;
+        answer.autocomplete = 'off';
+        answer.placeholder = Array.isArray(run.pending_input.options)
+          ? run.pending_input.options.map(option => typeof option === 'string' ? option : option.label).filter(Boolean).join(' · ')
+          : 'Your answer';
+        const submit = document.createElement('button');
+        submit.type = 'submit';
+        submit.textContent = 'Send response';
+        form.append(question, answer, submit);
+        form.addEventListener('submit', event => respondWorkflowRun(event, answer, submit));
+        workflowRunOutput.append(form);
+      }
+      if (workflowRunIsActive()) {
+        const abort = document.createElement('button');
+        abort.type = 'button';
+        abort.className = 'danger';
+        abort.disabled = state.workflowAbortPending;
+        abort.textContent = state.workflowAbortPending ? 'Aborting…' : 'Abort run';
+        abort.addEventListener('click', abortWorkflowRun);
+        workflowRunOutput.append(abort);
+      }
+    }
+
+    function renderWorkflowDetail() {
+      const workflow = state.workflowSelected;
+      workflowEmpty.hidden = !!workflow;
+      workflowContent.hidden = !workflow;
+      exportWorkflowBtn.disabled = !workflow;
+      renameWorkflowBtn.disabled = !workflow;
+      deleteWorkflowBtn.disabled = !workflow;
+      if (!workflow) return;
+      workflowMeta.replaceChildren();
+      appendWorkflowMeta('Name', workflow.name);
+      appendWorkflowMeta('Start origin', workflow.start?.origin);
+      appendWorkflowMeta('Path family', workflow.start?.path_family);
+      appendWorkflowMeta('Definition', workflow.schema + ' · ' + workflow.step_count + ' steps');
+      renderWorkflowParameters();
+      renderWorkflowRunner();
+      renderWorkflowRun();
+    }
+
+    function scheduleWorkflowPoll() {
+      if (workflowPollTimer) clearTimeout(workflowPollTimer);
+      workflowPollTimer = null;
+      if (workflowRunIsActive() && state.workflowRun?.status !== 'needs_user_input'
+          && state.workflowRun?.run_id && !state.workflowAbortPending) {
+        workflowPollTimer = setTimeout(pollWorkflowRun, 1000);
+      }
+    }
+
+    async function pollWorkflowRun() {
+      const runId = state.workflowRun?.run_id;
+      const sessionId = state.workflowRunSessionId;
+      const requestVersion = workflowRunRequestVersion;
+      if (!runId || !sessionId || !workflowRunIsActive()) return;
+      try {
+        const run = await api('/api/browser-sessions/' + encodeURIComponent(sessionId) + '/runs/' + encodeURIComponent(runId));
+        if (requestVersion !== workflowRunRequestVersion || state.workflowRun?.run_id !== runId) return;
+        state.workflowRun = run;
+        showMessage(workflowRunMessage, terminalRunStatuses.has(run.status) ? 'Run ' + run.status + '.' : 'Run is active.', run.status === 'failed');
+        renderWorkflowRunner();
+        renderWorkflowRun();
+      } catch (error) {
+        if (requestVersion === workflowRunRequestVersion) showMessage(workflowRunMessage, 'Could not refresh yet. ' + error.message, true);
+      }
+      scheduleWorkflowPoll();
+    }
+
+    async function executeWorkflowRun(event) {
+      event.preventDefault();
+      const workflow = state.workflowSelected;
+      const session = state.sessions.find(item => item.id === state.workflowSessionId);
+      if (!workflow || !session?.runtime_ready || workflowRunIsActive()) return;
+      const inputs = [...workflowParameters.querySelectorAll('[data-workflow-parameter-id]')];
+      const parameters = {};
+      for (const descriptor of workflow.parameters || []) {
+        const input = inputs.find(item => item.dataset.workflowParameterId === descriptor.id);
+        if (!input || (descriptor.required !== false && input.value === '')) {
+          showMessage(workflowRunMessage, (descriptor.label || descriptor.id) + ' is required.', true);
+          return;
+        }
+        parameters[descriptor.id] = input.value;
+      }
+      state.workflowRunSessionId = session.id;
+      state.workflowAbortPending = false;
+      workflowRunRequestVersion += 1;
+      state.workflowRun = { status: 'starting', run_id: '', updates: [] };
+      showMessage(workflowRunMessage, 'Starting workflow…');
+      renderWorkflowRunner();
+      renderWorkflowRun();
+      try {
+        const pending = api('/api/browser-sessions/' + encodeURIComponent(session.id) + '/runs', {
+          method: 'POST',
+          body: { workflow_id: workflow.id, parameters, wait: false },
+        });
+        for (const input of inputs) input.value = '';
+        for (const key of Object.keys(parameters)) delete parameters[key];
+        const run = await pending;
+        state.workflowRun = run;
+        showMessage(workflowRunMessage, 'Workflow started.');
+        renderWorkflowRunner();
+        renderWorkflowRun();
+        scheduleWorkflowPoll();
+      } catch (error) {
+        for (const input of inputs) input.value = '';
+        for (const key of Object.keys(parameters)) delete parameters[key];
+        state.workflowRun = { status: 'failed', run_id: '', error: error.message, updates: [] };
+        showMessage(workflowRunMessage, error.message, true);
+        renderWorkflowRunner();
+        renderWorkflowRun();
+      }
+    }
+
+    async function respondWorkflowRun(event, answerInput, submit) {
+      event.preventDefault();
+      const run = state.workflowRun;
+      const sessionId = state.workflowRunSessionId;
+      const answer = answerInput.value;
+      const clarifyId = run?.pending_input?.clarify_id;
+      if (!answer || !clarifyId || !run?.run_id || !sessionId) return;
+      submit.disabled = true;
+      try {
+        const pending = api('/api/browser-sessions/' + encodeURIComponent(sessionId) + '/runs/' + encodeURIComponent(run.run_id) + '/responses', {
+          method: 'POST',
+          body: { clarify_id: clarifyId, answer },
+        });
+        answerInput.value = '';
+        const next = await pending;
+        state.workflowRun = next;
+        renderWorkflowRunner();
+        renderWorkflowRun();
+        scheduleWorkflowPoll();
+      } catch (error) {
+        answerInput.value = '';
+        showMessage(workflowRunMessage, error.message, true);
+        submit.disabled = false;
+      }
+    }
+
+    async function abortWorkflowRun() {
+      const run = state.workflowRun;
+      const sessionId = state.workflowRunSessionId;
+      if (!run?.run_id || !sessionId || !workflowRunIsActive() || state.workflowAbortPending) return;
+      state.workflowAbortPending = true;
+      renderWorkflowRun();
+      try {
+        state.workflowRun = await api('/api/browser-sessions/' + encodeURIComponent(sessionId) + '/runs/' + encodeURIComponent(run.run_id) + '/abort', { method: 'POST' });
+      } catch (error) {
+        showMessage(workflowRunMessage, error.message, true);
+      } finally {
+        state.workflowAbortPending = false;
+        renderWorkflowRunner();
+        renderWorkflowRun();
+        scheduleWorkflowPoll();
+      }
+    }
+
+    async function importWorkflowFile() {
+      const file = workflowImportFile.files?.[0];
+      workflowImportFile.value = '';
+      if (!file) return;
+      if (file.size > 1024 * 1024) return showMessage(workflowMessage, 'Portable workflow files must not exceed 1 MiB.', true);
+      importWorkflowBtn.disabled = true;
+      showMessage(workflowMessage, 'Importing workflow…');
+      try {
+        const text = await file.text();
+        if (new TextEncoder().encode(text).byteLength > 1024 * 1024) throw new Error('Portable workflow files must not exceed 1 MiB.');
+        const definition = JSON.parse(text);
+        const body = await api('/api/workflows/import', { method: 'POST', body: { definition } });
+        state.workflowSelectedId = body.workflow.id;
+        state.workflowSelected = body.workflow;
+        await loadWorkflows({ reset: true });
+        showMessage(workflowMessage, 'Imported “' + body.workflow.name + '”.');
+      } catch (error) {
+        showMessage(workflowMessage, error.message || 'Invalid workflow file.', true);
+      } finally {
+        importWorkflowBtn.disabled = false;
+      }
+    }
+
+    function exportSelectedWorkflow() {
+      if (!state.workflowSelected?.id) return;
+      const link = document.createElement('a');
+      link.href = '/api/workflows/' + encodeURIComponent(state.workflowSelected.id) + '/export';
+      document.body.append(link);
+      link.click();
+      link.remove();
+    }
+
+    async function renameSelectedWorkflow() {
+      const workflow = state.workflowSelected;
+      if (!workflow) return;
+      const name = window.prompt('Workflow name', workflow.name);
+      if (name == null || !name.trim() || name.trim() === workflow.name) return;
+      try {
+        const body = await api('/api/workflows/' + encodeURIComponent(workflow.id), { method: 'PATCH', body: { name } });
+        state.workflowSelected = body.workflow;
+        state.workflows = state.workflows.map(item => item.id === workflow.id ? { ...item, name: body.workflow.name } : item);
+        renderWorkflowList();
+        renderWorkflowDetail();
+      } catch (error) {
+        showMessage(workflowMessage, error.message, true);
+      }
+    }
+
+    async function deleteSelectedWorkflow() {
+      const workflow = state.workflowSelected;
+      if (!workflow || !window.confirm('Delete “' + workflow.name + '”? Historical runs will be kept.')) return;
+      try {
+        await api('/api/workflows/' + encodeURIComponent(workflow.id), { method: 'DELETE' });
+        state.workflows = state.workflows.filter(item => item.id !== workflow.id);
+        state.workflowSelectedId = null;
+        state.workflowSelected = null;
+        state.workflowRun = null;
+        renderWorkflowList();
+        if (state.workflows[0]) await selectWorkflow(state.workflows[0].id);
+        else renderWorkflowDetail();
+      } catch (error) {
+        showMessage(workflowMessage, error.message, true);
+      }
+    }
+
     function runLogBrowserName(run) {
       const session = state.sessions.find(item => item.id === run.session_id);
       return session ? browserName(session) : (run.session_id || 'Unknown browser');
@@ -2852,6 +3346,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       syncCreateBrowserControls();
       renderViewer();
       renderConsole();
+      renderWorkflowRunner();
     }
 
     function syncCreateBrowserControls() {
@@ -3602,6 +4097,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       try {
         const refreshes = [loadSessions(), loadApiKeys(), loadBilling()];
         if (!logsView.hidden) refreshes.push(loadRunLogs({ reset: true }));
+        if (!workflowsView.hidden) refreshes.push(loadWorkflows({ reset: true }));
         await Promise.all(refreshes);
         accountMenu.removeAttribute('open');
       } catch (e) {
@@ -3609,7 +4105,9 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
         else {
           const targetMessage = !consoleView.hidden
             ? consoleMessage
-            : (!billingView.hidden ? billingMessage : (browserView.hidden ? apiKeyMessage : sessionMessage));
+            : (!workflowsView.hidden
+              ? workflowMessage
+              : (!billingView.hidden ? billingMessage : (browserView.hidden ? apiKeyMessage : sessionMessage)));
           showMessage(targetMessage, e.message, true);
         }
       } finally {
@@ -3701,6 +4199,18 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) executeConsoleRun();
     });
     executeConsoleBtn.addEventListener('click', executeConsoleRun);
+    importWorkflowBtn.addEventListener('click', () => workflowImportFile.click());
+    workflowImportFile.addEventListener('change', importWorkflowFile);
+    refreshWorkflowsBtn.addEventListener('click', () => loadWorkflows({ reset: true }).catch(error => showMessage(workflowMessage, error.message, true)));
+    loadMoreWorkflowsBtn.addEventListener('click', () => loadWorkflows().catch(error => showMessage(workflowMessage, error.message, true)));
+    exportWorkflowBtn.addEventListener('click', exportSelectedWorkflow);
+    renameWorkflowBtn.addEventListener('click', renameSelectedWorkflow);
+    deleteWorkflowBtn.addEventListener('click', deleteSelectedWorkflow);
+    workflowSessionSelect.addEventListener('change', () => {
+      state.workflowSessionId = workflowSessionSelect.value || null;
+      renderWorkflowRunner();
+    });
+    workflowRunForm.addEventListener('submit', executeWorkflowRun);
     refreshLogsBtn.addEventListener('click', () => loadRunLogs({ reset: true }).catch(error => {
       logsMessage.textContent = error.message;
     }));
@@ -3737,6 +4247,7 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
     function dashboardViewFromHash() {
       if (location.hash === '#api-keys') return 'api-keys';
       if (location.hash === '#console') return 'console';
+      if (location.hash === '#workflows') return 'workflows';
       if (location.hash === '#logs') return 'logs';
       if (location.hash === '#billing') return 'billing';
       return 'browsers';
@@ -3786,7 +4297,7 @@ function normalizeRunSnapshot(snapshot, existing = {}) {
 export function createPlatformApp({ store, provisioner, controlChannel, config, downloadsHandler = null, warmPool = null }) {
   const app = express();
   const browserLifecycleOperations = new Set();
-  const workflowCreateOperations = new Set();
+  const workflowCreationOperations = new Set();
   const billingPackages = new Map(DEFAULT_CREDIT_PACKAGES.map(item => [item.amountCents, item]));
   const unlimitedBillingEmails = new Set(config.billing?.unlimitedEmails || []);
 
@@ -3806,7 +4317,10 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
     }
   });
 
-  app.use(express.json({ limit: '1mb' }));
+  // Leave a small envelope allowance around the 1 MiB portable definition so
+  // `{ definition }` can reach the workflow validator without widening the
+  // public artifact limit itself.
+  app.use(express.json({ limit: '1025kb' }));
   app.use(express.urlencoded({ extended: false }));
 
   app.use(async (req, res, next) => {
@@ -4550,10 +5064,10 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
 
   app.post('/api/workflows', requireAuth, async (req, res, next) => {
     const userId = req.auth.user.id;
-    if (workflowCreateOperations.has(userId)) {
-      return jsonError(res, 409, 'Another workflow is currently being compiled for this account.');
+    if (workflowCreationOperations.has(userId)) {
+      return jsonError(res, 409, 'Another workflow is currently being created for this account.');
     }
-    workflowCreateOperations.add(userId);
+    workflowCreationOperations.add(userId);
     try {
       const name = normalizeWorkflowName(req.body.name);
       const sourceSessionId = String(req.body.source_session_id || '').trim();
@@ -4636,7 +5150,59 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
     } catch (error) {
       next(error);
     } finally {
-      workflowCreateOperations.delete(userId);
+      workflowCreationOperations.delete(userId);
+    }
+  });
+
+  app.post('/api/workflows/import', requireAuth, async (req, res, next) => {
+    const userId = req.auth.user.id;
+    if (workflowCreationOperations.has(userId)) {
+      return jsonError(res, 409, 'Another workflow is currently being created for this account.');
+    }
+    workflowCreationOperations.add(userId);
+    try {
+      const input = req.body?.definition;
+      if (!input || typeof input !== 'object' || Array.isArray(input)) {
+        return jsonError(res, 400, '`definition` is required and must be an object.');
+      }
+      if (portableWorkflowByteLength(input) > MAX_PORTABLE_WORKFLOW_BYTES) {
+        return jsonError(res, 413, 'Portable workflow definitions must not exceed 1 MiB.');
+      }
+      if (await store.countSavedWorkflowsForUser(userId) >= MAX_SAVED_WORKFLOWS) {
+        return jsonError(res, 409, `An account can store at most ${MAX_SAVED_WORKFLOWS} workflows.`);
+      }
+      const name = normalizeWorkflowName(req.body.name ?? input.name);
+      const id = randomId('wfl');
+      const now = nowIso();
+      const definition = normalizePortableWorkflowDefinition(input, {
+        id,
+        name,
+        now: Date.parse(now),
+        resetTimestamps: true,
+        strict: true,
+      });
+      const workflow = await store.createSavedWorkflow({
+        id,
+        user_id: userId,
+        name,
+        schema_version: SAVED_WORKFLOW_SCHEMA,
+        definition,
+        source_browser_session_id: null,
+        source_run_id: null,
+        created_at: now,
+        updated_at: now,
+      });
+      await audit(req, 'saved_workflow.import', 'saved_workflow', workflow.id, {
+        schema: definition.schema,
+        step_count: definition.steps.length,
+        parameter_count: definition.parameters.length,
+      });
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.status(201).json({ workflow: publicWorkflow(workflow, { includeDefinition: true }) });
+    } catch (error) {
+      next(error);
+    } finally {
+      workflowCreationOperations.delete(userId);
     }
   });
 
@@ -4665,6 +5231,32 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       }
       res.setHeader('Cache-Control', 'private, no-store');
       res.json({ workflow: publicWorkflow(workflow, { includeDefinition: true }) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/api/workflows/:workflowId/export', requireAuth, async (req, res, next) => {
+    try {
+      const workflow = await store.getSavedWorkflow(req.params.workflowId);
+      if (!workflow || workflow.user_id !== req.auth.user.id) {
+        return jsonError(res, 404, 'Saved workflow not found.');
+      }
+      const definition = normalizePortableWorkflowDefinition(workflow.definition, {
+        id: workflow.id,
+        name: workflow.name,
+        now: Date.parse(workflow.updated_at || nowIso()),
+        updatedAt: Date.parse(workflow.updated_at || nowIso()),
+        invalidStatus: 500,
+      });
+      await audit(req, 'saved_workflow.export', 'saved_workflow', workflow.id, {
+        schema: definition.schema,
+        step_count: definition.steps.length,
+        parameter_count: definition.parameters.length,
+      });
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.setHeader('Content-Disposition', `attachment; filename="${workflowExportFilename(workflow.name)}"`);
+      res.type('application/json').send(`${JSON.stringify(definition, null, 2)}\n`);
     } catch (error) {
       next(error);
     }

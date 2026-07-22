@@ -150,6 +150,7 @@ Use the Downloads helpers to retrieve it after the run completes.
 - `resumeBrowserSession(sessionId)`
 - `createWorkflow({ name, sourceSessionId, sourceRunId })`
 - `listWorkflows(options)` / `getWorkflow(workflowId)`
+- `importWorkflow(definition, { name })` / `exportWorkflow(workflowId)`
 - `renameWorkflow(workflowId, name)` / `deleteWorkflow(workflowId)`
 - `createRun(sessionId, options)`
 - `createWorkflowRun(sessionId, workflowId, options)`

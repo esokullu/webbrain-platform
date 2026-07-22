@@ -619,11 +619,13 @@ export function docsPage() {
         <section class="docs-section" id="workflows">
           <p class="section-kicker">Repeat safely</p>
           <h2>Compile and replay saved workflows</h2>
-          <p>Create a workflow from a completed successful cloud run with <span class="inline-code">POST /api/workflows</span> and <span class="inline-code">name</span>, <span class="inline-code">source_session_id</span>, and <span class="inline-code">source_run_id</span>. The response includes compiler warnings, the required start origin/path family, parameter descriptors, and a sanitized <span class="inline-code">webbrain-workflow/1</span> definition.</p>
+          <p>Create a workflow from a completed successful cloud run with <span class="inline-code">POST /api/workflows</span>, or import the raw sanitized <span class="inline-code">webbrain-workflow/1</span> JSON definition with <span class="inline-code">POST /api/workflows/import</span>. Portable files are limited to 1 MiB, never contain runtime parameter values, and receive a fresh cloud ID and timestamps.</p>
           <div class="endpoint-list">
             <div class="endpoint"><span class="method">POST</span><code>/api/workflows</code><span>Compile and store an exact successful run trace.</span></div>
+            <div class="endpoint"><span class="method">POST</span><code>/api/workflows/import</code><span>Validate and store a portable workflow definition.</span></div>
             <div class="endpoint"><span class="method">GET</span><code>/api/workflows?limit=&amp;offset=</code><span>List workflow metadata.</span></div>
             <div class="endpoint"><span class="method">GET</span><code>/api/workflows/:workflowId</code><span>Read metadata and the sanitized definition.</span></div>
+            <div class="endpoint"><span class="method">GET</span><code>/api/workflows/:workflowId/export</code><span>Download the raw portable workflow JSON.</span></div>
             <div class="endpoint"><span class="method">PATCH</span><code>/api/workflows/:workflowId</code><span>Rename a workflow.</span></div>
             <div class="endpoint"><span class="method">DELETE</span><code>/api/workflows/:workflowId</code><span>Delete the definition while retaining historical runs.</span></div>
           </div>

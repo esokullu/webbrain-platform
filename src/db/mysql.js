@@ -297,6 +297,20 @@ export class MySqlStore {
     if (!runParentIndexes.length) {
       await this.pool.query('CREATE UNIQUE INDEX idx_cloud_runs_parent_run ON cloud_runs (parent_run_id)');
     }
+    for (const column of ['source_browser_session_id', 'source_run_id']) {
+      const [rows] = await this.pool.execute(
+        `SELECT IS_NULLABLE AS is_nullable
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'saved_workflows'
+           AND COLUMN_NAME = :column
+         LIMIT 1`,
+        { column }
+      );
+      if (rows[0]?.is_nullable !== 'YES') {
+        await this.pool.query(`ALTER TABLE saved_workflows MODIFY COLUMN ${column} VARCHAR(40) NULL`);
+      }
+    }
   }
 
   async queryOne(sql, params = {}) {

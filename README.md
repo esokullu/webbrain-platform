@@ -478,6 +478,14 @@ Compile a completed successful run with `POST /api/workflows` and a body of
 read, rename, and delete owned definitions through `/api/workflows`; deleting a
 definition does not delete historical runs.
 
+Import a portable workflow exported by Chrome or Firefox with
+`POST /api/workflows/import` and `{"definition":{...},"name":"optional override"}`.
+The raw `webbrain-workflow/1` file is limited to 1 MiB, is normalized at the
+cloud boundary, and always receives a fresh cloud ID and timestamps. Download
+the same portable format from `GET /api/workflows/:workflowId/export`. The
+dashboard Workflows view provides upload, download, rename, delete, parameter
+entry, and active-tab replay without placing runtime values in browser storage.
+
 Replay with `POST /api/browser-sessions/:sessionId/runs` and
 `{"workflow_id":"...","parameters":{"field":"new value"}}`. Supply exactly
 one of `task` and `workflow_id`. Workflow runs reject `output_schema` in v1.
