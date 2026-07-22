@@ -31,6 +31,7 @@ function normalizeRun(snapshot, sessionId = null) {
     run_id: snapshot.runId || snapshot.run_id,
     status: snapshot.status,
     session_id: sessionId || snapshot.sessionId || snapshot.session_id || null,
+    workflow_id: snapshot.workflowId || snapshot.workflow_id || null,
     parent_run_id: snapshot.parentRunId || snapshot.parent_run_id || null,
     tab_id: snapshot.tabId ?? snapshot.tab_id ?? null,
     pending_input: snapshot.pendingInput || snapshot.pending_input || null,
@@ -47,7 +48,9 @@ function normalizeRun(snapshot, sessionId = null) {
 }
 
 function route(method, pathname) {
-  let m = /^\/runs\/([^/]+)\/abort$/.exec(pathname);
+  let m = /^\/runs\/([^/]+)\/workflow$/.exec(pathname);
+  if (method === 'POST' && m) return { kind: 'compile_workflow', runId: m[1], sessionId: null };
+  m = /^\/runs\/([^/]+)\/abort$/.exec(pathname);
   if (method === 'POST' && m) return { kind: 'abort', runId: m[1], sessionId: null };
   m = /^\/runs\/([^/]+)\/responses$/.exec(pathname);
   if (method === 'POST' && m) return { kind: 'respond', runId: m[1], sessionId: null };
@@ -75,6 +78,8 @@ export function createSidecarServer(options = {}) {
   const runs = new Map();
   const pending = new Map();
   let extensionSocket = null;
+  let extensionProtocolVersion = null;
+  let extensionCapabilities = [];
   let seq = 0;
 
   function hasExtension() {
@@ -112,20 +117,33 @@ export function createSidecarServer(options = {}) {
 
   async function createRun(body, sessionId) {
     const task = String(body.task || '').trim();
-    if (!task) {
-      const err = new Error('`task` is required.');
+    const workflow = body.workflow && typeof body.workflow === 'object' && !Array.isArray(body.workflow)
+      ? body.workflow
+      : null;
+    if ((task ? 1 : 0) + (workflow ? 1 : 0) !== 1) {
+      const err = new Error('Provide exactly one of `task` or `workflow`.');
       err.status = 400;
       throw err;
     }
     const outputSchema = body.output_schema ?? body.outputSchema ?? null;
-    const started = await sendExtension('cloud_run', {
-      task,
-      apiMutationsAllowed: body.api_mutations_allowed === true || body.apiMutationsAllowed === true,
-      outputSchema,
-      ...(body.capture === undefined ? {} : { capture: body.capture }),
-      parentRunId: body.parent_run_id ?? body.parentRunId ?? null,
-      tabId: body.tab_id ?? body.tabId,
-    });
+    if (workflow && outputSchema != null) {
+      throw Object.assign(new Error('`output_schema` is not supported for workflow runs.'), { status: 400 });
+    }
+    const started = workflow
+      ? await sendExtension('cloud_workflow_run', {
+        workflow,
+        parameters: body.parameters ?? {},
+        ...(body.capture === undefined ? {} : { capture: body.capture }),
+        tabId: body.tab_id ?? body.tabId,
+      })
+      : await sendExtension('cloud_run', {
+        task,
+        apiMutationsAllowed: body.api_mutations_allowed === true || body.apiMutationsAllowed === true,
+        outputSchema,
+        ...(body.capture === undefined ? {} : { capture: body.capture }),
+        parentRunId: body.parent_run_id ?? body.parentRunId ?? null,
+        tabId: body.tab_id ?? body.tabId,
+      });
     const run = normalizeRun(started, sessionId);
     runs.set(run.run_id, run);
 
@@ -141,6 +159,13 @@ export function createSidecarServer(options = {}) {
       return { status: 202, body: runs.get(run.run_id) || run };
     }
     return { status: terminal.status === 'completed' ? 200 : 500, body: terminal };
+  }
+
+  async function compileWorkflow(runId, body) {
+    return await sendExtension('cloud_workflow_compile', {
+      runId,
+      name: String(body.name || '').trim(),
+    });
   }
 
   async function statusRun(runId, sessionId) {
@@ -178,7 +203,13 @@ export function createSidecarServer(options = {}) {
     try {
       const url = new URL(req.url, `http://${req.headers.host || `${host}:${port}`}`);
       if (req.method === 'GET' && url.pathname === '/healthz') {
-        json(res, 200, { ok: true, extension_connected: hasExtension(), runs: runs.size });
+        json(res, 200, {
+          ok: true,
+          extension_connected: hasExtension(),
+          extension_protocol_version: extensionProtocolVersion,
+          capabilities: extensionCapabilities,
+          runs: runs.size,
+        });
         return;
       }
 
@@ -192,6 +223,10 @@ export function createSidecarServer(options = {}) {
         const body = await readJson(req);
         const result = await createRun(body, r.sessionId);
         json(res, result.status, result.body);
+        return;
+      }
+      if (r.kind === 'compile_workflow') {
+        json(res, 200, await compileWorkflow(r.runId, await readJson(req)));
         return;
       }
       if (r.kind === 'status') {
@@ -214,14 +249,23 @@ export function createSidecarServer(options = {}) {
   const wss = new WebSocketServer({ server, path: '/extension' });
   wss.on('connection', (ws) => {
     extensionSocket = ws;
+    extensionProtocolVersion = null;
+    extensionCapabilities = [];
     ws.on('message', (raw) => {
+      if (extensionSocket !== ws) return;
       let msg;
       try {
         msg = JSON.parse(raw.toString('utf8'));
       } catch {
         return;
       }
-      if (msg.type === 'hello') return;
+      if (msg.type === 'hello') {
+        extensionProtocolVersion = Number(msg.protocolVersion) || null;
+        extensionCapabilities = Array.isArray(msg.capabilities)
+          ? [...new Set(msg.capabilities.map(value => String(value)).filter(Boolean))]
+          : [];
+        return;
+      }
       if (!msg.id || !pending.has(msg.id)) return;
       const p = pending.get(msg.id);
       pending.delete(msg.id);
@@ -233,6 +277,8 @@ export function createSidecarServer(options = {}) {
     ws.on('close', () => {
       if (extensionSocket !== ws) return;
       extensionSocket = null;
+      extensionProtocolVersion = null;
+      extensionCapabilities = [];
       const completedAt = new Date().toISOString();
       for (const run of runs.values()) {
         if (!['running', 'needs_user_input', 'aborting'].includes(run.status)) continue;

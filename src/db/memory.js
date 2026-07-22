@@ -26,6 +26,7 @@ export class MemoryStore {
     this.browserSessions = new Map();
     this.warmDroplets = new Map();
     this.cloudRuns = new Map();
+    this.savedWorkflows = new Map();
     this.auditLogs = [];
   }
 
@@ -450,6 +451,37 @@ export class MemoryStore {
     if (!row) throw notFound('Cloud run not found');
     Object.assign(row, clone(patch), { updated_at: patch.updated_at || nowIso() });
     return clone(row);
+  }
+
+  async createSavedWorkflow(row) {
+    this.savedWorkflows.set(row.id, clone(row));
+    return clone(row);
+  }
+
+  async getSavedWorkflow(id) {
+    return clone(this.savedWorkflows.get(id) || null);
+  }
+
+  async countSavedWorkflowsForUser(userId) {
+    return [...this.savedWorkflows.values()].filter(row => row.user_id === userId).length;
+  }
+
+  async listSavedWorkflowsForUser(userId, { limit = 50, offset = 0 } = {}) {
+    return clone([...this.savedWorkflows.values()]
+      .filter(row => row.user_id === userId)
+      .sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)) || String(b.id).localeCompare(String(a.id)))
+      .slice(offset, offset + limit));
+  }
+
+  async updateSavedWorkflow(id, patch) {
+    const row = this.savedWorkflows.get(id);
+    if (!row) throw notFound('Saved workflow not found');
+    Object.assign(row, clone(patch), { updated_at: patch.updated_at || nowIso() });
+    return clone(row);
+  }
+
+  async deleteSavedWorkflow(id) {
+    return this.savedWorkflows.delete(id);
   }
 
   async createAuditLog(row) {

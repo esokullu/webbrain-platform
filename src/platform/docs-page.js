@@ -496,6 +496,7 @@ export function docsPage() {
         <a href="#examples">Language examples</a>
         <a href="#downloads">Downloads</a>
         <a href="#runs">Runs</a>
+        <a href="#workflows">Workflows</a>
         <a href="#structured-output">Structured output</a>
         <a href="#statuses">Statuses</a>
         <a href="#agent-skill">Agent skill</a>
@@ -596,7 +597,9 @@ export function docsPage() {
           <table class="field-table">
             <thead><tr><th>Field</th><th>Required</th><th>Purpose</th></tr></thead>
             <tbody>
-              <tr><td><code>task</code></td><td>Yes</td><td>The natural-language browser task.</td></tr>
+              <tr><td><code>task</code></td><td>One of</td><td>The natural-language browser task. Supply exactly one of <code>task</code> and <code>workflow_id</code>.</td></tr>
+              <tr><td><code>workflow_id</code></td><td>One of</td><td>An owned saved workflow to replay.</td></tr>
+              <tr><td><code>parameters</code></td><td>Workflow only</td><td>Transient string values keyed by declared parameter ID.</td></tr>
               <tr><td><code>wait</code></td><td>No</td><td>Wait for a terminal response instead of returning immediately.</td></tr>
               <tr><td><code>timeout_ms</code></td><td>No</td><td>Maximum time for the blocking request path.</td></tr>
               <tr><td><code>tab_id</code></td><td>No</td><td>Target a specific tab. Otherwise the visible active page is used.</td></tr>
@@ -611,6 +614,20 @@ export function docsPage() {
             <div class="endpoint"><span class="method">POST</span><code>/api/browser-sessions/:sessionId/runs/:runId/abort</code><span>Abort a run.</span></div>
           </div>
           <p>Post a new <span class="inline-code">task</span> to <span class="inline-code">/messages</span> after a run is completed, failed, or aborted. WebBrain creates an immutable child run with <span class="inline-code">parent_run_id</span> and reuses the same tab and conversation, so the follow-up can continue on the current page or navigate elsewhere. Append later turns to the newest child. Use <span class="inline-code">/responses</span> only for a paused <span class="inline-code">needs_user_input</span> run.</p>
+        </section>
+
+        <section class="docs-section" id="workflows">
+          <p class="section-kicker">Repeat safely</p>
+          <h2>Compile and replay saved workflows</h2>
+          <p>Create a workflow from a completed successful cloud run with <span class="inline-code">POST /api/workflows</span> and <span class="inline-code">name</span>, <span class="inline-code">source_session_id</span>, and <span class="inline-code">source_run_id</span>. The response includes compiler warnings, the required start origin/path family, parameter descriptors, and a sanitized <span class="inline-code">webbrain-workflow/1</span> definition.</p>
+          <div class="endpoint-list">
+            <div class="endpoint"><span class="method">POST</span><code>/api/workflows</code><span>Compile and store an exact successful run trace.</span></div>
+            <div class="endpoint"><span class="method">GET</span><code>/api/workflows?limit=&amp;offset=</code><span>List workflow metadata.</span></div>
+            <div class="endpoint"><span class="method">GET</span><code>/api/workflows/:workflowId</code><span>Read metadata and the sanitized definition.</span></div>
+            <div class="endpoint"><span class="method">PATCH</span><code>/api/workflows/:workflowId</code><span>Rename a workflow.</span></div>
+            <div class="endpoint"><span class="method">DELETE</span><code>/api/workflows/:workflowId</code><span>Delete the definition while retaining historical runs.</span></div>
+          </div>
+          <p>Before replay, open a page matching the workflow's start URL family in a compatible login/profile. Start it with <span class="inline-code">workflow_id</span> and <span class="inline-code">parameters</span>; <span class="inline-code">output_schema</span> is not supported for workflow runs in v1. Parameter values are validated before dispatch and are never stored or returned. A pre-upgrade runtime returns <span class="inline-code">409</span> for workflow operations but remains usable for ordinary tasks.</p>
         </section>
 
         <section class="docs-section" id="structured-output">

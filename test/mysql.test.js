@@ -73,6 +73,13 @@ test('dashboard columns are present in fresh schema and existing-database migrat
   assert.match(storeSource, /async claimReadyWarmDroplet\(/);
   assert.match(storeSource, /ALTER TABLE cloud_runs ADD COLUMN parent_run_id VARCHAR\(40\) NULL AFTER user_id/);
   assert.match(storeSource, /ALTER TABLE cloud_runs ADD COLUMN tab_id BIGINT NULL AFTER parent_run_id/);
+  assert.match(schema, /workflow_id VARCHAR\(40\) NULL/);
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS saved_workflows/);
+  assert.match(schema, /definition JSON NOT NULL/);
+  assert.match(storeSource, /ALTER TABLE cloud_runs ADD COLUMN workflow_id VARCHAR\(40\) NULL AFTER user_id/);
+  assert.match(storeSource, /async createSavedWorkflow\(/);
+  assert.match(storeSource, /async listSavedWorkflowsForUser\(/);
+  assert.doesNotMatch(schema, /FOREIGN KEY \(workflow_id\)/);
   assert.match(storeSource, /CREATE UNIQUE INDEX idx_cloud_runs_parent_run ON cloud_runs \(parent_run_id\)/);
   assert.match(storeSource, /async listCloudRunsForUser\(/);
   assert.match(storeSource, /WHERE user_id = :userId/);

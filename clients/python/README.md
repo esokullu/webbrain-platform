@@ -143,7 +143,11 @@ run = client.create_run(
 - `reset_browser_session(session_id)`
 - `pause_browser_session(session_id)`
 - `resume_browser_session(session_id)`
+- `create_workflow(name, source_session_id, source_run_id)`
+- `list_workflows(...)` / `get_workflow(workflow_id)`
+- `rename_workflow(workflow_id, name)` / `delete_workflow(workflow_id)`
 - `create_run(session_id, task, ...)`
+- `create_workflow_run(session_id, workflow_id, parameters, ...)`
 - `get_run(session_id, run_id)`
 - `continue_run(session_id, run_id, task, ...)`
 - `respond_to_run(session_id, run_id, clarify_id, answer)`

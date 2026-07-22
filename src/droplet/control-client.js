@@ -144,6 +144,8 @@ export class DropletControlClient {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           task: payload.task,
+          workflow: payload.workflow,
+          parameters: payload.parameters,
           api_mutations_allowed: payload.api_mutations_allowed === true || payload.apiMutationsAllowed === true,
           output_schema: payload.output_schema ?? payload.outputSchema ?? null,
           ...(payload.capture === undefined ? {} : { capture: payload.capture }),
@@ -153,7 +155,21 @@ export class DropletControlClient {
           timeout_ms: payload.timeout_ms,
         }),
       });
-      if (!res.ok && res.status !== 202) throw new Error(`Sidecar run failed: ${res.status} ${await res.text()}`);
+      if (!res.ok && res.status !== 202) {
+        throw Object.assign(new Error(`Sidecar run failed: ${res.status} ${await res.text()}`), { status: res.status });
+      }
+      return await readJson(res);
+    }
+    if (action === 'workflow.compile') {
+      const runId = payload.run_id || payload.runId;
+      const res = await fetch(`${this.sidecarBase}/runs/${encodeURIComponent(runId)}/workflow`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: payload.name }),
+      });
+      if (!res.ok) {
+        throw Object.assign(new Error(`Sidecar workflow compile failed: ${res.status} ${await res.text()}`), { status: res.status });
+      }
       return await readJson(res);
     }
     if (action === 'health') {

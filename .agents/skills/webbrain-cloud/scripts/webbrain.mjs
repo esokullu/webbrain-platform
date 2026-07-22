@@ -28,6 +28,11 @@ Usage:
   webbrain.mjs upload-download SESSION_ID --file LOCAL_PATH [--remote REMOTE_NAME]
   webbrain.mjs download-file SESSION_ID --remote REMOTE_NAME --output LOCAL_PATH [--force]
   webbrain.mjs list-runs [--limit N] [--offset N]
+  webbrain.mjs list-workflows [--limit N] [--offset N]
+  webbrain.mjs create-workflow SOURCE_SESSION_ID SOURCE_RUN_ID --name TEXT
+  webbrain.mjs get-workflow|delete-workflow WORKFLOW_ID
+  webbrain.mjs rename-workflow WORKFLOW_ID --name TEXT
+  webbrain.mjs create-workflow-run SESSION_ID WORKFLOW_ID [--parameters JSON|@FILE] [--tab-id ID]
   webbrain.mjs create-run SESSION_ID --task TEXT|--task-file PATH [--schema JSON|@FILE] [--tab-id ID]
   webbrain.mjs get-run|wait-run SESSION_ID RUN_ID [--timeout-ms N] [--poll-ms N]
   webbrain.mjs continue-run SESSION_ID RUN_ID --task TEXT|--task-file PATH [--schema JSON|@FILE]
@@ -410,6 +415,40 @@ async function main() {
       const limit = integerOption(options, 'limit', 50, { min: 1, max: 100 });
       const offset = integerOption(options, 'offset', 0, { min: 0 });
       print(await api('GET', `/api/runs?limit=${limit}&offset=${offset}`));
+      break;
+    }
+    case 'list-workflows': {
+      const limit = integerOption(options, 'limit', 50, { min: 1, max: 100 });
+      const offset = integerOption(options, 'offset', 0, { min: 0 });
+      print(await api('GET', `/api/workflows?limit=${limit}&offset=${offset}`));
+      break;
+    }
+    case 'create-workflow':
+      print(await api('POST', '/api/workflows', {
+        name: required(options.name, '--name'),
+        source_session_id: required(sessionId, 'SOURCE_SESSION_ID'),
+        source_run_id: required(runId, 'SOURCE_RUN_ID'),
+      }));
+      break;
+    case 'get-workflow':
+      print((await api('GET', `/api/workflows/${encodeURIComponent(required(sessionId, 'WORKFLOW_ID'))}`)).workflow);
+      break;
+    case 'rename-workflow':
+      print((await api('PATCH', `/api/workflows/${encodeURIComponent(required(sessionId, 'WORKFLOW_ID'))}`, {
+        name: required(options.name, '--name'),
+      })).workflow);
+      break;
+    case 'delete-workflow':
+      await api('DELETE', `/api/workflows/${encodeURIComponent(required(sessionId, 'WORKFLOW_ID'))}`);
+      print({ deleted: true, workflow_id: sessionId });
+      break;
+    case 'create-workflow-run': {
+      const parameters = await jsonOption(options.parameters, '--parameters');
+      print(await api('POST', entityPath(sessionId, '/runs'), {
+        workflow_id: required(runId, 'WORKFLOW_ID'),
+        parameters: parameters ?? {},
+        ...(options['tab-id'] === undefined ? {} : { tab_id: options['tab-id'] }),
+      }));
       break;
     }
     case 'create-run':

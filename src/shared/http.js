@@ -42,6 +42,7 @@ export function publicRun(row) {
     run_id: row.id || row.run_id,
     status: row.status,
     session_id: row.browser_session_id || row.session_id,
+    workflow_id: row.workflow_id || row.workflowId || null,
     parent_run_id: row.parent_run_id || row.parentRunId || null,
     tab_id: row.tab_id ?? row.tabId ?? null,
     result: row.result ?? null,
@@ -60,6 +61,35 @@ export function publicRun(row) {
     created_at: row.created_at || null,
     updated_at: row.updated_at || null,
     completed_at: row.completed_at || null,
+  };
+}
+
+export function publicWorkflow(row, { includeDefinition = false } = {}) {
+  if (!row) return null;
+  const definition = row.definition && typeof row.definition === 'object' ? row.definition : {};
+  const parameters = Array.isArray(definition.parameters) ? definition.parameters : [];
+  const steps = Array.isArray(definition.steps) ? definition.steps : [];
+  return {
+    id: row.id,
+    name: row.name,
+    schema: row.schema_version || definition.schema || null,
+    start: {
+      origin: definition.start?.origin || '',
+      path_family: definition.start?.pathFamily || '/',
+    },
+    parameters: parameters.map(parameter => ({
+      id: parameter.id,
+      label: parameter.label || parameter.id,
+      required: parameter.required !== false,
+      sensitive: parameter.sensitive === true,
+      type: parameter.type || 'text',
+    })),
+    step_count: steps.length,
+    source_session_id: row.source_browser_session_id,
+    source_run_id: row.source_run_id,
+    created_at: row.created_at || null,
+    updated_at: row.updated_at || null,
+    ...(includeDefinition ? { definition } : {}),
   };
 }
 

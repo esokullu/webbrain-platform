@@ -471,6 +471,22 @@ Run request fields:
 Without `tab_id`, the API controls the visible active webpage. Navigation and
 page interaction are therefore observable in noVNC.
 
+### Saved workflows
+
+Compile a completed successful run with `POST /api/workflows` and a body of
+`{"name":"...","source_session_id":"...","source_run_id":"..."}`. List,
+read, rename, and delete owned definitions through `/api/workflows`; deleting a
+definition does not delete historical runs.
+
+Replay with `POST /api/browser-sessions/:sessionId/runs` and
+`{"workflow_id":"...","parameters":{"field":"new value"}}`. Supply exactly
+one of `task` and `workflow_id`. Workflow runs reject `output_schema` in v1.
+The target tab must already match the returned start origin/path family, and
+the target browser must have compatible login/profile state. Runtime parameter
+values are forwarded transiently and never stored in workflow, run, audit, or
+export records. Unsupported pre-upgrade runtimes return `409` for workflow
+operations while remaining available for ordinary runs.
+
 ### 3. Poll or wait for the result
 
 Poll an asynchronous run:

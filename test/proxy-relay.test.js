@@ -227,13 +227,27 @@ test('droplet control forwards run metadata and clarification responses', async 
     assert.equal(received[0].body.task, 'Open Google');
     assert.equal(received[0].body.api_mutations_allowed, true);
     assert.equal(received[0].body.parent_run_id, 'run_parent');
+    await client.handleCommand('run', {
+      workflow: { schema: 'webbrain-workflow/1', id: 'wfl_1' },
+      parameters: { email: 'runtime@example.com' },
+      tab_id: 7,
+    });
+    assert.equal(received[1].body.task, undefined);
+    assert.equal(received[1].body.workflow.id, 'wfl_1');
+    assert.deepEqual(received[1].body.parameters, { email: 'runtime@example.com' });
+    await client.handleCommand('workflow.compile', { run_id: 'run_source', name: 'Fill form' });
+    assert.deepEqual(received[2], {
+      method: 'POST',
+      url: '/runs/run_source/workflow',
+      body: { name: 'Fill form' },
+    });
     const resumed = await client.handleCommand('respond', {
       run_id: 'run_test',
       clarify_id: 'clr_1',
       answer: 'Continue',
     });
     assert.equal(resumed.status, 'running');
-    assert.deepEqual(received[1], {
+    assert.deepEqual(received[3], {
       method: 'POST',
       url: '/runs/run_test/responses',
       body: { clarify_id: 'clr_1', answer: 'Continue' },

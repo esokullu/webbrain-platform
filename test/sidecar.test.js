@@ -173,3 +173,68 @@ test('sidecar run lifecycle proxies cloud_run/status/abort to extension bridge',
 
   await sidecar.close();
 });
+
+test('sidecar negotiates workflow capability and uses distinct compile and replay actions', async () => {
+  const sidecar = createSidecarServer({ port: 0, requestTimeoutMs: 1000 });
+  const address = await sidecar.listen(0, '127.0.0.1');
+  const base = `http://127.0.0.1:${address.port}`;
+  const ws = new WebSocket(`ws://127.0.0.1:${address.port}/extension`);
+  const runtimeValue = 'runtime-only@example.com';
+  await new Promise(resolve => ws.once('open', resolve));
+  ws.on('message', raw => {
+    const msg = JSON.parse(raw.toString('utf8'));
+    if (msg.action === 'cloud_workflow_compile') {
+      assert.deepEqual(msg.payload, { runId: 'run_source', name: 'Fill form' });
+      ws.send(JSON.stringify({
+        id: msg.id,
+        ok: true,
+        result: { ok: true, workflow: { schema: 'webbrain-workflow/1', id: 'wfl_1' }, warnings: [] },
+      }));
+      return;
+    }
+    if (msg.action === 'cloud_workflow_run') {
+      assert.equal(msg.payload.parameters.email, runtimeValue);
+      assert.equal(msg.payload.workflow.id, 'wfl_1');
+      ws.send(JSON.stringify({
+        id: msg.id,
+        ok: true,
+        result: { runId: 'run_workflow', workflowId: 'wfl_1', status: 'running', tabId: 5 },
+      }));
+    }
+  });
+  ws.send(JSON.stringify({
+    type: 'hello',
+    client: 'webbrain-extension',
+    protocolVersion: 2,
+    capabilities: ['saved_workflows_v1'],
+  }));
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  const health = await request(base, '/healthz');
+  assert.equal(health.status, 200);
+  assert.equal(health.body.extension_protocol_version, 2);
+  assert.deepEqual(health.body.capabilities, ['saved_workflows_v1']);
+
+  const compiled = await request(base, '/runs/run_source/workflow', {
+    method: 'POST',
+    body: JSON.stringify({ name: 'Fill form' }),
+  });
+  assert.equal(compiled.status, 200);
+  assert.equal(compiled.body.workflow.id, 'wfl_1');
+
+  const started = await request(base, '/runs', {
+    method: 'POST',
+    body: JSON.stringify({
+      workflow: { schema: 'webbrain-workflow/1', id: 'wfl_1' },
+      parameters: { email: runtimeValue },
+      tab_id: 5,
+    }),
+  });
+  assert.equal(started.status, 202);
+  assert.equal(started.body.workflow_id, 'wfl_1');
+  assert.doesNotMatch(JSON.stringify(started.body), new RegExp(runtimeValue));
+  assert.doesNotMatch(JSON.stringify(sidecar.runs.get('run_workflow')), new RegExp(runtimeValue));
+
+  ws.close();
+  await sidecar.close();
+});

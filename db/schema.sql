@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS cloud_runs (
   id VARCHAR(40) PRIMARY KEY,
   browser_session_id VARCHAR(40) NOT NULL,
   user_id VARCHAR(40) NOT NULL,
+  workflow_id VARCHAR(40) NULL,
   parent_run_id VARCHAR(40) NULL,
   tab_id BIGINT NULL,
   task TEXT NOT NULL,
@@ -127,6 +128,20 @@ CREATE TABLE IF NOT EXISTS cloud_runs (
   FOREIGN KEY (browser_session_id) REFERENCES browser_sessions(id),
   FOREIGN KEY (user_id) REFERENCES users(id),
   UNIQUE INDEX idx_cloud_runs_parent_run (parent_run_id)
+);
+
+CREATE TABLE IF NOT EXISTS saved_workflows (
+  id VARCHAR(40) PRIMARY KEY,
+  user_id VARCHAR(40) NOT NULL,
+  name VARCHAR(120) NOT NULL,
+  schema_version VARCHAR(64) NOT NULL,
+  definition JSON NOT NULL,
+  source_browser_session_id VARCHAR(40) NOT NULL,
+  source_run_id VARCHAR(40) NOT NULL,
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id),
+  INDEX idx_saved_workflows_user_updated (user_id, updated_at, id)
 );
 
 CREATE TABLE IF NOT EXISTS audit_logs (

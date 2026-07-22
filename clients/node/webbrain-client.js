@@ -233,6 +233,34 @@ export class WebBrainClient {
     }
   }
 
+  async createWorkflow({ name, sourceSessionId, sourceRunId } = {}) {
+    if (!name) throw new TypeError('name is required');
+    if (!sourceSessionId) throw new TypeError('sourceSessionId is required');
+    if (!sourceRunId) throw new TypeError('sourceRunId is required');
+    return await this.request('POST', '/api/workflows', {
+      name,
+      source_session_id: sourceSessionId,
+      source_run_id: sourceRunId,
+    });
+  }
+
+  async listWorkflows({ limit = 50, offset = 0 } = {}) {
+    return await this.request('GET', `/api/workflows?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`);
+  }
+
+  async getWorkflow(workflowId) {
+    return (await this.request('GET', `/api/workflows/${encodeURIComponent(workflowId)}`)).workflow;
+  }
+
+  async renameWorkflow(workflowId, name) {
+    if (!name) throw new TypeError('name is required');
+    return (await this.request('PATCH', `/api/workflows/${encodeURIComponent(workflowId)}`, { name })).workflow;
+  }
+
+  async deleteWorkflow(workflowId) {
+    await this.request('DELETE', `/api/workflows/${encodeURIComponent(workflowId)}`);
+  }
+
   async createRun(sessionId, { task, wait = false, timeoutMs, tabId, outputSchema, capture } = {}) {
     if (!task) throw new TypeError('task is required');
     return await this.request('POST', `/api/browser-sessions/${encodeURIComponent(sessionId)}/runs`, {
@@ -241,6 +269,20 @@ export class WebBrainClient {
       ...(timeoutMs === undefined ? {} : { timeout_ms: timeoutMs }),
       ...(tabId === undefined ? {} : { tab_id: tabId }),
       ...(outputSchema === undefined ? {} : { output_schema: outputSchema }),
+      ...(capture === undefined ? {} : { capture }),
+    });
+  }
+
+  async createWorkflowRun(sessionId, workflowId, {
+    parameters = {}, wait = false, timeoutMs, tabId, capture,
+  } = {}) {
+    if (!workflowId) throw new TypeError('workflowId is required');
+    return await this.request('POST', `/api/browser-sessions/${encodeURIComponent(sessionId)}/runs`, {
+      workflow_id: workflowId,
+      parameters,
+      wait,
+      ...(timeoutMs === undefined ? {} : { timeout_ms: timeoutMs }),
+      ...(tabId === undefined ? {} : { tab_id: tabId }),
       ...(capture === undefined ? {} : { capture }),
     });
   }

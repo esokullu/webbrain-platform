@@ -786,6 +786,271 @@ test('platform auth, API keys, session ownership, run lifecycle, and abort', asy
   }
 });
 
+test('saved workflows enforce ownership, capability, pagination, ephemeral parameters, and deletion-safe history', async () => {
+  const ctx = await startPlatform();
+  let ws = null;
+  try {
+    const cookie = await register(ctx.base, 'workflow-owner@example.com');
+    const otherCookie = await register(ctx.base, 'workflow-other@example.com');
+    const user = await ctx.store.findUserByEmail('workflow-owner@example.com');
+    const now = new Date().toISOString();
+    await ctx.store.createBrowserSession({
+      id: 'bs_workflow',
+      user_id: user.id,
+      status: 'ready',
+      region: 'ams3',
+      size: 's-2vcpu-4gb',
+      profile_mode: 'persistent',
+      connect_secret: 'workflow-connect-secret',
+      created_at: now,
+      updated_at: now,
+    });
+    await ctx.store.createCloudRun({
+      id: 'run_source',
+      browser_session_id: 'bs_workflow',
+      user_id: user.id,
+      workflow_id: null,
+      parent_run_id: null,
+      tab_id: 17,
+      task: 'Fill the source form',
+      output_schema: null,
+      status: 'completed',
+      result: null,
+      summary: 'Done',
+      final_url: 'https://example.com/form',
+      error: '',
+      updates: [],
+      created_at: now,
+      updated_at: now,
+      completed_at: now,
+    });
+
+    let supportsWorkflows = false;
+    let compileCount = 0;
+    let runCount = 0;
+    let runtimeParameterValue = '';
+    ws = new WebSocket(`${ctx.wsBase}/droplet/control?session_token=${encodeURIComponent('workflow-connect-secret')}`);
+    await new Promise(resolve => ws.once('open', resolve));
+    ws.on('message', raw => {
+      const msg = JSON.parse(raw.toString('utf8'));
+      if (msg.type === 'hello') return;
+      if (msg.action === 'health') {
+        ws.send(JSON.stringify({
+          id: msg.id,
+          ok: true,
+          result: {
+            ok: true,
+            extension_connected: true,
+            capabilities: supportsWorkflows ? ['saved_workflows_v1'] : [],
+            extension_protocol_version: supportsWorkflows ? 2 : 1,
+          },
+        }));
+        return;
+      }
+      if (msg.action === 'workflow.compile') {
+        compileCount += 1;
+        assert.equal(msg.payload.run_id, 'run_source');
+        if (msg.payload.name === 'Empty workflow') {
+          ws.send(JSON.stringify({
+            id: msg.id,
+            ok: true,
+            result: { ok: false, status: 422, reason: 'no_replayable_steps', warnings: ['Nothing safe to replay.'] },
+          }));
+          return;
+        }
+        ws.send(JSON.stringify({
+          id: msg.id,
+          ok: true,
+          result: {
+            ok: true,
+            warnings: ['One unsupported read-only step was skipped.'],
+            workflow: {
+              schema: 'webbrain-workflow/1',
+              id: 'browser_local_id',
+              name: msg.payload.name,
+              createdAt: 1000,
+              updatedAt: 1000,
+              source: { runId: 'trace_exact' },
+              start: { origin: 'https://example.com', pathFamily: '/form' },
+              parameters: [{ id: 'email', label: 'Email', required: true, sensitive: false, type: 'text' }],
+              steps: [{
+                tool: 'set_field',
+                target: { role: 'textbox', label: 'Email' },
+                args: { text: { $workflowParam: 'email' }, clear: true },
+                expected: { kind: 'value' },
+              }],
+            },
+          },
+        }));
+        return;
+      }
+      if (msg.action === 'run') {
+        runCount += 1;
+        assert.equal(msg.payload.task, undefined);
+        assert.equal(msg.payload.workflow.schema, 'webbrain-workflow/1');
+        runtimeParameterValue = msg.payload.parameters.email;
+        ws.send(JSON.stringify({
+          id: msg.id,
+          ok: true,
+          result: {
+            run_id: `run_workflow_${runCount}`,
+            workflow_id: msg.payload.workflow.id,
+            status: 'running',
+            tab_id: 17,
+            updates: [],
+          },
+        }));
+        return;
+      }
+      if (msg.action === 'status') {
+        ws.send(JSON.stringify({
+          id: msg.id,
+          ok: true,
+          result: {
+            run_id: msg.payload.run_id,
+            status: 'completed',
+            tab_id: 17,
+            result: 'Workflow complete',
+            summary: 'Finished.',
+            final_url: 'https://example.com/form',
+            updates: [{ seq: 1, type: 'workflow_step', data: { args: { text: '[parameter]' } } }],
+            completed_at: new Date().toISOString(),
+          },
+        }));
+      }
+    });
+
+    const unsupported = await request(ctx.base, '/api/workflows', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ name: 'Fill form', source_session_id: 'bs_workflow', source_run_id: 'run_source' }),
+    });
+    assert.equal(unsupported.status, 409);
+    assert.equal(compileCount, 0);
+
+    supportsWorkflows = true;
+    const empty = await request(ctx.base, '/api/workflows', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ name: 'Empty workflow', source_session_id: 'bs_workflow', source_run_id: 'run_source' }),
+    });
+    assert.equal(empty.status, 422);
+    assert.equal(empty.body.reason, 'no_replayable_steps');
+
+    const created = await request(ctx.base, '/api/workflows', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ name: 'Fill form', source_session_id: 'bs_workflow', source_run_id: 'run_source' }),
+    });
+    assert.equal(created.status, 201);
+    assert.deepEqual(created.body.warnings, ['One unsupported read-only step was skipped.']);
+    assert.equal(created.body.workflow.start.path_family, '/form');
+    assert.equal(created.body.workflow.parameters[0].id, 'email');
+    assert.equal(created.body.workflow.definition.id, created.body.workflow.id);
+    const workflowId = created.body.workflow.id;
+
+    const duplicate = await request(ctx.base, '/api/workflows', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ name: 'Fill form', source_session_id: 'bs_workflow', source_run_id: 'run_source' }),
+    });
+    assert.equal(duplicate.status, 201);
+    assert.notEqual(duplicate.body.workflow.id, workflowId);
+
+    const listed = await request(ctx.base, '/api/workflows?limit=1&offset=0', { headers: { cookie } });
+    assert.equal(listed.status, 200);
+    assert.equal(listed.body.workflows.length, 1);
+    assert.equal(listed.body.has_more, true);
+    assert.equal(Object.hasOwn(listed.body.workflows[0], 'definition'), false);
+
+    const forbidden = await request(ctx.base, `/api/workflows/${workflowId}`, { headers: { cookie: otherCookie } });
+    assert.equal(forbidden.status, 404);
+    const renamed = await request(ctx.base, `/api/workflows/${workflowId}`, {
+      method: 'PATCH',
+      headers: { cookie },
+      body: JSON.stringify({ name: 'Fill contact form' }),
+    });
+    assert.equal(renamed.status, 200);
+    assert.equal(renamed.body.workflow.name, 'Fill contact form');
+    assert.equal(renamed.body.workflow.definition.name, 'Fill contact form');
+
+    const missingParameter = await request(ctx.base, '/api/browser-sessions/bs_workflow/runs', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ workflow_id: workflowId, parameters: {} }),
+    });
+    assert.equal(missingParameter.status, 400);
+    const unknownParameter = await request(ctx.base, '/api/browser-sessions/bs_workflow/runs', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ workflow_id: workflowId, parameters: { email: 'ok', extra: 'no' } }),
+    });
+    assert.equal(unknownParameter.status, 400);
+    const outputSchema = await request(ctx.base, '/api/browser-sessions/bs_workflow/runs', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ workflow_id: workflowId, parameters: { email: 'ok' }, output_schema: null }),
+    });
+    assert.equal(outputSchema.status, 400);
+    const oversizedParameter = await request(ctx.base, '/api/browser-sessions/bs_workflow/runs', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ workflow_id: workflowId, parameters: { email: 'x'.repeat(10_001) } }),
+    });
+    assert.equal(oversizedParameter.status, 400);
+    assert.equal(runCount, 0);
+
+    const secretValue = 'ephemeral-value@example.com';
+    const started = await request(ctx.base, '/api/browser-sessions/bs_workflow/runs', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ workflow_id: workflowId, parameters: { email: secretValue }, tab_id: 17 }),
+    });
+    assert.equal(started.status, 202);
+    assert.equal(started.body.workflow_id, workflowId);
+    assert.equal(runtimeParameterValue, secretValue);
+    assert.doesNotMatch(JSON.stringify(started.body), new RegExp(secretValue));
+
+    const completed = await request(ctx.base, '/api/browser-sessions/bs_workflow/runs/run_workflow_1', {
+      headers: { cookie },
+    });
+    assert.equal(completed.status, 200);
+    assert.equal(completed.body.status, 'completed');
+    assert.equal(completed.body.workflow_id, workflowId);
+    const exported = await request(ctx.base, '/api/browser-sessions/bs_workflow/runs/run_workflow_1/export', {
+      headers: { cookie },
+    });
+    assert.equal(exported.status, 200);
+    assert.equal(exported.body.run.workflow_id, workflowId);
+
+    const waited = await request(ctx.base, '/api/browser-sessions/bs_workflow/runs', {
+      method: 'POST',
+      headers: { cookie },
+      body: JSON.stringify({ workflow_id: workflowId, parameters: { email: 'second@example.com' }, wait: true }),
+    });
+    assert.equal(waited.status, 200);
+    assert.equal(waited.body.status, 'completed');
+    assert.equal(waited.body.workflow_id, workflowId);
+
+    const storedRun = await ctx.store.getCloudRun('run_workflow_1');
+    assert.equal(storedRun.workflow_id, workflowId);
+    assert.doesNotMatch(JSON.stringify(storedRun), new RegExp(secretValue));
+    assert.doesNotMatch(JSON.stringify(ctx.store.auditLogs), new RegExp(secretValue));
+    assert.doesNotMatch(JSON.stringify(exported.body), new RegExp(secretValue));
+
+    const deleted = await request(ctx.base, `/api/workflows/${workflowId}`, {
+      method: 'DELETE',
+      headers: { cookie },
+    });
+    assert.equal(deleted.status, 204);
+    assert.equal(await ctx.store.getSavedWorkflow(workflowId), null);
+    assert.equal((await ctx.store.getCloudRun('run_workflow_1')).workflow_id, workflowId);
+  } finally {
+    ws?.close();
+    await ctx.platform.close();
+  }
+});
+
 test('account settings securely update email and password', async () => {
   const ctx = await startPlatform();
   try {

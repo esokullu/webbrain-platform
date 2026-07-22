@@ -309,6 +309,37 @@ class WebBrainClient:
                 raise WebBrainApiError(f"Browser session {session_id} was not ready within {timeout} seconds", body=session)
             time.sleep(poll_interval)
 
+    def create_workflow(self, name: str, source_session_id: str, source_run_id: str):
+        if not name:
+            raise ValueError("name is required")
+        if not source_session_id:
+            raise ValueError("source_session_id is required")
+        if not source_run_id:
+            raise ValueError("source_run_id is required")
+        return self._request("POST", "/api/workflows", {
+            "name": name,
+            "source_session_id": source_session_id,
+            "source_run_id": source_run_id,
+        })
+
+    def list_workflows(self, *, limit: int = 50, offset: int = 0):
+        return self._request("GET", f"/api/workflows?limit={int(limit)}&offset={int(offset)}")
+
+    def get_workflow(self, workflow_id: str):
+        return self._request("GET", f"/api/workflows/{self._id(workflow_id)}")["workflow"]
+
+    def rename_workflow(self, workflow_id: str, name: str):
+        if not name:
+            raise ValueError("name is required")
+        return self._request(
+            "PATCH",
+            f"/api/workflows/{self._id(workflow_id)}",
+            {"name": name},
+        )["workflow"]
+
+    def delete_workflow(self, workflow_id: str):
+        self._request("DELETE", f"/api/workflows/{self._id(workflow_id)}")
+
     def create_run(
         self,
         session_id: str,
@@ -332,6 +363,32 @@ class WebBrainClient:
 
     def get_run(self, session_id: str, run_id: str):
         return self._request("GET", f"/api/browser-sessions/{self._id(session_id)}/runs/{self._id(run_id)}")
+
+    def create_workflow_run(
+        self,
+        session_id: str,
+        workflow_id: str,
+        parameters: Optional[Dict[str, str]] = None,
+        *,
+        wait: bool = False,
+        timeout_ms: Optional[int] = None,
+        tab_id: Optional[int] = None,
+        capture: Optional[str] = None,
+    ):
+        if not workflow_id:
+            raise ValueError("workflow_id is required")
+        body: Dict[str, Any] = {
+            "workflow_id": workflow_id,
+            "parameters": parameters or {},
+            "wait": wait,
+        }
+        if timeout_ms is not None:
+            body["timeout_ms"] = timeout_ms
+        if tab_id is not None:
+            body["tab_id"] = tab_id
+        if capture is not None:
+            body["capture"] = capture
+        return self._request("POST", f"/api/browser-sessions/{self._id(session_id)}/runs", body)
 
     def continue_run(
         self,

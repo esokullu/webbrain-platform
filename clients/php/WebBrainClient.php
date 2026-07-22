@@ -429,6 +429,45 @@ final class WebBrainClient
         } while (true);
     }
 
+    public function createWorkflow(string $name, string $sourceSessionId, string $sourceRunId): array
+    {
+        if ($name === '' || $sourceSessionId === '' || $sourceRunId === '') {
+            throw new InvalidArgumentException('name, sourceSessionId, and sourceRunId are required');
+        }
+        return $this->request('POST', '/api/workflows', [
+            'name' => $name,
+            'source_session_id' => $sourceSessionId,
+            'source_run_id' => $sourceRunId,
+        ]);
+    }
+
+    public function listWorkflows(int $limit = 50, int $offset = 0): array
+    {
+        return $this->request('GET', '/api/workflows?limit=' . $limit . '&offset=' . $offset);
+    }
+
+    public function getWorkflow(string $workflowId): array
+    {
+        return $this->request('GET', '/api/workflows/' . self::id($workflowId))['workflow'];
+    }
+
+    public function renameWorkflow(string $workflowId, string $name): array
+    {
+        if ($name === '') {
+            throw new InvalidArgumentException('name is required');
+        }
+        return $this->request(
+            'PATCH',
+            '/api/workflows/' . self::id($workflowId),
+            ['name' => $name],
+        )['workflow'];
+    }
+
+    public function deleteWorkflow(string $workflowId): void
+    {
+        $this->request('DELETE', '/api/workflows/' . self::id($workflowId));
+    }
+
     public function createRun(string $sessionId, string $task, array $options = []): array
     {
         if ($task === '') {
@@ -446,6 +485,28 @@ final class WebBrainClient
     public function getRun(string $sessionId, string $runId): array
     {
         return $this->request('GET', '/api/browser-sessions/' . self::id($sessionId) . '/runs/' . self::id($runId));
+    }
+
+    public function createWorkflowRun(
+        string $sessionId,
+        string $workflowId,
+        array $parameters = [],
+        array $options = [],
+    ): array {
+        if ($workflowId === '') {
+            throw new InvalidArgumentException('workflowId is required');
+        }
+        $body = [
+            'workflow_id' => $workflowId,
+            'parameters' => $parameters,
+            'wait' => $options['wait'] ?? false,
+        ];
+        foreach (['timeout_ms', 'tab_id', 'capture'] as $key) {
+            if (array_key_exists($key, $options)) {
+                $body[$key] = $options[$key];
+            }
+        }
+        return $this->request('POST', '/api/browser-sessions/' . self::id($sessionId) . '/runs', $body);
     }
 
     public function continueRun(string $sessionId, string $runId, string $task, array $options = []): array

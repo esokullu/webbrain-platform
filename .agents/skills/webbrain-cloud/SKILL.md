@@ -1,6 +1,6 @@
 ---
 name: webbrain-cloud
-description: "Use WebBrain Cloud to run browser automation through its REST API: create or reuse sessions, run and continue tasks, handle clarifications, transfer files, manage lifecycle, and verify results."
+description: "Use WebBrain Cloud to run browser automation through its REST API: create or reuse sessions, run and continue tasks, compile and replay saved workflows, handle clarifications, transfer files, manage lifecycle, and verify results."
 ---
 
 # Use WebBrain Cloud
@@ -73,6 +73,25 @@ Continue a finished run on the same tab and conversation by appending to the new
 node "$SKILL_DIR/scripts/webbrain.mjs" continue-run SESSION_ID LATEST_RUN_ID \
   --task "Now compare that with the previous page"
 ```
+
+## Compile and replay a saved workflow
+
+Compile only a completed successful run created on a browser that advertises saved-workflow support:
+
+```bash
+node "$SKILL_DIR/scripts/webbrain.mjs" create-workflow SOURCE_SESSION_ID SOURCE_RUN_ID \
+  --name "Submit contact form"
+```
+
+Read the returned start origin/path family and parameter descriptors. Open a compatible page in the target browser first, then supply only the declared parameter IDs:
+
+```bash
+node "$SKILL_DIR/scripts/webbrain.mjs" create-workflow-run TARGET_SESSION_ID WORKFLOW_ID \
+  --parameters '{"email":"new@example.com","message":"A new value"}'
+node "$SKILL_DIR/scripts/webbrain.mjs" wait-run TARGET_SESSION_ID RUN_ID
+```
+
+Treat parameter values as ephemeral secrets: pass them only in the run request, do not write them into task text, workflow names, logs, or tracked files. A `409` that says the runtime lacks workflow support means the browser must be recreated on an upgraded runtime; ordinary runs can still use that session. The target tab must already match the workflow's start URL family and use the intended login/profile state.
 
 ## Transfer files
 

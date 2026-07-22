@@ -76,6 +76,16 @@ export function normalizeCloudRun(row) {
   };
 }
 
+function normalizeSavedWorkflow(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    definition: parseJsonMaybe(row.definition),
+    created_at: fromMysqlDate(row.created_at),
+    updated_at: fromMysqlDate(row.updated_at),
+  };
+}
+
 export class MySqlStore {
   constructor(config) {
     this.config = config;
@@ -260,6 +270,7 @@ export class MySqlStore {
       await this.pool.query('ALTER TABLE cloud_runs ADD COLUMN updates JSON NULL AFTER error');
     }
     const runContinuationColumns = [
+      ['workflow_id', 'ALTER TABLE cloud_runs ADD COLUMN workflow_id VARCHAR(40) NULL AFTER user_id'],
       ['parent_run_id', 'ALTER TABLE cloud_runs ADD COLUMN parent_run_id VARCHAR(40) NULL AFTER user_id'],
       ['tab_id', 'ALTER TABLE cloud_runs ADD COLUMN tab_id BIGINT NULL AFTER parent_run_id'],
     ];
@@ -1023,10 +1034,11 @@ export class MySqlStore {
   async createCloudRun(row) {
     await this.pool.execute(
       `INSERT INTO cloud_runs
-       (id,browser_session_id,user_id,parent_run_id,tab_id,task,output_schema,status,result,summary,final_url,error,updates,created_at,updated_at,completed_at)
-       VALUES (:id,:browser_session_id,:user_id,:parent_run_id,:tab_id,:task,:output_schema,:status,:result,:summary,:final_url,:error,:updates,:created_at,:updated_at,:completed_at)`,
+       (id,browser_session_id,user_id,workflow_id,parent_run_id,tab_id,task,output_schema,status,result,summary,final_url,error,updates,created_at,updated_at,completed_at)
+       VALUES (:id,:browser_session_id,:user_id,:workflow_id,:parent_run_id,:tab_id,:task,:output_schema,:status,:result,:summary,:final_url,:error,:updates,:created_at,:updated_at,:completed_at)`,
       {
         ...row,
+        workflow_id: row.workflow_id || null,
         parent_run_id: row.parent_run_id || null,
         tab_id: row.tab_id ?? null,
         output_schema: encodeJson(row.output_schema),
@@ -1063,7 +1075,7 @@ export class MySqlStore {
     const safeLimit = Math.max(1, Math.min(101, Math.trunc(Number(limit) || 50)));
     const safeOffset = Math.max(0, Math.trunc(Number(offset) || 0));
     const [rows] = await this.pool.execute(
-      `SELECT id, browser_session_id, user_id, parent_run_id, tab_id, task, status, summary, final_url, error,
+      `SELECT id, browser_session_id, user_id, workflow_id, parent_run_id, tab_id, task, status, summary, final_url, error,
               COALESCE(JSON_LENGTH(updates), 0) AS update_count,
               created_at, updated_at, completed_at
        FROM cloud_runs
@@ -1090,6 +1102,69 @@ export class MySqlStore {
       { id, ...encoded }
     );
     return await this.getCloudRun(id);
+  }
+
+  async createSavedWorkflow(row) {
+    await this.pool.execute(
+      `INSERT INTO saved_workflows
+       (id,user_id,name,schema_version,definition,source_browser_session_id,source_run_id,created_at,updated_at)
+       VALUES (:id,:user_id,:name,:schema_version,:definition,:source_browser_session_id,:source_run_id,:created_at,:updated_at)`,
+      {
+        ...row,
+        definition: encodeJson(row.definition),
+        created_at: toMysqlDate(row.created_at),
+        updated_at: toMysqlDate(row.updated_at),
+      }
+    );
+    return await this.getSavedWorkflow(row.id);
+  }
+
+  async getSavedWorkflow(id) {
+    return normalizeSavedWorkflow(await this.queryOne(
+      'SELECT * FROM saved_workflows WHERE id = :id',
+      { id }
+    ));
+  }
+
+  async countSavedWorkflowsForUser(userId) {
+    const row = await this.queryOne(
+      'SELECT COUNT(*) AS total FROM saved_workflows WHERE user_id = :userId',
+      { userId }
+    );
+    return Number(row?.total || 0);
+  }
+
+  async listSavedWorkflowsForUser(userId, { limit = 50, offset = 0 } = {}) {
+    const safeLimit = Math.max(1, Math.min(101, Math.trunc(Number(limit) || 50)));
+    const safeOffset = Math.max(0, Math.trunc(Number(offset) || 0));
+    const [rows] = await this.pool.execute(
+      `SELECT * FROM saved_workflows
+       WHERE user_id = :userId
+       ORDER BY updated_at DESC, id DESC
+       LIMIT ${safeLimit} OFFSET ${safeOffset}`,
+      { userId }
+    );
+    return rows.map(normalizeSavedWorkflow);
+  }
+
+  async updateSavedWorkflow(id, patch) {
+    const encoded = { ...patch };
+    if ('definition' in encoded) encoded.definition = encodeJson(encoded.definition);
+    for (const key of ['created_at', 'updated_at']) {
+      if (encoded[key]) encoded[key] = toMysqlDate(encoded[key]);
+    }
+    const fields = Object.keys(encoded).filter(key => encoded[key] !== undefined);
+    if (!fields.length) return await this.getSavedWorkflow(id);
+    await this.pool.execute(
+      `UPDATE saved_workflows SET ${fields.map(key => `${key} = :${key}`).join(', ')} WHERE id = :id`,
+      { id, ...encoded }
+    );
+    return await this.getSavedWorkflow(id);
+  }
+
+  async deleteSavedWorkflow(id) {
+    const [result] = await this.pool.execute('DELETE FROM saved_workflows WHERE id = :id', { id });
+    return result.affectedRows > 0;
   }
 
   async createAuditLog(row) {

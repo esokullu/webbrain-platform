@@ -2,7 +2,7 @@ import express from 'express';
 import { readFileSync } from 'node:fs';
 import { randomId, randomSecret, nowIso, isoAfterMs } from '../shared/ids.js';
 import { hashPassword, verifyPassword, hashToken } from '../shared/crypto.js';
-import { publicBrowserSession, publicRun, jsonError } from '../shared/http.js';
+import { publicBrowserSession, publicRun, publicWorkflow, jsonError } from '../shared/http.js';
 import { signNoVncToken } from '../shared/novnc-token.js';
 import { instanceHostname } from './instance-proxy.js';
 import { docsPage } from './docs-page.js';
@@ -25,6 +25,12 @@ const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'aborted']);
 const EXPORTABLE_RUN_STATUSES = new Set(['completed', 'failed']);
 const TERMINAL_BROWSER_STATUSES = new Set(['destroyed']);
 const AUTO_TOP_UP_THRESHOLDS = new Set([500, 1000, 2500]);
+const SAVED_WORKFLOW_SCHEMA = 'webbrain-workflow/1';
+const SAVED_WORKFLOW_CAPABILITY = 'saved_workflows_v1';
+const MAX_SAVED_WORKFLOWS = 100;
+const MAX_WORKFLOW_STEPS = 100;
+const MAX_WORKFLOW_PARAMETERS = 50;
+const MAX_WORKFLOW_PARAMETER_VALUE_LENGTH = 10_000;
 const WEBBRAIN_AGENT_SKILL = readFileSync(
   new URL('../../.agents/skills/webbrain-cloud/SKILL.md', import.meta.url),
   'utf8',
@@ -66,6 +72,89 @@ function normalizeBrowserLifecycle(value) {
     throw Object.assign(new Error('Browser lifecycle must be `resumable`, `always_on`, or `ephemeral`'), { status: 400 });
   }
   return lifecycle;
+}
+
+function normalizeWorkflowName(value) {
+  const name = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (!name) throw Object.assign(new Error('`name` is required.'), { status: 400 });
+  if (name.length > 80) {
+    throw Object.assign(new Error('Workflow name must be 80 characters or fewer.'), { status: 400 });
+  }
+  return name;
+}
+
+function normalizeCompiledWorkflowDefinition(value, { id, name, now }) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw Object.assign(new Error('The browser returned an invalid workflow definition.'), { status: 409 });
+  }
+  const definition = JSON.parse(JSON.stringify(value));
+  if (definition.schema !== SAVED_WORKFLOW_SCHEMA) {
+    throw Object.assign(new Error('The browser returned an unsupported workflow definition.'), { status: 409 });
+  }
+  const steps = Array.isArray(definition.steps) ? definition.steps : [];
+  const parameters = Array.isArray(definition.parameters) ? definition.parameters : [];
+  if (!steps.length) {
+    throw Object.assign(new Error('No safe replayable steps were found.'), { status: 422 });
+  }
+  if (steps.length > MAX_WORKFLOW_STEPS || parameters.length > MAX_WORKFLOW_PARAMETERS) {
+    throw Object.assign(new Error('The compiled workflow exceeds WebBrain workflow limits.'), { status: 422 });
+  }
+  const origin = String(definition.start?.origin || '');
+  try {
+    const parsed = new URL(origin);
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.origin !== origin) throw new Error();
+  } catch {
+    throw Object.assign(new Error('The compiled workflow has an invalid start origin.'), { status: 409 });
+  }
+  const pathFamily = String(definition.start?.pathFamily || '');
+  if (!pathFamily.startsWith('/')) {
+    throw Object.assign(new Error('The compiled workflow has an invalid start path family.'), { status: 409 });
+  }
+  const parameterIds = new Set();
+  for (const parameter of parameters) {
+    const parameterId = String(parameter?.id || '');
+    if (!parameterId || parameterIds.has(parameterId)) {
+      throw Object.assign(new Error('The compiled workflow has invalid parameter descriptors.'), { status: 409 });
+    }
+    parameterIds.add(parameterId);
+  }
+  definition.id = id;
+  definition.name = name;
+  definition.updatedAt = now;
+  return definition;
+}
+
+function validateWorkflowParameters(definition, value) {
+  const input = value ?? {};
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw Object.assign(new Error('`parameters` must be an object.'), { status: 400 });
+  }
+  const descriptors = new Map(
+    (Array.isArray(definition?.parameters) ? definition.parameters : [])
+      .map(parameter => [String(parameter.id || ''), parameter])
+  );
+  const normalized = Object.create(null);
+  for (const [id, parameterValue] of Object.entries(input)) {
+    if (!descriptors.has(id)) {
+      throw Object.assign(new Error(`Unknown workflow parameter: ${id}`), { status: 400 });
+    }
+    if (typeof parameterValue !== 'string') {
+      throw Object.assign(new Error(`Workflow parameter ${id} must be a string.`), { status: 400 });
+    }
+    if (parameterValue.length > MAX_WORKFLOW_PARAMETER_VALUE_LENGTH) {
+      throw Object.assign(
+        new Error(`Workflow parameter ${id} exceeds ${MAX_WORKFLOW_PARAMETER_VALUE_LENGTH} characters.`),
+        { status: 400 }
+      );
+    }
+    normalized[id] = parameterValue;
+  }
+  for (const [id, descriptor] of descriptors) {
+    if (descriptor.required !== false && !Object.hasOwn(normalized, id)) {
+      throw Object.assign(new Error(`Missing workflow parameter: ${id}`), { status: 400 });
+    }
+  }
+  return normalized;
 }
 
 function browserLifecycleFromRequest(body) {
@@ -3680,6 +3769,7 @@ function escapeHtml(value) {
 function normalizeRunSnapshot(snapshot, existing = {}) {
   return {
     status: snapshot.status || existing.status,
+    workflow_id: snapshot.workflow_id || snapshot.workflowId || existing.workflow_id || null,
     parent_run_id: snapshot.parent_run_id || snapshot.parentRunId || existing.parent_run_id || null,
     tab_id: snapshot.tab_id ?? snapshot.tabId ?? existing.tab_id ?? null,
     result: snapshot.result ?? existing.result ?? null,
@@ -3696,6 +3786,7 @@ function normalizeRunSnapshot(snapshot, existing = {}) {
 export function createPlatformApp({ store, provisioner, controlChannel, config, downloadsHandler = null, warmPool = null }) {
   const app = express();
   const browserLifecycleOperations = new Set();
+  const workflowCreateOperations = new Set();
   const billingPackages = new Map(DEFAULT_CREDIT_PACKAGES.map(item => [item.amountCents, item]));
   const unlimitedBillingEmails = new Set(config.billing?.unlimitedEmails || []);
 
@@ -3910,14 +4001,15 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
     return () => browserLifecycleOperations.delete(sessionId);
   }
 
-  async function startStoredCloudRun(req, session, task, parentRun = null) {
-    const outputSchema = req.body.output_schema ?? req.body.outputSchema ?? null;
+  async function startStoredCloudRun(req, session, task, parentRun = null, workflow = null, parameters = null) {
+    const outputSchema = workflow ? null : (req.body.output_schema ?? req.body.outputSchema ?? null);
     const requestedCapture = req.body.capture;
     if (requestedCapture !== undefined && !['none', 'video'].includes(requestedCapture)) {
       throw Object.assign(new Error('`capture` must be `none` or `video`.'), { status: 400 });
     }
     const started = await controlChannel.send(session.id, 'run', {
-      task,
+      task: workflow ? undefined : task,
+      ...(workflow ? { workflow: workflow.definition, parameters } : {}),
       api_mutations_allowed: true,
       output_schema: outputSchema,
       ...(requestedCapture === undefined ? {} : { capture: requestedCapture }),
@@ -3931,6 +4023,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       id: started.run_id || started.runId,
       browser_session_id: session.id,
       user_id: req.auth.user.id,
+      workflow_id: workflow?.id || started.workflow_id || started.workflowId || null,
       parent_run_id: parentRun?.id || null,
       tab_id: started.tab_id ?? started.tabId ?? (parentRun
         ? (parentRun.tab_id ?? null)
@@ -4455,6 +4548,163 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
     res.json({ ok: true });
   });
 
+  app.post('/api/workflows', requireAuth, async (req, res, next) => {
+    const userId = req.auth.user.id;
+    if (workflowCreateOperations.has(userId)) {
+      return jsonError(res, 409, 'Another workflow is currently being compiled for this account.');
+    }
+    workflowCreateOperations.add(userId);
+    try {
+      const name = normalizeWorkflowName(req.body.name);
+      const sourceSessionId = String(req.body.source_session_id || '').trim();
+      const sourceRunId = String(req.body.source_run_id || '').trim();
+      if (!sourceSessionId) return jsonError(res, 400, '`source_session_id` is required.');
+      if (!sourceRunId) return jsonError(res, 400, '`source_run_id` is required.');
+      if (await store.countSavedWorkflowsForUser(req.auth.user.id) >= MAX_SAVED_WORKFLOWS) {
+        return jsonError(res, 409, `An account can store at most ${MAX_SAVED_WORKFLOWS} workflows.`);
+      }
+
+      const session = await store.getBrowserSession(sourceSessionId);
+      const sourceRun = await store.getCloudRun(sourceRunId);
+      if (!session || session.user_id !== req.auth.user.id
+          || !sourceRun || sourceRun.user_id !== req.auth.user.id
+          || sourceRun.browser_session_id !== session.id) {
+        return jsonError(res, 404, 'Source cloud run not found.');
+      }
+      if (sourceRun.workflow_id) {
+        return jsonError(res, 422, 'A saved workflow run cannot be compiled into another workflow.');
+      }
+      if (sourceRun.status !== 'completed') {
+        return jsonError(res, 409, 'The source cloud run must be completed successfully.');
+      }
+
+      const runtime = await browserRuntimeState(session);
+      if (!runtime.runtime_ready) {
+        return jsonError(res, 409, 'The source browser runtime or trace is unavailable.', runtime);
+      }
+      if (!runtime.capabilities.includes(SAVED_WORKFLOW_CAPABILITY)) {
+        return jsonError(
+          res,
+          409,
+          'The source browser runtime does not support saved workflows; recreate it on the upgraded runtime.',
+          runtime
+        );
+      }
+
+      const compiled = await controlChannel.send(session.id, 'workflow.compile', {
+        run_id: sourceRun.id,
+        name,
+      });
+      if (compiled?.ok !== true || !compiled.workflow) {
+        const reason = String(compiled?.reason || 'workflow_compilation_failed');
+        const status = reason === 'no_replayable_steps' || compiled?.status === 422 ? 422 : 409;
+        const message = status === 422
+          ? 'No safe replayable steps were found in the source run.'
+          : `The source runtime could not compile this workflow (${reason}).`;
+        return jsonError(res, status, message, { reason, warnings: compiled?.warnings || [] });
+      }
+
+      const id = randomId('wfl');
+      const now = nowIso();
+      const definition = normalizeCompiledWorkflowDefinition(compiled.workflow, {
+        id,
+        name,
+        now: Date.parse(now),
+      });
+      const workflow = await store.createSavedWorkflow({
+        id,
+        user_id: req.auth.user.id,
+        name,
+        schema_version: SAVED_WORKFLOW_SCHEMA,
+        definition,
+        source_browser_session_id: session.id,
+        source_run_id: sourceRun.id,
+        created_at: now,
+        updated_at: now,
+      });
+      await audit(req, 'saved_workflow.create', 'saved_workflow', workflow.id, {
+        source_browser_session_id: session.id,
+        source_run_id: sourceRun.id,
+        step_count: definition.steps.length,
+        parameter_count: definition.parameters.length,
+      });
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.status(201).json({
+        workflow: publicWorkflow(workflow, { includeDefinition: true }),
+        warnings: Array.isArray(compiled.warnings) ? compiled.warnings : [],
+      });
+    } catch (error) {
+      next(error);
+    } finally {
+      workflowCreateOperations.delete(userId);
+    }
+  });
+
+  app.get('/api/workflows', requireAuth, async (req, res, next) => {
+    try {
+      const limit = Math.max(1, Math.min(100, Math.trunc(Number(req.query.limit) || 50)));
+      const offset = Math.max(0, Math.trunc(Number(req.query.offset) || 0));
+      const rows = await store.listSavedWorkflowsForUser(req.auth.user.id, { limit: limit + 1, offset });
+      const hasMore = rows.length > limit;
+      const workflows = rows.slice(0, limit).map(row => publicWorkflow(row));
+      res.json({
+        workflows,
+        has_more: hasMore,
+        next_offset: hasMore ? offset + workflows.length : null,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/api/workflows/:workflowId', requireAuth, async (req, res, next) => {
+    try {
+      const workflow = await store.getSavedWorkflow(req.params.workflowId);
+      if (!workflow || workflow.user_id !== req.auth.user.id) {
+        return jsonError(res, 404, 'Saved workflow not found.');
+      }
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.json({ workflow: publicWorkflow(workflow, { includeDefinition: true }) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.patch('/api/workflows/:workflowId', requireAuth, async (req, res, next) => {
+    try {
+      const workflow = await store.getSavedWorkflow(req.params.workflowId);
+      if (!workflow || workflow.user_id !== req.auth.user.id) {
+        return jsonError(res, 404, 'Saved workflow not found.');
+      }
+      const name = normalizeWorkflowName(req.body.name);
+      const now = nowIso();
+      const definition = {
+        ...workflow.definition,
+        name,
+        updatedAt: Date.parse(now),
+      };
+      const updated = await store.updateSavedWorkflow(workflow.id, { name, definition, updated_at: now });
+      await audit(req, 'saved_workflow.rename', 'saved_workflow', workflow.id);
+      res.json({ workflow: publicWorkflow(updated, { includeDefinition: true }) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete('/api/workflows/:workflowId', requireAuth, async (req, res, next) => {
+    try {
+      const workflow = await store.getSavedWorkflow(req.params.workflowId);
+      if (!workflow || workflow.user_id !== req.auth.user.id) {
+        return jsonError(res, 404, 'Saved workflow not found.');
+      }
+      await store.deleteSavedWorkflow(workflow.id);
+      await audit(req, 'saved_workflow.delete', 'saved_workflow', workflow.id);
+      res.status(204).end();
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get('/api/browser-sessions', requireAuth, async (req, res) => {
     const sessions = await store.listBrowserSessions(req.auth.user.id);
     const refreshed = await Promise.all(sessions.map(session => refreshProvisioningSession(session)));
@@ -4805,7 +5055,12 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
   async function browserRuntimeState(session) {
     const dropletConnected = controlChannel.isConnected(session.id);
     if (!dropletConnected) {
-      return { droplet_connected: false, extension_connected: false, runtime_ready: false };
+      return {
+        droplet_connected: false,
+        extension_connected: false,
+        runtime_ready: false,
+        capabilities: [],
+      };
     }
     const health = await controlChannel.send(session.id, 'health', {}, 2000).catch(() => null);
     const extensionConnected = health?.extension_connected === true;
@@ -4813,6 +5068,8 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       droplet_connected: true,
       extension_connected: extensionConnected,
       runtime_ready: extensionConnected,
+      capabilities: Array.isArray(health?.capabilities) ? health.capabilities : [],
+      extension_protocol_version: health?.extension_protocol_version || null,
       error: health?.error || null,
     };
   }
@@ -5363,7 +5620,22 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       const session = await ownedBrowserSession(req, res);
       if (!session) return;
       const task = String(req.body.task || '').trim();
-      if (!task) return jsonError(res, 400, '`task` is required');
+      const workflowId = String(req.body.workflow_id || '').trim();
+      if ((task ? 1 : 0) + (workflowId ? 1 : 0) !== 1) {
+        return jsonError(res, 400, 'Provide exactly one of `task` or `workflow_id`.');
+      }
+      let workflow = null;
+      let parameters = null;
+      if (workflowId) {
+        if (Object.hasOwn(req.body, 'output_schema') || Object.hasOwn(req.body, 'outputSchema')) {
+          return jsonError(res, 400, '`output_schema` is not supported for workflow runs in v1.');
+        }
+        workflow = await store.getSavedWorkflow(workflowId);
+        if (!workflow || workflow.user_id !== req.auth.user.id) {
+          return jsonError(res, 404, 'Saved workflow not found.');
+        }
+        parameters = validateWorkflowParameters(workflow.definition, req.body.parameters);
+      }
       const runtime = await browserRuntimeState(session);
       const latestSession = await store.getBrowserSession(session.id);
       if (latestSession?.status !== 'ready') {
@@ -5372,8 +5644,21 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       if (!runtime.runtime_ready) {
         return jsonError(res, 409, 'WebBrain browser runtime is not ready; the extension bridge is not connected.', runtime);
       }
-      let run = await startStoredCloudRun(req, session, task);
-      await audit(req, 'cloud_run.create', 'cloud_run', run.id, { browser_session_id: session.id });
+      if (workflow && !runtime.capabilities.includes(SAVED_WORKFLOW_CAPABILITY)) {
+        return jsonError(
+          res,
+          409,
+          'This browser runtime does not support saved workflows; recreate it on the upgraded runtime.',
+          runtime
+        );
+      }
+      const storedTask = workflow ? `Run saved workflow: ${workflow.name}` : task;
+      let run = await startStoredCloudRun(req, session, storedTask, null, workflow, parameters);
+      await audit(req, 'cloud_run.create', 'cloud_run', run.id, {
+        browser_session_id: session.id,
+        workflow_id: workflow?.id || null,
+        parameter_count: workflow ? Object.keys(parameters).length : 0,
+      });
       if (!req.body.wait) return res.status(202).json(publicRun(run));
 
       run = await waitForRun({ run, session, store, controlChannel, config, timeoutMs: req.body.timeout_ms });
@@ -5392,6 +5677,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
       const runs = rows.slice(0, limit).map(run => ({
         run_id: run.id,
         session_id: run.browser_session_id,
+        workflow_id: run.workflow_id || null,
         parent_run_id: run.parent_run_id || null,
         tab_id: run.tab_id ?? null,
         task: run.task || '',
@@ -5450,6 +5736,7 @@ export function createPlatformApp({ store, provisioner, controlChannel, config, 
         run: {
           run_id: run.id,
           session_id: run.browser_session_id,
+          workflow_id: run.workflow_id || null,
           parent_run_id: run.parent_run_id || null,
           tab_id: run.tab_id ?? null,
           task: run.task || '',

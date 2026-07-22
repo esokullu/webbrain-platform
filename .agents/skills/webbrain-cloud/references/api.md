@@ -55,14 +55,16 @@ Create with `POST /api/browser-sessions/:sessionId/runs`:
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `task` | yes | Natural-language browser objective. |
+| `task` | one of | Natural-language browser objective. Exactly one of `task` and `workflow_id` is required. |
+| `workflow_id` | one of | Owned saved workflow to replay. Exactly one of `task` and `workflow_id` is required. |
+| `parameters` | workflow only | String values keyed by declared workflow parameter ID. Values are transient and are never stored or returned. |
 | `wait` | no | Block until terminal or user input instead of returning `202`. |
 | `timeout_ms` | no | Blocking-path timeout. Client-side polling remains preferable for long agent tasks. |
 | `tab_id` | no | Target a specific tab; otherwise use the active page. |
 | `output_schema` | no | Request validated structured JSON. |
 | `capture` | no | `video` records the run to Downloads as `webbrain-ci-<run_id>.webm`; `none` is the default. |
 
-The public run includes `run_id`, `session_id`, `parent_run_id`, `tab_id`, `status`, `result`, `summary`, `final_url`, `error`, `pending_input`, `updates`, and timestamps.
+The public run includes `run_id`, `session_id`, nullable `workflow_id`, `parent_run_id`, `tab_id`, `status`, `result`, `summary`, `final_url`, `error`, `pending_input`, `updates`, and timestamps. Workflow runs do not accept `output_schema` in v1.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
@@ -75,6 +77,30 @@ The public run includes `run_id`, `session_id`, `parent_run_id`, `tab_id`, `stat
 | `GET` | `/api/browser-sessions/:sessionId/runs/:runId/export` | Download a trace for a completed or failed run. |
 
 Statuses are `running`, `needs_user_input`, `completed`, `failed`, `aborting`, and `aborted`. Polling should return on `needs_user_input` as well as terminal states. A run can be continued only after it finishes, and each run can have at most one direct child; append the next turn to the newest child.
+
+## Saved workflows
+
+`POST /api/workflows` compiles one completed successful cloud run:
+
+```json
+{
+  "name": "Submit contact form",
+  "source_session_id": "brw_...",
+  "source_run_id": "run_..."
+}
+```
+
+The create response contains `workflow` plus compiler `warnings`. Workflow metadata includes its start `origin` and `path_family`, parameter descriptors, step count, source IDs, and timestamps. `GET /api/workflows/:workflowId` additionally returns the complete sanitized `webbrain-workflow/1` definition. Names need not be unique.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/workflows` | Compile and save a successful owned cloud run. |
+| `GET` | `/api/workflows?limit=50&offset=0` | List owned workflow metadata without step definitions. |
+| `GET` | `/api/workflows/:workflowId` | Read metadata and the sanitized definition. |
+| `PATCH` | `/api/workflows/:workflowId` | Rename with `{ "name": "..." }`. |
+| `DELETE` | `/api/workflows/:workflowId` | Delete the definition without deleting historical runs. |
+
+Compilation returns `409` when the source runtime, exact trace, or capability is unavailable and `422` when no safe replayable steps exist. Replay requires an upgraded target runtime, a current tab matching the start URL family, and compatible login/profile state. Unknown or missing parameters are rejected before dispatch; each value is limited to 10,000 characters. Ambiguous targets and uncertain outcomes fail closed, with only the engine's parameter-free safe fallback available.
 
 For `needs_user_input`, pass this body to `/responses`:
 
@@ -133,6 +159,10 @@ list-downloads SESSION_ID [--path REMOTE_DIRECTORY]
 upload-download SESSION_ID --file LOCAL_PATH [--remote REMOTE_NAME]
 download-file SESSION_ID --remote REMOTE_NAME --output LOCAL_PATH [--force]
 list-runs [--limit N] [--offset N]
+list-workflows [--limit N] [--offset N]
+create-workflow SOURCE_SESSION_ID SOURCE_RUN_ID --name TEXT
+get-workflow WORKFLOW_ID | rename-workflow WORKFLOW_ID --name TEXT | delete-workflow WORKFLOW_ID
+create-workflow-run SESSION_ID WORKFLOW_ID [--parameters JSON|@FILE] [--tab-id ID]
 create-run SESSION_ID --task TEXT|--task-file PATH [--schema JSON|@FILE] [--tab-id ID]
 get-run SESSION_ID RUN_ID
 wait-run SESSION_ID RUN_ID [--timeout-ms N] [--poll-ms N]

@@ -11,7 +11,7 @@ Small, dependency-free clients for the browser automation API at
 
 Each client supports browser-session creation, force reset, pause, resume, and deletion, readiness polling,
 startup and live proxy assignment, run creation and polling, structured output,
-finished-run follow-up turns, aborting, signed noVNC links, and private
+saved-workflow CRUD and replay, finished-run follow-up turns, aborting, signed noVNC links, and private
 Downloads access that remains available while browsers are paused.
 All three clients also provide streaming Downloads listing, upload, full-file
 download, and byte-range download helpers, with collision-safe server naming

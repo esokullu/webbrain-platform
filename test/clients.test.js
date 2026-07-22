@@ -301,6 +301,62 @@ test('Node.js client sends authenticated session and run requests', async () => 
   }
 });
 
+test('Node.js client exposes workflow CRUD and createWorkflowRun without output schemas', async () => {
+  const requests = [];
+  const client = new WebBrainClient({
+    apiKey: 'wbp_test',
+    baseUrl: 'https://api.example.test',
+    fetchImpl: async (url, options) => {
+      const pathName = new URL(url).pathname + new URL(url).search;
+      const body = options.body ? JSON.parse(options.body) : null;
+      requests.push({ method: options.method, path: pathName, body });
+      if (options.method === 'DELETE') return new Response(null, { status: 204 });
+      if (pathName === '/api/workflows' && options.method === 'POST') {
+        return Response.json({ workflow: { id: 'wfl_1', name: body.name }, warnings: [] }, { status: 201 });
+      }
+      if (pathName.startsWith('/api/workflows?')) {
+        return Response.json({ workflows: [{ id: 'wfl_1' }], has_more: false, next_offset: null });
+      }
+      if (pathName === '/api/workflows/wfl_1' && options.method === 'PATCH') {
+        return Response.json({ workflow: { id: 'wfl_1', name: body.name } });
+      }
+      if (pathName === '/api/workflows/wfl_1') {
+        return Response.json({ workflow: { id: 'wfl_1', definition: { schema: 'webbrain-workflow/1' } } });
+      }
+      if (pathName === '/api/browser-sessions/bs_1/runs') {
+        return Response.json({ run_id: 'run_1', workflow_id: body.workflow_id, status: 'running' }, { status: 202 });
+      }
+      return Response.json({ error: 'Not found' }, { status: 404 });
+    },
+  });
+
+  await client.createWorkflow({ name: 'Fill form', sourceSessionId: 'bs_source', sourceRunId: 'run_source' });
+  await client.listWorkflows({ limit: 10, offset: 2 });
+  await client.getWorkflow('wfl_1');
+  await client.renameWorkflow('wfl_1', 'Renamed');
+  await client.createWorkflowRun('bs_1', 'wfl_1', {
+    parameters: { email: 'runtime@example.com' },
+    tabId: 9,
+    wait: true,
+  });
+  await client.deleteWorkflow('wfl_1');
+
+  assert.deepEqual(requests[0].body, {
+    name: 'Fill form',
+    source_session_id: 'bs_source',
+    source_run_id: 'run_source',
+  });
+  assert.equal(requests[1].path, '/api/workflows?limit=10&offset=2');
+  const workflowRun = requests.find(item => item.path === '/api/browser-sessions/bs_1/runs');
+  assert.deepEqual(workflowRun.body, {
+    workflow_id: 'wfl_1',
+    parameters: { email: 'runtime@example.com' },
+    wait: true,
+    tab_id: 9,
+  });
+  assert.equal(Object.hasOwn(workflowRun.body, 'output_schema'), false);
+});
+
 test('PHP client preserves the non-secret WebBrain config result when PHP is installed', async t => {
   if (!await runtimeAvailable('php', '-v')) return t.skip('PHP is not installed');
   const server = http.createServer(async (req, res) => {
@@ -481,10 +537,10 @@ echo json_encode(['uploaded' => $uploaded, 'names' => array_column($listing['ent
 test('Python and PHP clients expose the shared browser automation operations', async () => {
   const python = await readFile(new URL('../clients/python/webbrain_client.py', import.meta.url), 'utf8');
   const php = await readFile(new URL('../clients/php/WebBrainClient.php', import.meta.url), 'utf8');
-  for (const method of ['create_browser_session', 'update_browser_session', 'reset_browser_session', 'pause_browser_session', 'resume_browser_session', 'get_browser_proxy', 'update_browser_proxy', 'delete_browser_proxy', 'create_downloads_access', 'list_downloads', 'upload_downloads_file', 'download_downloads_file', 'wait_for_browser_session', 'create_run', 'get_run', 'continue_run', 'respond_to_run', 'abort_run', 'wait_for_run']) {
+  for (const method of ['create_browser_session', 'update_browser_session', 'reset_browser_session', 'pause_browser_session', 'resume_browser_session', 'get_browser_proxy', 'update_browser_proxy', 'delete_browser_proxy', 'create_downloads_access', 'list_downloads', 'upload_downloads_file', 'download_downloads_file', 'wait_for_browser_session', 'create_workflow', 'list_workflows', 'get_workflow', 'rename_workflow', 'delete_workflow', 'create_run', 'create_workflow_run', 'get_run', 'continue_run', 'respond_to_run', 'abort_run', 'wait_for_run']) {
     assert.match(python, new RegExp(`def ${method}\\(`));
   }
-  for (const method of ['createBrowserSession', 'updateBrowserSession', 'resetBrowserSession', 'pauseBrowserSession', 'resumeBrowserSession', 'getBrowserProxy', 'updateBrowserProxy', 'deleteBrowserProxy', 'createDownloadsAccess', 'listDownloads', 'uploadDownloadsFile', 'downloadDownloadsFile', 'waitForBrowserSession', 'createRun', 'getRun', 'continueRun', 'respondToRun', 'abortRun', 'waitForRun']) {
+  for (const method of ['createBrowserSession', 'updateBrowserSession', 'resetBrowserSession', 'pauseBrowserSession', 'resumeBrowserSession', 'getBrowserProxy', 'updateBrowserProxy', 'deleteBrowserProxy', 'createDownloadsAccess', 'listDownloads', 'uploadDownloadsFile', 'downloadDownloadsFile', 'waitForBrowserSession', 'createWorkflow', 'listWorkflows', 'getWorkflow', 'renameWorkflow', 'deleteWorkflow', 'createRun', 'createWorkflowRun', 'getRun', 'continueRun', 'respondToRun', 'abortRun', 'waitForRun']) {
     assert.match(php, new RegExp(`function ${method}\\(`));
   }
   assert.match(python, /Authorization.*Bearer/);
