@@ -6,7 +6,7 @@ import { publicBrowserSession, publicRun, publicWorkflow, jsonError } from '../s
 import { signNoVncToken } from '../shared/novnc-token.js';
 import { instanceHostname } from './instance-proxy.js';
 import { docsPage } from './docs-page.js';
-import { normalizeProxyUrl, publicProxyEndpoint, publicProxyState } from '../shared/proxy.js';
+import { normalizeProxyUrl, resolveConfiguredProxyUrl, publicProxyEndpoint, publicProxyState } from '../shared/proxy.js';
 import { DEFAULT_DOWNLOADS_UPLOAD_LIMIT_BYTES, downloadsAccessCredentials } from '../shared/downloads-access.js';
 import { DEFAULT_CREDIT_PACKAGES, pricingPage } from './pricing-page.js';
 import {
@@ -162,6 +162,7 @@ function configuredBrowserProxyUrl(body, config, { defaultToConfigured = true } 
       { status: 400 }
     );
   }
+  const location = body?.proxy_country || body?.proxy_region || null;
   if (Object.prototype.hasOwnProperty.call(body, 'proxy_enabled')) {
     if (typeof body.proxy_enabled !== 'boolean') {
       throw Object.assign(new Error('`proxy_enabled` must be a boolean'), { status: 400 });
@@ -170,11 +171,11 @@ function configuredBrowserProxyUrl(body, config, { defaultToConfigured = true } 
       if (!config.browserProxy.url) {
         throw Object.assign(new Error('Configured browser proxy is unavailable.'), { status: 503 });
       }
-      return normalizeProxyUrl(config.browserProxy.url);
+      return resolveConfiguredProxyUrl(config.browserProxy.url, location);
     }
     return '';
   }
-  return defaultToConfigured ? normalizeProxyUrl(config.browserProxy.url) : '';
+  return defaultToConfigured ? resolveConfiguredProxyUrl(config.browserProxy.url, location) : '';
 }
 
 function isEphemeralBrowser(session) {
@@ -3529,8 +3530,8 @@ function dashboardPage(user, { sharedDownloadsEnabled = false } = {}) {
       state.creatingSession = true;
       syncCreateBrowserControls();
       showMessage(createBrowserMessage, type === 'incognito'
-        ? 'Opening an incognito browser…'
-        : 'Opening a saved browser…');
+        ? 'Opening an incognito browser… You can safely close this dialog while setup continues.'
+        : 'Opening a saved browser… You can safely close this dialog while setup continues.');
       try {
         const body = await api('/api/browser-sessions', {
           method: 'POST',

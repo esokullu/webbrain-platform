@@ -522,6 +522,7 @@ export function docsPage() {
               <tr><td><code>display_name</code></td><td>string</td><td>None</td><td>Both</td><td>An optional dashboard label up to 120 characters.</td></tr>
               <tr><td><code>type</code></td><td>string enum</td><td><code>normal</code></td><td>Both</td><td><code>normal</code> or <code>incognito</code>, matching the dashboard.</td></tr>
               <tr><td><code>proxy_enabled</code></td><td>boolean</td><td>Server default</td><td>Both</td><td><code>true</code> uses the server-configured proxy; <code>false</code> uses a direct connection.</td></tr>
+              <tr><td><code>proxy_country</code></td><td>string</td><td><code>rotate</code></td><td>Both</td><td>Optional country or region code (e.g. <code>us</code>, <code>de</code>) passed when <code>proxy_enabled</code> is <code>true</code>. Substituted into <code>%</code> template placeholders in server proxy URLs, falling back to <code>rotate</code> if omitted or unconfigured.</td></tr>
               <tr><td><code>webbrain_config</code></td><td><code>webbrain-config/1</code> object</td><td>None</td><td>Both</td><td>Optional sparse Settings import copied directly from WebBrain's <code>/export --config</code> output.</td></tr>
             </tbody>
           </table>

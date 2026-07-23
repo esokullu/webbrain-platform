@@ -36,6 +36,25 @@ export function normalizeProxyUrl(value, { allowEmpty = true } = {}) {
   return parsed.toString();
 }
 
+export function resolveConfiguredProxyUrl(templateUrl, location, { allowEmpty = true } = {}) {
+  const rawTemplate = String(templateUrl ?? '').trim();
+  if (!rawTemplate) {
+    if (allowEmpty) return '';
+    throw invalidProxyUrl('Configured browser proxy is unavailable.');
+  }
+
+  if (!rawTemplate.includes('%')) {
+    return normalizeProxyUrl(rawTemplate, { allowEmpty });
+  }
+
+  const loc = String(location ?? '').trim().toLowerCase();
+  const isValidLocation = Boolean(loc) && /^[a-z0-9_-]{2,20}$/.test(loc);
+  const target = isValidLocation ? loc : 'rotate';
+  const substituted = rawTemplate.replace(/%/g, target);
+
+  return normalizeProxyUrl(substituted, { allowEmpty: false });
+}
+
 export function proxyUrlFromParts(parts, { allowEmpty = true } = {}) {
   const input = parts && typeof parts === 'object' ? parts : {};
   const host = String(input.host ?? input.hostname ?? input.domain ?? '').trim();
