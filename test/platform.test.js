@@ -3096,6 +3096,8 @@ test('public API documentation provides accessible REST and client tabs', async 
     assert.match(res.text, /Copy example/);
     assert.match(res.text, /class="tok-comment"/);
     assert.match(res.text, /class="tok-keyword"/);
+    assert.match(res.text, /\.toc a\.active, \.toc a\[aria-current="true"\]/);
+    assert.match(res.text, /updateActiveSection/);
     assert.match(res.text, /class="tok-string"/);
     assert.match(res.text, /class="tok-variable"/);
     assert.match(res.text, /class="tok-function"/);

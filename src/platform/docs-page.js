@@ -384,8 +384,9 @@ export function docsPage() {
     .docs-grid { display: grid; grid-template-columns: 220px minmax(0,1fr); gap: 56px; margin-top: 76px; align-items: start; }
     .toc { position: sticky; top: 94px; display: grid; gap: 5px; }
     .toc-label { margin-bottom: 7px; color: var(--text-dim); font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
-    .toc a { padding: 7px 9px; border-radius: 7px; color: var(--text-dim); font-size: 13px; font-weight: 600; text-decoration: none; }
+    .toc a { padding: 7px 9px; border-radius: 7px; color: var(--text-dim); font-size: 13px; font-weight: 600; text-decoration: none; transition: background .15s ease, color .15s ease; }
     .toc a:hover { background: rgba(89,55,25,.05); color: var(--text); }
+    .toc a.active, .toc a[aria-current="true"] { background: rgba(91,82,232,.12); color: var(--accent); font-weight: 750; }
     .docs-content { min-width: 0; }
     .docs-section { padding: 0 0 56px; scroll-margin-top: 94px; }
     .docs-section + .docs-section { padding-top: 56px; border-top: 1px solid var(--border); }
@@ -717,6 +718,64 @@ export function docsPage() {
           copyButton.textContent = 'Copy unavailable';
         }
       });
+    }
+
+    const tocLinks = Array.from(document.querySelectorAll('.toc a[href^="#"]'));
+    const sections = Array.from(document.querySelectorAll('.docs-section[id]'));
+    if (tocLinks.length > 0 && sections.length > 0) {
+      function setActive(activeId) {
+        tocLinks.forEach(link => {
+          const isCurrent = link.getAttribute('href') === '#' + activeId;
+          if (isCurrent) {
+            link.classList.add('active');
+            link.setAttribute('aria-current', 'true');
+          } else {
+            link.classList.remove('active');
+            link.removeAttribute('aria-current');
+          }
+        });
+      }
+
+      function updateActiveSection() {
+        const scrollPosition = window.scrollY + 130;
+        if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 50) {
+          const lastSection = sections[sections.length - 1];
+          if (lastSection) {
+            setActive(lastSection.id);
+            return;
+          }
+        }
+        let currentSectionId = sections[0].id;
+        for (const section of sections) {
+          if (scrollPosition >= section.offsetTop) {
+            currentSectionId = section.id;
+          } else {
+            break;
+          }
+        }
+        setActive(currentSectionId);
+      }
+
+      let ticking = false;
+      window.addEventListener('scroll', () => {
+        if (!ticking) {
+          window.requestAnimationFrame(() => {
+            updateActiveSection();
+            ticking = false;
+          });
+          ticking = true;
+        }
+      }, { passive: true });
+
+      tocLinks.forEach(link => {
+        link.addEventListener('click', () => {
+          const id = link.getAttribute('href').slice(1);
+          if (id) setActive(id);
+        });
+      });
+
+      window.addEventListener('hashchange', updateActiveSection);
+      updateActiveSection();
     }
   </script>
 </body>
